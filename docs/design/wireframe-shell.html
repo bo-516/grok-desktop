@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>grok-desktop — MVP shell wireframe</title>
+  <!--
+    Static visual stub for UI/UX design review only.
+    Colors here are illustrative for the wireframe file itself;
+    production TSX must use defineColor.css semantic tokens (see ui-ux-agent-client.md §4).
+  -->
+  <style>
+    :root {
+      --bg-app: hsl(220 14% 8%);
+      --bg-surface: hsl(220 12% 11%);
+      --bg-elevated: hsl(220 12% 14%);
+      --bg-timeline: hsl(220 13% 9.5%);
+      --bg-composer: hsl(220 12% 12%);
+      --border: hsl(220 10% 18%);
+      --text: hsl(210 20% 96%);
+      --text-2: hsl(215 10% 65%);
+      --text-3: hsl(215 8% 45%);
+      --accent: hsl(210 90% 56%);
+      --streaming: hsl(200 80% 55%);
+      --success: hsl(142 50% 45%);
+      --warning: hsl(38 90% 55%);
+      --danger: hsl(0 70% 55%);
+      --mode-build: hsl(24 90% 55%);
+      --diff-add-bg: hsla(142 50% 40% / 0.15);
+      --diff-del-bg: hsla(0 70% 50% / 0.12);
+      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: #111;
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 48px;
+    }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; color: var(--text-2); }
+    .note { font-size: 12px; color: var(--text-3); max-width: 1100px; margin-bottom: 16px; line-height: 1.45; }
+    .window {
+      width: min(1100px, 100%);
+      height: 640px;
+      background: var(--bg-app);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 40px 1fr;
+      box-shadow: 0 24px 80px rgba(0,0,0,.45);
+    }
+    .titlebar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .dots { display: flex; gap: 6px; }
+    .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); display: block; opacity: .5; }
+    .titlebar .grow { flex: 1; color: var(--text-2); }
+    .chip {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      color: var(--text-2);
+    }
+    .chip.mode { border-color: color-mix(in srgb, var(--mode-build) 40%, var(--border)); color: var(--mode-build); }
+    .chip.model { color: var(--text); }
+    .body {
+      display: grid;
+      grid-template-columns: 240px 1fr 300px;
+      min-height: 0;
+    }
+    .rail {
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .rail.right { border-right: none; border-left: 1px solid var(--border); }
+    .rail-head {
+      padding: 10px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--text-3);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .btn-new {
+      font-size: 11px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: default;
+    }
+    .group-label {
+      padding: 8px 12px 4px;
+      font-size: 11px;
+      color: var(--text-3);
+      font-family: var(--mono);
+    }
+    .sess {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      border-left: 2px solid transparent;
+    }
+    .sess.active {
+      background: var(--bg-elevated);
+      border-left-color: var(--accent);
+    }
+    .pip {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-3); flex-shrink: 0;
+    }
+    .pip.run { background: var(--streaming); box-shadow: 0 0 0 3px color-mix(in srgb, var(--streaming) 25%, transparent); }
+    .pip.idle { background: var(--success); }
+    .pip.wait { background: var(--warning); }
+    .sess .meta { flex: 1; min-width: 0; }
+    .sess .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sess .sub { font-size: 11px; color: var(--text-3); }
+    .main {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-width: 0;
+      background: var(--bg-timeline);
+    }
+    .timeline {
+      padding: 16px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg, .tool, .thought {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .msg.user { background: var(--bg-elevated); align-self: stretch; }
+    .msg.agent { background: transparent; border-color: transparent; padding-left: 4px; }
+    .thought { background: var(--bg-surface); color: var(--text-2); font-size: 12px; }
+    .tool { background: var(--bg-surface); }
+    .tool .head {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; margin-bottom: 8px; color: var(--text-2);
+    }
+    .badge {
+      font-size: 10px; padding: 2px 6px; border-radius: 999px;
+      background: color-mix(in srgb, var(--success) 20%, transparent);
+      color: var(--success);
+    }
+    .mini-diff {
+      font-family: var(--mono);
+      font-size: 11px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .mini-diff .ln { padding: 2px 8px; white-space: pre; }
+    .mini-diff .add { background: var(--diff-add-bg); }
+    .mini-diff .del { background: var(--diff-del-bg); }
+    .link { color: var(--accent); font-size: 11px; margin-top: 6px; }
+    .composer {
+      border-top: 1px solid var(--border);
+      background: var(--bg-composer);
+      padding: 10px 12px;
+    }
+    .chips { display: flex; gap: 6px; margin-bottom: 8px; }
+    .achip {
+      font-size: 11px; padding: 3px 8px; border-radius: 6px;
+      background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-2);
+      font-family: var(--mono);
+    }
+    .box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      min-height: 56px;
+      padding: 10px;
+      color: var(--text-3);
+      font-size: 13px;
+    }
+    .composer-bar {
+      display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;
+    }
+    .send {
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; padding: 6px 14px; font-size: 12px;
+    }
+    .plan-step {
+      display: flex; gap: 8px; padding: 8px 12px; font-size: 12px; align-items: flex-start;
+    }
+    .plan-step .i {
+      width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--text-3);
+      margin-top: 1px; flex-shrink: 0;
+    }
+    .plan-step.done .i { background: var(--success); border-color: var(--success); }
+    .plan-step.active .i { border-color: var(--streaming); box-shadow: inset 0 0 0 3px var(--bg-surface), inset 0 0 0 5px var(--streaming); }
+    .plan-step .t { color: var(--text-2); }
+    .plan-step.active .t { color: var(--text); }
+    .diff-row {
+      padding: 8px 12px; font-size: 12px; font-family: var(--mono);
+      display: flex; justify-content: space-between; border-top: 1px solid var(--border);
+    }
+    .diff-row .add { color: var(--success); }
+    .diff-row .del { color: var(--danger); }
+    .sec { font-size: 11px; color: var(--text-3); padding: 12px 12px 4px; text-transform: uppercase; letter-spacing: .04em; }
+    .banner {
+      margin: 8px 12px 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--warning) 12%, var(--bg-elevated));
+      border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+      font-size: 11px;
+      color: var(--text-2);
+      display: none;
+    }
+    .banner.show { display: block; }
+    .legend {
+      max-width: 1100px;
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-3);
+    }
+    .legend b { color: var(--text-2); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>grok-desktop MVP shell — static wireframe</h1>
+  <p class="note">
+    Illustrative layout only (session mission-control · timeline + tool cards · plan/diff context rail · composer).
+    Production UI must map colors to <code>defineColor.css</code> tokens — no hard-coded colors in TSX.
+    Patterns reference Codex command-center density, Claude Code Desktop multi-session sidebar / panes, and Antigravity Manager agent-first supervision.
+  </p>
+
+  <div class="window" role="img" aria-label="MVP three-column agent shell wireframe">
+    <div class="titlebar">
+      <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="grow">grok-desktop · ~/code/grok-desktop</div>
+      <span class="chip model">grok-4.5 ▾</span>
+      <span class="chip mode">Build ▾</span>
+    </div>
+    <div class="body">
+      <aside class="rail">
+        <div class="rail-head">Sessions <button class="btn-new" type="button">+ New</button></div>
+        <div class="group-label">grok-desktop</div>
+        <div class="sess active">
+          <span class="pip run" title="streaming"></span>
+          <div class="meta">
+            <div class="name">Wire up ACP timeline</div>
+            <div class="sub">streaming · Build</div>
+          </div>
+        </div>
+        <div class="sess">
+          <span class="pip wait" title="waiting_permission"></span>
+          <div class="meta">
+            <div class="name">Fix permission modal</div>
+            <div class="sub">waiting · Build</div>
+          </div>
+        </div>
+        <div class="group-label">other-app</div>
+        <div class="sess">
+          <span class="pip idle" title="idle"></span>
+          <div class="meta">
+            <div class="name">Refactor stores</div>
+            <div class="sub">idle · Plan</div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="main">
+        <div class="timeline">
+          <div class="msg user">
+            Implement the session timeline with tool card patch-merge for tool_call_update.
+          </div>
+          <div class="thought">▸ Thinking — mapping ACP session/update variants…</div>
+          <div class="tool">
+            <div class="head">
+              <span>edit · src/widgets/timeline/ToolCardView.tsx</span>
+              <span class="badge">completed</span>
+            </div>
+            <div class="mini-diff">
+              <div class="ln del">- status replaces content</div>
+              <div class="ln add">+ status patches existing card</div>
+              <div class="ln add">+ content preserved when absent</div>
+            </div>
+            <div class="link">Open full review →</div>
+          </div>
+          <div class="msg agent">
+            Timeline items are ordered; tool entities live in a <code>Map</code> keyed by
+            <code>toolCallId</code>. Updates patch in place so partial status events never wipe diffs.
+            <span style="opacity:.5">▌</span>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="chips">
+            <span class="achip">@ToolCardView.tsx</span>
+            <span class="achip">/plan</span>
+          </div>
+          <div class="box">Message grok… (@ files, / commands)</div>
+          <div class="composer-bar">
+            <button class="send" type="button">Stop</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="rail right">
+        <div class="rail-head">Context</div>
+        <div class="sec">Plan</div>
+        <div class="plan-step done"><span class="i"></span><span class="t">Define timeline item types</span></div>
+        <div class="plan-step active"><span class="i"></span><span class="t">Patch-merge tool_call_update</span></div>
+        <div class="plan-step"><span class="i"></span><span class="t">Virtualize long sessions</span></div>
+        <div class="sec">Diffs</div>
+        <div class="diff-row">
+          <span>ToolCardView.tsx</span>
+          <span><span class="add">+12</span> <span class="del">−3</span></span>
+        </div>
+        <div class="sec">Rules</div>
+        <div class="plan-step"><span class="t" style="padding-left:4px">AGENTS.md · colors via defineColor.css</span></div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div><b>Left</b> — Mission Control sessions (Claude / Codex)</div>
+    <div><b>Center</b> — Structured timeline + tool cards + composer</div>
+    <div><b>Right</b> — Plan artifact + diffs (Antigravity Manager density)</div>
+    <div><b>Chrome</b> — Model + Ask/Plan/Build mode</div>
+  </div>
+</body>
+</html>

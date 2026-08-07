@@ -1,0 +1,37 @@
+{
+  "name": "grok-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop ACP client for grok-build (M0/M1 MVP)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @grok-desktop/acp-core && npm run build -w @grok-desktop/desktop",
+    "test": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core",
+    "test:all": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core && npm run test -w @grok-desktop/desktop --if-present",
+    "m0": "npm run m0 -w @grok-desktop/m0",
+    "m0:mock": "npm run m0:mock -w @grok-desktop/m0",
+    "m0:live": "npm run m0:live -w @grok-desktop/m0",
+    "bridge": "npm run start -w @grok-desktop/bridge",
+    "demo:e2e": "npm run demo:e2e -w @grok-desktop/bridge",
+    "dev": "npm run dev -w @grok-desktop/desktop",
+    "dev:full": "echo 'Terminal A: npm run bridge  |  Terminal B: npm run dev  |  UI: Live grok (demo/)'",
+    "typecheck": "npm run typecheck -w @grok-desktop/acp-core && npm run typecheck -w @grok-desktop/desktop --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "^4.5.0",
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.4.0",
+    "typescript-eslint": "^8.46.2"
+  }
+}

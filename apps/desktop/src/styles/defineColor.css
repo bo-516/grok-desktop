@@ -1,0 +1,184 @@
+/**
+ * All color tokens for grok-desktop (Grok Developer Studio palette).
+ * Business TSX must only consume these variables (or classes derived from them)
+ * — never raw hex/rgb in components.
+ *
+ * Palette aligned to design mock: neutral dark surfaces, white primary,
+ * high-density agent chrome.
+ */
+:root {
+  /* ── Surfaces (Material-like container scale) ── */
+  --color-surface-lowest: #0e0e0e;
+  --color-surface-low: #1c1b1b;
+  --color-surface: #131313;
+  --color-surface-dim: #131313;
+  --color-surface-container: #201f1f;
+  --color-surface-high: #2a2a2a;
+  --color-surface-highest: #353534;
+  --color-surface-bright: #3a3939;
+  --color-surface-variant: #353534;
+
+  /* App semantic aliases (layout consumers) */
+  --color-bg-app: var(--color-surface-lowest);
+  --color-bg-surface: var(--color-surface-low);
+  --color-bg-elevated: var(--color-surface-high);
+  --color-bg-timeline: var(--color-surface-lowest);
+  --color-bg-composer: var(--color-surface-high);
+  --color-bg-composer-suggestion: var(--color-surface-container);
+  --color-bg-composer-suggestion-hover: var(--color-surface-highest);
+  --color-border-composer-suggestion: var(--color-border-muted);
+  --color-text-composer-suggestion-detail: var(--color-text-secondary);
+  --color-text-composer-suggestion-kind: var(--color-text-muted);
+  --color-bg-thought: var(--color-surface-container);
+  --color-bg-tool: var(--color-surface-container);
+  --color-bg-user: var(--color-surface-highest);
+  --color-bg-overlay: color-mix(in srgb, var(--color-surface-lowest) 55%, transparent);
+  --color-bg-sidebar: color-mix(in srgb, var(--color-surface-low) 80%, transparent);
+  --color-bg-titlebar: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  --color-bg-secondary-container: #474746;
+
+  /* Borders / outline */
+  --color-outline: #8e9192;
+  --color-outline-variant: #444748;
+  --color-border-default: var(--color-outline-variant);
+  --color-border-strong: var(--color-outline);
+  --color-border-subtle: color-mix(in srgb, var(--color-outline-variant) 30%, transparent);
+  --color-border-muted: color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+  --color-border-focus: #ffffff;
+
+  /* Text */
+  --color-on-surface: #e5e2e1;
+  --color-on-surface-variant: #c4c7c8;
+  --color-on-secondary-container: #b7b5b4;
+  --color-text-primary: var(--color-on-surface);
+  --color-text-secondary: var(--color-on-surface-variant);
+  --color-text-muted: color-mix(in srgb, var(--color-on-surface-variant) 70%, transparent);
+  --color-text-inverse: #2f3131;
+  --color-primary: #ffffff;
+  --color-on-primary: #2f3131;
+  --color-primary-container: #e2e2e2;
+  --color-on-primary-container: #636565;
+  --color-primary-fixed: #e2e2e2;
+
+  /* Accent / semantic */
+  --color-accent: var(--color-primary);
+  --color-accent-hover: var(--color-primary-fixed);
+  --color-accent-muted: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --color-danger: #ffb4ab;
+  --color-danger-muted: color-mix(in srgb, #93000a 55%, transparent);
+  --color-on-error: #690005;
+  --color-warning: #e8c07a;
+  --color-warning-muted: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  --color-success: #8fbf8f;
+  --color-success-muted: color-mix(in srgb, var(--color-success) 16%, transparent);
+  --color-streaming: #c6c6c7;
+
+  /* Diff */
+  --color-diff-add: #8fbf8f;
+  --color-diff-add-bg: color-mix(in srgb, var(--color-diff-add) 15%, transparent);
+  --color-diff-del: #ffb4ab;
+  --color-diff-del-bg: color-mix(in srgb, var(--color-diff-del) 12%, transparent);
+
+  /* Modes */
+  --color-mode-ask: #8ab4d9;
+  --color-mode-plan: #b0a8d9;
+  --color-mode-build: #e8a87c;
+
+  /* Scrollbar */
+  --color-scrollbar-thumb: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --color-scrollbar-thumb-hover: color-mix(in srgb, var(--color-primary) 20%, transparent);
+
+  /* Composer gradient fade */
+  --gradient-composer-fade: linear-gradient(
+    to top,
+    var(--color-surface-lowest) 0%,
+    var(--color-surface-lowest) 40%,
+    transparent 100%
+  );
+
+  /* Shadows */
+  --shadow-modal: 0 24px 64px color-mix(in srgb, #000 45%, transparent);
+  --shadow-popover: 0 8px 24px color-mix(in srgb, #000 35%, transparent);
+  --shadow-composer: 0 8px 32px color-mix(in srgb, #000 40%, transparent);
+  --shadow-composer-suggestions: 0 12px 28px color-mix(in srgb, #000 42%, transparent);
+
+  /* Layout density */
+  --sidebar-width: 240px;
+  --topnav-height: 48px;
+  --container-padding: 24px;
+  --gutter: 12px;
+  --unit: 4px;
+  --item-gap: 2px;
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-lg: 4px;
+  --radius-xl: 8px;
+  --radius-full: 12px;
+  --radius-bubble: 16px;
+  --radius-modal: 12px;
+  --radius-sm: 2px;
+
+  /* Typography */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-size-mono-label: 11px;
+  --line-height-mono-label: 14px;
+  --font-size-body-sm: 13px;
+  --line-height-body-sm: 18px;
+  --font-size-nav-item: 12.5px;
+  --line-height-nav-item: 16px;
+  --font-size-body-md: 14px;
+  --line-height-body-md: 20px;
+  --font-size-headline-sm: 18px;
+  --line-height-headline-sm: 24px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body-sm);
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+/* High-density custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}

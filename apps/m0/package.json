@@ -1,0 +1,19 @@
+{
+  "name": "@grok-desktop/m0",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "m0": "tsx src/run-m0.ts",
+    "m0:mock": "tsx src/run-m0.ts --mock",
+    "m0:live": "tsx src/run-m0.ts --live"
+  },
+  "dependencies": {
+    "@grok-desktop/acp-core": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "@types/node": "^22.13.10"
+  }
+}

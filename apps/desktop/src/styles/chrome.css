@@ -1,0 +1,156 @@
+/**
+ * Shared chips, buttons, context rail, permission modal.
+ * Colors via defineColor.css tokens only.
+ */
+
+/* ── Chips / buttons (toolbar) ── */
+
+.chip {
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-control);
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.chip-mode-ask {
+  color: var(--color-mode-ask);
+  border-color: var(--color-mode-ask);
+}
+
+.chip-mode-plan {
+  color: var(--color-mode-plan);
+  border-color: var(--color-mode-plan);
+}
+
+.chip-mode-build {
+  color: var(--color-mode-build);
+  border-color: var(--color-mode-build);
+}
+
+.btn {
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.btn-danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+
+.btn-new {
+  font-size: 11px;
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+/* ── Right context rail ── */
+
+.rail-right {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface);
+}
+
+.rail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.plan-empty {
+  padding: 12px 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.plan-step {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Modal / permission ── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  width: min(420px, 92vw);
+  background: var(--color-surface-high);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-modal);
+  box-shadow: var(--shadow-modal);
+  padding: 20px;
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--color-primary);
+}
+
+.modal p {
+  margin: 0 0 16px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Legacy structural aliases */
+.rail {
+  background: var(--color-bg-surface);
+  border-right: 1px solid var(--color-border-default);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
