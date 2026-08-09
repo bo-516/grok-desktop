@@ -3,10 +3,20 @@
  * Unknown methods throw MethodNotImplementedError so AcpClient returns JSON-RPC -32601.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  spawn,
+  type ChildProcessByStdio,
+} from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { resolveWorkspacePath } from "./workspacePath.js";
+
+/**
+ * Terminal child: stdin ignored, stdout/stderr piped for output capture.
+ * Matches `stdio: ["ignore", "pipe", "pipe"]` so we never claim a Writable stdin.
+ */
+export type TerminalChild = ChildProcessByStdio<null, Readable, Readable>;
 
 /** JSON-RPC method-not-found surface for reverse handlers. */
 export class MethodNotImplementedError extends Error {
@@ -26,7 +36,7 @@ export class MethodNotImplementedError extends Error {
 /** Live terminal process tracked for kill/output. */
 export type TerminalHandle = {
   terminalId: string;
-  child: ChildProcessWithoutNullStreams;
+  child: TerminalChild;
   output: string;
   exitCode: number | null;
   cwd: string;
@@ -70,7 +80,7 @@ export class TerminalRegistry {
       env: { ...process.env, ...(params.env ?? {}) },
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-    }) as ChildProcessWithoutNullStreams;
+    });
 
     const handle: TerminalHandle = {
       terminalId,
@@ -213,12 +223,12 @@ export async function handleReverseRequest(
     method === "terminal/wait"
   ) {
     const terminalId = String(p.terminalId ?? p.id ?? "");
-    const timeoutMs =
-      typeof p.timeoutMs === "number"
-        ? p.timeoutMs
-        : method === "terminal/output"
-          ? 0
-          : 30_000;
+    let timeoutMs = 30_000;
+    if (typeof p.timeoutMs === "number") {
+      timeoutMs = p.timeoutMs;
+    } else if (method === "terminal/output") {
+      timeoutMs = 0;
+    }
     return terminals.wait(terminalId, timeoutMs);
   }
 

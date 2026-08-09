@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx src/server.ts",
     "demo:e2e": "tsx src/demo-e2e.ts",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@grok-desktop/acp-core": "*",

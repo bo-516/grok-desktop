@@ -78,12 +78,12 @@ function signalAgentTree(
 
 /**
  * SIGTERM the agent tree immediately; escalate to SIGKILL after grace if still alive.
- * @param child Spawned grok process.
+ * @param child Spawned process (only `pid` / `killed` are required; stdio shape varies).
  * @param useGroup Whether child is a process-group leader (Unix detached).
  * @param graceMs Milliseconds before SIGKILL; timer is unref'd so it won't hold the event loop.
  */
 export function disposeAgentProcess(
-  child: ChildProcessWithoutNullStreams,
+  child: { pid?: number | undefined; killed: boolean },
   useGroup: boolean,
   graceMs: number = DISPOSE_KILL_GRACE_MS,
 ): void {
@@ -121,7 +121,12 @@ export function buildGrokAgentArgs(opts: SpawnGrokOptions): string[] {
   const extras = opts.extraArgs ?? [];
   let i = 0;
   while (i < extras.length) {
-    const a = extras[i]!;
+    const a = extras[i];
+    if (a === undefined) {
+      break;
+    }
+    const next = extras[i + 1];
+    const nextIsValue = next !== undefined && !next.startsWith("-");
     const globalKeys = new Set([
       "--sandbox",
       "--worktree",
@@ -170,17 +175,11 @@ export function buildGrokAgentArgs(opts: SpawnGrokOptions): string[] {
         a !== "--disable-web-search" &&
         a !== "--worktree" &&
         a !== "-w" &&
-        i + 1 < extras.length &&
-        !extras[i + 1]!.startsWith("-")
+        nextIsValue &&
+        next !== undefined
       ) {
         // --worktree may be bare or with name; if next looks like a value, take it.
-        if (a === "--worktree" || a === "-w") {
-          // optional value
-          globalFlags.push(extras[i + 1]!);
-          i += 2;
-          continue;
-        }
-        globalFlags.push(extras[i + 1]!);
+        globalFlags.push(next);
         i += 2;
         continue;
       }
@@ -195,10 +194,10 @@ export function buildGrokAgentArgs(opts: SpawnGrokOptions): string[] {
         a !== "--debug" &&
         a !== "--no-leader" &&
         a !== "--leader" &&
-        i + 1 < extras.length &&
-        !extras[i + 1]!.startsWith("-")
+        nextIsValue &&
+        next !== undefined
       ) {
-        agentFlags.push(extras[i + 1]!);
+        agentFlags.push(next);
         i += 2;
         continue;
       }
