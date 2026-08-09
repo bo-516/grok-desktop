@@ -5,6 +5,7 @@
  */
 
 import type { AvailableCommand } from "@grok-desktop/acp-core";
+import { mentionMarkForSymbol } from "@/lib/mentionTokens";
 
 /** Minimal workspace entry shape required by Composer-side bridge file listing. */
 export type ComposerWorkspaceEntry = {
@@ -79,6 +80,8 @@ export function findComposerTrigger(
 
 /**
  * Replaces the active trigger token with the chosen candidate and places the caret after the insert.
+ * Stores a zero-width mark instead of visible `@`/`/` so the mirror can hide the trigger without
+ * leaving an advance-width gap; `materializeMentionTriggers` restores agent syntax on send.
  * @param value Original input.
  * @param trigger Current valid trigger; bad ranges are clamped rather than thrown.
  * @param suggestionValue Candidate value without `@` or `/`; empty values leave the text unchanged.
@@ -103,7 +106,8 @@ export function replaceComposerTrigger(
 
   if (!replacement) {return { value, caret: end };}
 
-  const inserted = `${trigger.symbol}${escapedReplacement}${
+  const mark = mentionMarkForSymbol(trigger.symbol);
+  const inserted = `${mark}${escapedReplacement}${
     needsTrailingSpace ? " " : ""
   }`;
   return {

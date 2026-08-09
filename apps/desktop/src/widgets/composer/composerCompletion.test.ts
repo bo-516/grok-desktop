@@ -3,6 +3,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  MENTION_AT_MARK,
+  MENTION_SLASH_MARK,
+} from "../../lib/mentionTokens";
+import {
   createCommandSuggestions,
   createMentionSuggestions,
   findComposerTrigger,
@@ -34,7 +38,7 @@ describe("composerCompletion", () => {
     assert.equal(email, null);
   });
 
-  it("replaces the active slash token and keeps following text", () => {
+  it("replaces the active slash token with a zero-width mark and keeps following text", () => {
     const trigger = findComposerTrigger("Run /impl then test", 9);
     assert.ok(trigger);
     if (!trigger) {return;}
@@ -42,7 +46,7 @@ describe("composerCompletion", () => {
     assert.deepEqual(
       replaceComposerTrigger("Run /impl then test", trigger, "implement"),
       {
-        value: "Run /implement then test",
+        value: `Run ${MENTION_SLASH_MARK}implement then test`,
         caret: 14,
       },
     );
@@ -87,14 +91,17 @@ describe("composerCompletion", () => {
     assert.equal(suggestions[0]?.kind, "file");
   });
 
-  it("quotes a selected file path that contains spaces", () => {
+  it("quotes a selected file path that contains spaces using the @ mark", () => {
     const trigger = findComposerTrigger("Read @des", 9);
     assert.ok(trigger);
     if (!trigger) {return;}
 
     assert.deepEqual(
       replaceComposerTrigger("Read @des", trigger, "design docs/brief.md"),
-      { value: 'Read @"design docs/brief.md" ', caret: 29 },
+      {
+        value: `Read ${MENTION_AT_MARK}"design docs/brief.md" `,
+        caret: 29,
+      },
     );
   });
 

@@ -3,17 +3,23 @@
  * State is computed in useComposerWidget; this component only assembles the result into UI.
  */
 
+import { ClickSpark, StarBorder } from "@/components/react-bits";
+import { ComposerInputView } from "./ComposerInputView";
+import { ComposerModelMenuView } from "./ComposerModelMenuView";
+import { ComposerModeControlView } from "./ComposerModeControlView";
 import { ComposerSuggestionListView } from "./ComposerSuggestionListView";
-import { modeLabel, useComposerWidget } from "./useComposerWidget";
+import { useComposerWidget } from "./useComposerWidget";
 
 /**
- * Renders the sendable textarea, mode controls, and `@`/`/` completion.
+ * Renders the sendable textarea, mode controls, model/thinking menu, and `@`/`/` completion.
  * @returns Composer bound to the real live bridge; when the bridge is unavailable send fails and the draft is kept.
  */
 export function ComposerWidget() {
   const widget = useComposerWidget();
   const placeholder =
-    widget.timelineLength > 0 ? "Continue the conversation…" : "Ask Grok anything";
+    widget.timelineLength > 0
+      ? "Continue the conversation…"
+      : "Ask Grok anything";
 
   return (
     <div className="composer-dock">
@@ -27,42 +33,69 @@ export function ComposerWidget() {
               onPick={widget.pickSuggestion}
             />
           ) : null}
-          <textarea
-            ref={widget.textareaRef}
-            className="composer-input"
+          <ComposerInputView
+            draft={widget.draft}
             placeholder={placeholder}
-            value={widget.draft}
             disabled={!widget.canType || widget.status === "waiting_permission"}
-            rows={2}
-            aria-controls={
+            textareaRef={widget.textareaRef}
+            ariaControls={
               widget.isMenuOpen ? "composer-suggestions" : undefined
             }
-            aria-expanded={widget.isMenuOpen}
-            aria-activedescendant={
+            ariaExpanded={widget.isMenuOpen}
+            ariaActivedescendant={
               widget.suggestions.length > 0
                 ? `composer-suggestion-${widget.activeIndex}`
                 : undefined
             }
+            attachments={widget.attachments}
+            dragOver={widget.dragOver}
             onChange={widget.handleDraftChange}
             onSelect={widget.handleSelection}
             onKeyDown={widget.handleKeyDown}
+            onScroll={widget.handleInputScroll}
+            onPaste={widget.handlePaste}
+            onDragOver={widget.handleDragOver}
+            onDragLeave={widget.handleDragLeave}
+            onDrop={widget.handleDrop}
+            onRemoveAttachment={widget.removeAttachment}
           />
           <div className="composer-bar">
             <div className="composer-bar-left">
+              <ComposerModeControlView
+                mode={widget.mode}
+                pendingMode={widget.pendingMode}
+                options={widget.modeOptions}
+                open={widget.modeMenuOpen}
+                onToggle={widget.toggleModeMenu}
+                onSelect={widget.selectMode}
+                onClose={widget.closeModeMenu}
+              />
               <button
                 type="button"
                 className="composer-chip-btn"
-                onClick={widget.setMode}
-                title="Switch Ask / Plan / Build"
+                title="Voice dictation (Web Speech API)"
+                onClick={widget.startDictation}
               >
-                {modeLabel(widget.mode)}
+                Mic
               </button>
-              <span className="composer-model-label">
-                {widget.model || "grok"} · live
-              </span>
             </div>
             <div className="composer-bar-right">
-              <span className="composer-hint">@ files · / commands · Enter to send</span>
+              <ComposerModelMenuView
+                open={widget.menuOpen}
+                panel={widget.menuPanel}
+                modelId={widget.model}
+                modelLabel={widget.modelLabel}
+                effort={widget.effort}
+                effortLabel={widget.effortLabel}
+                models={widget.models}
+                thinkingOptions={widget.thinkingOptions}
+                onToggle={widget.toggleMenu}
+                onOpenPanel={widget.openPanel}
+                onSelectModel={widget.selectModel}
+                onSelectEffort={widget.selectEffort}
+                onReset={widget.resetControls}
+                onClose={widget.closeMenu}
+              />
               {widget.streaming ? (
                 <button
                   type="button"
@@ -72,15 +105,19 @@ export function ComposerWidget() {
                   Stop
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="composer-send"
-                  disabled={!widget.canSend}
-                  onClick={widget.submitDraft}
-                  title="Send"
-                >
-                  ↑
-                </button>
+                <ClickSpark sparkCount={10} sparkRadius={14}>
+                  <StarBorder
+                    className="composer-send-star"
+                    disabled={!widget.canSend}
+                    onClick={widget.submitDraft}
+                    title="Send · Enter"
+                    speed="4s"
+                  >
+                    <span className="composer-send" aria-hidden="true">
+                      ↑
+                    </span>
+                  </StarBorder>
+                </ClickSpark>
               )}
             </div>
           </div>
@@ -92,7 +129,7 @@ export function ComposerWidget() {
         ) : null}
         <p className="composer-hint composer-hint-footer">
           {widget.connectionMode === "live-bridge"
-            ? "Real grok-build · @ reads files from the current workspace"
+            ? "Enter to send · ⇧Tab mode · @ files · / commands"
             : "Waiting for bridge (npm run bridge)"}
         </p>
       </div>

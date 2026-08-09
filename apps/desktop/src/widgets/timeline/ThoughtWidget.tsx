@@ -1,5 +1,5 @@
 /**
- * Codex-style collapsible Thinking row.
+ * Soft collapsible Thinking pill (Framer: muted inline control, not a heavy card).
  * Expanded state belongs only to this render instance; the protocol timeline only
  * stores the initial collapsed flag and streaming lifecycle fields.
  */
@@ -40,23 +40,51 @@ export function ThoughtWidget(props: ThoughtWidgetProps) {
         </span>
         {label}
       </button>
-      {isOpen ? <div className="thought-content">{item.text}</div> : null}
+      {isOpen && item.text ? (
+        <div className="thought-content">{item.text}</div>
+      ) : null}
     </div>
   );
 }
 
 /**
  * Builds a short label from the thought lifecycle.
+ * Framer style: "Thought for 6s · …" / "Thinking".
  * @param item Thought produced by the protocol reducer; missing completedAt means still streaming.
  * @param sessionStatus Current session status for legacy cached entries without timestamps.
- * @returns `Thinking`, `Thought`, or a completed label with seconds.
+ * @returns Thinking / Thought / duration label, optionally with a one-line preview.
  */
-function formatThoughtLabel(item: ThoughtItem, sessionStatus: SessionStatus): string {
+function formatThoughtLabel(
+  item: ThoughtItem,
+  sessionStatus: SessionStatus,
+): string {
   if (item.completedAt === undefined && sessionStatus === "streaming") {
-    return "Thinking";
+    return "Thinking…";
   }
-  if (!item.startedAt || !item.completedAt) {return "Thought";}
+  if (!item.startedAt || !item.completedAt) {
+    return previewLabel("Thought", item.text);
+  }
 
-  const seconds = Math.max(1, Math.round((item.completedAt - item.startedAt) / 1000));
-  return `Thought for ${seconds}s`;
+  const seconds = Math.max(
+    1,
+    Math.round((item.completedAt - item.startedAt) / 1000),
+  );
+  return previewLabel(`Thought for ${seconds}s`, item.text);
+}
+
+/**
+ * Append a short first-line preview after the status label when content exists.
+ * @param base Status prefix.
+ * @param text Full thought body; may be empty while streaming.
+ */
+function previewLabel(base: string, text: string): string {
+  const line = text
+    .split(/\n/)
+    .map((s) => s.trim())
+    .find(Boolean);
+  if (!line) {
+    return base;
+  }
+  const short = line.length > 36 ? `${line.slice(0, 36)}…` : line;
+  return `${base} · ${short}`;
 }

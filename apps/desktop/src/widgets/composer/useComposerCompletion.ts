@@ -13,6 +13,10 @@ import {
 } from "react";
 import type { AvailableCommand } from "@grok-desktop/acp-core";
 import {
+  sealCompletedMentions,
+  snapCaretToMentionEdge,
+} from "@/lib/mentionTokens";
+import {
   createCommandSuggestions,
   getComposerEmptyLabel,
   createMentionSuggestions,
@@ -150,16 +154,41 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
     setDismissedTriggerKey(null);
   };
 
-  /** Track input and browser selection changes; new edits always reopen the matching menu. */
+  /**
+   * Track input and selection; seal finished tokens into zero-width marks so
+   * hidden triggers do not leave gaps; reopen the menu on any new edit.
+   */
   const handleDraftChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    setDraft(event.target.value);
-    setCaret(event.target.selectionStart);
+    const nextCaret = event.target.selectionStart;
+    const sealed = sealCompletedMentions(event.target.value, nextCaret);
+    setDraft(sealed.value);
+    setCaret(sealed.caret);
     setDismissedTriggerKey(null);
+    if (sealed.value !== event.target.value) {
+      pendingCaretRef.current = sealed.caret;
+    }
   };
 
-  /** Recompute the trigger when the user moves the caret so completion works inside existing text. */
-  const handleSelection = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    setCaret(event.currentTarget.selectionStart);
+  /**
+   * Recompute the trigger when the user moves the caret so completion works
+   * inside existing text. Collapsed carets that land inside a mention snap to
+   * the nearer edge so committed tokens stay atomic.
+   */
+  const handleSelection = (
+    event: { currentTarget: HTMLTextAreaElement },
+  ) => {
+    const ta = event.currentTarget;
+    const rawStart = ta.selectionStart;
+    const rawEnd = ta.selectionEnd;
+    if (rawStart !== rawEnd) {
+      setCaret(rawStart);
+      return;
+    }
+    const snapped = snapCaretToMentionEdge(draft, rawStart);
+    if (snapped !== rawStart) {
+      ta.setSelectionRange(snapped, snapped);
+    }
+    setCaret(snapped);
   };
 
   /** Cycle the keyboard highlight forward; empty lists keep the prior index. */
@@ -181,6 +210,18 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   /** Close the menu for the current trigger without deleting the typed `@` or `/`. */
   const dismissMenu = () => setDismissedTriggerKey(triggerKey);
 
+  /**
+   * Replace the draft and restore the caret after React commits (atomic delete,
+   * programmatic inserts). Missing caret leaves the browser selection alone.
+   * @param value Next draft string.
+   * @param caret Collapsed caret index to apply after paint.
+   */
+  const setDraftWithCaret = (value: string, caret: number) => {
+    pendingCaretRef.current = caret;
+    setDraft(value);
+    setCaret(caret);
+  };
+
   return {
     activeIndex,
     activeSuggestion,
@@ -194,6 +235,7 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
     selectPreviousSuggestion,
     dismissMenu,
     setDraft,
+    setDraftWithCaret,
     suggestions,
     textareaRef,
   };
