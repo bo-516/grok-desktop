@@ -3,7 +3,10 @@
  * This module only handles immutable SessionState; it has no transport, React, or agent process I/O.
  */
 
-import { finalizeLatestThought } from "./timeline.js";
+import {
+  abandonUnconfirmedSeedContent,
+  finalizeLatestThought,
+} from "./timeline.js";
 import { nextTimelineId } from "./timelineId.js";
 import {
   collapseExactDoubledText,
@@ -47,10 +50,13 @@ export function appendUserPrompt(
   blocks: ContentBlock[],
 ): SessionState {
   const clientPromptId = nextTimelineId("prompt");
+  // A new local turn must not stay stuck claiming unfinished session/load
+  // seed agent/thought rows — abandon those latches, keep seed bodies.
+  const baseTimeline = abandonUnconfirmedSeedContent(state.timeline);
   return {
     ...state,
     timeline: [
-      ...state.timeline,
+      ...baseTimeline,
       {
         kind: "user",
         id: nextTimelineId("user"),
@@ -65,42 +71,55 @@ export function appendUserPrompt(
 }
 
 /**
- * Tag cached transcript user rows as seed so session/load replay can confirm them
- * without concatenating. Also normalizes exact X+X bodies left by the old bug so
- * product resume of pre-fix catalog rows is byte-identical to the original.
- * Non-user items are left unchanged. Confirmed/agent rows are still text-healed.
+ * Tag cached transcript rows as seed so session/load replay can confirm them
+ * without concatenating or double-appending.
+ * - User rows: also normalizes exact X+X bodies left by the old bug.
+ * - Agent / thought rows: origin seed + agentConfirmed false so
+ *   appendOrMergeText / appendOrMergeThought claim them in order.
+ * Confirmed or already agent-origin rows are left alone (users still text-healed).
  * @param timeline Seed or disk-restored timeline; not mutated in place.
- * @returns Timeline where each user row has origin seed, cleaned text, and agentConfirmed false (unless already confirmed).
+ * @returns Timeline where claimable rows carry origin seed and agentConfirmed false.
  */
 export function tagSeedUserMessages(
   timeline: SessionState["timeline"],
 ): SessionState["timeline"] {
   return timeline.map((item) => {
-    if (item.kind !== "user") {
-      return item;
-    }
-    let changed = false;
-    const blocks = item.blocks.map((block) => {
-      if (block.type !== "text") {
-        return block;
+    if (item.kind === "user") {
+      let changed = false;
+      const blocks = item.blocks.map((block) => {
+        if (block.type !== "text") {
+          return block;
+        }
+        const cleaned = collapseExactDoubledText(block.text);
+        if (cleaned === block.text) {
+          return block;
+        }
+        changed = true;
+        return { type: "text" as const, text: cleaned };
+      });
+      if (item.origin === "agent" || item.agentConfirmed) {
+        return changed ? { ...item, blocks } : item;
       }
-      const cleaned = collapseExactDoubledText(block.text);
-      if (cleaned === block.text) {
-        return block;
-      }
-      changed = true;
-      return { type: "text" as const, text: cleaned };
-    });
-    if (item.origin === "agent" || item.agentConfirmed) {
-      return changed ? { ...item, blocks } : item;
+      return {
+        ...item,
+        blocks,
+        origin: item.origin ?? "seed",
+        agentConfirmed: false,
+        agentEchoAcc: item.agentEchoAcc,
+      };
     }
-    return {
-      ...item,
-      blocks,
-      origin: item.origin ?? "seed",
-      agentConfirmed: false,
-      agentEchoAcc: item.agentEchoAcc,
-    };
+    if (item.kind === "agent" || item.kind === "thought") {
+      if (item.origin === "agent" || item.agentConfirmed) {
+        return item;
+      }
+      return {
+        ...item,
+        origin: item.origin ?? "seed",
+        agentConfirmed: false,
+        agentEchoAcc: item.agentEchoAcc,
+      };
+    }
+    return item;
   });
 }
 
@@ -112,6 +131,7 @@ export function tagSeedUserMessages(
 export function markPromptStarted(state: SessionState): SessionState {
   return {
     ...state,
+    timeline: abandonUnconfirmedSeedContent(state.timeline),
     status: transitionStatus(state.status, "streaming"),
     errorMessage: undefined,
     lastAgentText: "",

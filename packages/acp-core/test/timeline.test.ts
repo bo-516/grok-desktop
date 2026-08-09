@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import {
+  abandonUnconfirmedSeedContent,
   applySessionUpdate,
   applyUserMessageChunk,
   createSessionState,
@@ -497,5 +498,456 @@ describe("timeline / tool patch-merge", () => {
     });
     assert.equal(state.availableCommands?.length, 1);
     assert.equal(state.availableCommands?.[0]?.name, "plugins");
+  });
+
+  it("silent plan/todos/mode/session_info/token updates do not split continuous thought", () => {
+    let state = createSessionState({ id: "s-silent" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "partA " },
+    });
+    // Each of these draws nothing on the timeline — must not finalize.
+    state = applySessionUpdate(state, {
+      sessionUpdate: "plan",
+      entries: [{ content: "step", status: "pending" }],
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "todos_update",
+      todos: [{ content: "todo", status: "pending" }],
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "current_mode_update",
+      currentModeId: "acceptEdits",
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "session_info_update",
+      title: "Working",
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "config_option_update",
+      configOptions: [{ id: "model", currentValue: "grok" }],
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "token_usage" as "agent_message_chunk",
+      content: { type: "text", text: "ignored" },
+    });
+    // Soft-ignore path uses kind string only; force a usage-like unknown kind:
+    state = applySessionUpdate(state, {
+      sessionUpdate: "usage_update" as "plan",
+    } as Parameters<typeof applySessionUpdate>[1]);
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "partB" },
+    });
+
+    const thoughts = state.timeline.filter((t) => t.kind === "thought");
+    assert.equal(thoughts.length, 1);
+    assert.ok(thoughts[0] && thoughts[0].kind === "thought");
+    if (thoughts[0]?.kind === "thought") {
+      assert.equal(thoughts[0].text, "partA partB");
+      assert.equal(thoughts[0].completedAt, undefined);
+    }
+    assert.equal(state.plan?.length, 1);
+    assert.equal(state.todos?.length, 1);
+    assert.equal(state.mode, "build");
+    assert.equal(state.title, "Working");
+  });
+
+  it("tool_call between thoughts yields two thought rows with tool between", () => {
+    let state = createSessionState({ id: "s-tool-split" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "before tool" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call",
+      toolCallId: "tc-split",
+      title: "read x",
+      kind: "read",
+      status: "pending",
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "after tool" },
+    });
+
+    const kinds = state.timeline.map((t) => t.kind);
+    assert.deepEqual(kinds, ["thought", "tool", "thought"]);
+    const thoughts = state.timeline.filter((t) => t.kind === "thought");
+    assert.equal(thoughts.length, 2);
+    if (thoughts[0]?.kind === "thought" && thoughts[1]?.kind === "thought") {
+      assert.equal(thoughts[0].text, "before tool");
+      assert.equal(typeof thoughts[0].completedAt, "number");
+      assert.equal(thoughts[1].text, "after tool");
+      assert.equal(thoughts[1].completedAt, undefined);
+    }
+  });
+
+  it("unknown kind that becomes an error row finalizes open thought", () => {
+    let state = createSessionState({ id: "s-err" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "thinking" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "totally_unknown_kind" as "plan",
+    } as Parameters<typeof applySessionUpdate>[1]);
+
+    assert.equal(state.timeline.length, 2);
+    assert.equal(state.timeline[0]?.kind, "thought");
+    assert.equal(state.timeline[1]?.kind, "error");
+    if (state.timeline[0]?.kind === "thought") {
+      assert.equal(typeof state.timeline[0].completedAt, "number");
+    }
+  });
+
+  it("seed + session/load replay does not duplicate agent or thought rows", () => {
+    const agentBody =
+      "demo 是一个受限的本地演练场，用来安全地试验 agent 能力。";
+    const thoughtBody = "User wants a short Chinese demo description.";
+    const seeded: TimelineItem[] = tagSeedUserMessages([
+      {
+        kind: "user",
+        id: "user-1",
+        blocks: [
+          {
+            type: "text",
+            text: "Introduce demo in one sentence. Do not edit files.",
+          },
+        ],
+      },
+      {
+        kind: "thought",
+        id: "thought-1",
+        text: thoughtBody,
+        collapsed: true,
+        startedAt: 1_000,
+        completedAt: 2_000,
+      },
+      {
+        kind: "agent",
+        id: "agent-1",
+        text: agentBody,
+      },
+    ]);
+
+    let state = createSessionState({ id: "resume-agent" });
+    state = { ...state, timeline: seeded };
+
+    // Identity tags must mark agent/thought as seed.
+    assert.ok(seeded[1] && seeded[1].kind === "thought");
+    assert.ok(seeded[2] && seeded[2].kind === "agent");
+    if (seeded[1]?.kind === "thought" && seeded[2]?.kind === "agent") {
+      assert.equal(seeded[1].origin, "seed");
+      assert.equal(seeded[1].agentConfirmed, false);
+      assert.equal(seeded[2].origin, "seed");
+      assert.equal(seeded[2].agentConfirmed, false);
+    }
+
+    // Replay full transcript the way session/load does.
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: {
+        type: "text",
+        text: "Introduce demo in one sentence. Do not edit files.",
+      },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: thoughtBody },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: agentBody },
+    });
+
+    const thoughts = state.timeline.filter((t) => t.kind === "thought");
+    const agents = state.timeline.filter((t) => t.kind === "agent");
+    const users = state.timeline.filter((t) => t.kind === "user");
+    assert.equal(users.length, 1);
+    assert.equal(thoughts.length, 1, "thought must not double-append on replay");
+    assert.equal(agents.length, 1, "agent must not double-append on replay");
+    assert.equal(state.timeline.length, 3);
+
+    if (thoughts[0]?.kind === "thought") {
+      assert.equal(thoughts[0].text, thoughtBody);
+      assert.equal(thoughts[0].agentConfirmed, true);
+    }
+    if (agents[0]?.kind === "agent") {
+      assert.equal(agents[0].text, agentBody);
+      assert.equal(agents[0].agentConfirmed, true);
+    }
+  });
+
+  it("chunked seed replay claims one agent and one thought without doubling", () => {
+    const agentFull = "Hello world from agent.";
+    const thoughtFull = "plan then answer";
+    const seeded: TimelineItem[] = tagSeedUserMessages([
+      {
+        kind: "user",
+        id: "u",
+        blocks: [{ type: "text", text: "hi" }],
+      },
+      {
+        kind: "thought",
+        id: "th",
+        text: thoughtFull,
+        collapsed: true,
+        startedAt: 10,
+        completedAt: 20,
+      },
+      { kind: "agent", id: "ag", text: agentFull },
+    ]);
+    let state = createSessionState({ id: "chunk-replay" });
+    state = { ...state, timeline: seeded };
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "hi" },
+    });
+    for (const part of ["plan ", "then ", "answer"]) {
+      state = applySessionUpdate(state, {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: part },
+      });
+    }
+    for (const part of ["Hello ", "world ", "from agent."]) {
+      state = applySessionUpdate(state, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: part },
+      });
+    }
+
+    assert.equal(state.timeline.filter((t) => t.kind === "thought").length, 1);
+    assert.equal(state.timeline.filter((t) => t.kind === "agent").length, 1);
+    const thought = state.timeline.find((t) => t.kind === "thought");
+    const agent = state.timeline.find((t) => t.kind === "agent");
+    assert.ok(thought && thought.kind === "thought");
+    assert.ok(agent && agent.kind === "agent");
+    if (thought?.kind === "thought" && agent?.kind === "agent") {
+      assert.equal(thought.text, thoughtFull);
+      assert.equal(agent.text, agentFull);
+      assert.equal(thought.agentConfirmed, true);
+      assert.equal(agent.agentConfirmed, true);
+    }
+  });
+
+  it("multi-turn seed + full replay leaves agent texts single-copy", () => {
+    const a1 = "Demo is a sample workspace.";
+    const a2 = "const x = 1;";
+    const seeded: TimelineItem[] = tagSeedUserMessages([
+      {
+        kind: "user",
+        id: "user-1",
+        blocks: [{ type: "text", text: "describe demo" }],
+      },
+      { kind: "agent", id: "agent-1", text: a1 },
+      {
+        kind: "user",
+        id: "user-2",
+        blocks: [{ type: "text", text: "quote a line" }],
+      },
+      { kind: "agent", id: "agent-2", text: a2 },
+    ]);
+    let state = createSessionState({ id: "multi-agent" });
+    state = { ...state, timeline: seeded };
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "describe demo" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: a1 },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "quote a line" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: a2 },
+    });
+
+    const agents = state.timeline.filter((t) => t.kind === "agent");
+    assert.equal(agents.length, 2);
+    assert.equal(state.timeline.length, 4);
+    if (agents[0]?.kind === "agent" && agents[1]?.kind === "agent") {
+      assert.equal(agents[0].text, a1);
+      assert.equal(agents[1].text, a2);
+      assert.notEqual(agents[0].text, a1 + a1);
+      assert.notEqual(agents[1].text, a2 + a2);
+    }
+  });
+
+  it("unconfirmed seed thought + non-matching chunk abandons seed and appends live thought", () => {
+    const seeded: TimelineItem[] = tagSeedUserMessages([
+      {
+        kind: "thought",
+        id: "th-seed",
+        text: "cached reasoning that will not be replayed",
+        collapsed: true,
+        startedAt: 1,
+        completedAt: 2,
+      },
+    ]);
+    let state = createSessionState({ id: "thought-mismatch" });
+    state = { ...state, timeline: seeded };
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "brand new live reasoning" },
+    });
+
+    const thoughts = state.timeline.filter((t) => t.kind === "thought");
+    assert.equal(thoughts.length, 2, "seed kept + live thought appended");
+    assert.ok(thoughts[0] && thoughts[0].kind === "thought");
+    assert.ok(thoughts[1] && thoughts[1].kind === "thought");
+    if (thoughts[0]?.kind === "thought" && thoughts[1]?.kind === "thought") {
+      assert.equal(thoughts[0].text, "cached reasoning that will not be replayed");
+      assert.equal(thoughts[0].agentConfirmed, true, "seed slot abandoned");
+      assert.equal(thoughts[1].text, "brand new live reasoning");
+      assert.equal(thoughts[1].origin, "agent");
+      assert.equal(thoughts[1].completedAt, undefined);
+    }
+  });
+
+  it("unconfirmed seed agent + non-matching chunk abandons seed and appends live agent", () => {
+    const seeded: TimelineItem[] = tagSeedUserMessages([
+      { kind: "agent", id: "ag-seed", text: "old cached agent body" },
+    ]);
+    let state = createSessionState({ id: "agent-mismatch" });
+    state = { ...state, timeline: seeded };
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "fresh answer for a new turn" },
+    });
+
+    const agents = state.timeline.filter((t) => t.kind === "agent");
+    assert.equal(agents.length, 2, "seed kept + live agent appended");
+    assert.ok(agents[0] && agents[0].kind === "agent");
+    assert.ok(agents[1] && agents[1].kind === "agent");
+    if (agents[0]?.kind === "agent" && agents[1]?.kind === "agent") {
+      assert.equal(agents[0].text, "old cached agent body");
+      assert.equal(agents[0].agentConfirmed, true);
+      assert.equal(agents[1].text, "fresh answer for a new turn");
+      assert.equal(agents[1].origin, "agent");
+    }
+  });
+
+  it("load without thought replay still allows later live thoughts", () => {
+    // Seed has thought + agent; session/load only replaying agent (no thought chunks).
+    const agentBody = "answer without replaying thought";
+    const seeded: TimelineItem[] = tagSeedUserMessages([
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "hi" }],
+      },
+      {
+        kind: "thought",
+        id: "th-seed",
+        text: "seed thought never echoed by load",
+        collapsed: true,
+        startedAt: 10,
+        completedAt: 20,
+      },
+      { kind: "agent", id: "ag-seed", text: agentBody },
+    ]);
+    let state = createSessionState({ id: "partial-load" });
+    state = { ...state, timeline: seeded };
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "hi" },
+    });
+    // Agent replay matches seed agent; thought stays unconfirmed.
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: agentBody },
+    });
+    assert.equal(state.timeline.filter((t) => t.kind === "agent").length, 1);
+    const seedThought = state.timeline.find((t) => t.kind === "thought");
+    assert.ok(seedThought && seedThought.kind === "thought");
+    if (seedThought?.kind === "thought") {
+      assert.equal(seedThought.agentConfirmed, false);
+    }
+
+    // Later turn: user sends, agent thinks — must not silent-drop into seed thought.
+    state = appendUserPrompt(state, [{ type: "text", text: "second question" }]);
+    // appendUserPrompt abandons leftover seed thought.
+    const afterPrompt = state.timeline.find((t) => t.id === "th-seed");
+    assert.ok(afterPrompt && afterPrompt.kind === "thought");
+    if (afterPrompt?.kind === "thought") {
+      assert.equal(afterPrompt.agentConfirmed, true);
+    }
+
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "thinking about second question" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "second answer" },
+    });
+
+    const thoughts = state.timeline.filter((t) => t.kind === "thought");
+    const agents = state.timeline.filter((t) => t.kind === "agent");
+    assert.equal(thoughts.length, 2);
+    assert.equal(agents.length, 2);
+    const liveThought = thoughts[thoughts.length - 1];
+    const liveAgent = agents[agents.length - 1];
+    assert.ok(liveThought && liveThought.kind === "thought");
+    assert.ok(liveAgent && liveAgent.kind === "agent");
+    if (liveThought?.kind === "thought" && liveAgent?.kind === "agent") {
+      assert.equal(liveThought.text, "thinking about second question");
+      assert.equal(liveAgent.text, "second answer");
+    }
+  });
+
+  it("abandonUnconfirmedSeedContent flips claim latches without rewriting bodies", () => {
+    const seeded = tagSeedUserMessages([
+      {
+        kind: "thought",
+        id: "t",
+        text: "keep me",
+        collapsed: true,
+        startedAt: 1,
+        completedAt: 2,
+      },
+      { kind: "agent", id: "a", text: "keep me too" },
+    ]);
+    const next = abandonUnconfirmedSeedContent(seeded);
+    assert.ok(next[0] && next[0].kind === "thought");
+    assert.ok(next[1] && next[1].kind === "agent");
+    if (next[0]?.kind === "thought" && next[1]?.kind === "agent") {
+      assert.equal(next[0].text, "keep me");
+      assert.equal(next[1].text, "keep me too");
+      assert.equal(next[0].agentConfirmed, true);
+      assert.equal(next[1].agentConfirmed, true);
+    }
+    // Idempotent when already abandoned.
+    assert.equal(abandonUnconfirmedSeedContent(next), next);
+  });
+
+  it("markPromptStarted abandons leftover seed agent/thought so streaming can proceed", () => {
+    const seeded = tagSeedUserMessages([
+      { kind: "agent", id: "a", text: "stale seed" },
+    ]);
+    let state = createSessionState({ id: "start" });
+    state = { ...state, timeline: seeded };
+    state = markPromptStarted(state);
+    assert.ok(state.timeline[0] && state.timeline[0].kind === "agent");
+    if (state.timeline[0]?.kind === "agent") {
+      assert.equal(state.timeline[0].agentConfirmed, true);
+      assert.equal(state.timeline[0].text, "stale seed");
+    }
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "live stream" },
+    });
+    assert.equal(state.timeline.filter((t) => t.kind === "agent").length, 2);
   });
 });

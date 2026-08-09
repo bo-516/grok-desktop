@@ -169,8 +169,8 @@ export class AcpClient {
 
     if (opts.resumeId) {
       // Show cached transcript immediately, then agent replays on top.
-      // Tag seed user rows so user_message_chunk replay confirms by identity
-      // instead of concatenating the same body twice.
+      // Tag seed user/agent/thought rows so session/load replay claims by
+      // identity instead of concatenating or double-appending the same turn.
       if (opts.seed && opts.seed.id === opts.resumeId) {
         this.setState({
           ...opts.seed,
