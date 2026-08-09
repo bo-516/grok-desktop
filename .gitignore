@@ -72,3 +72,8 @@ Desktop.ini
 *.bak
 *.tmp
 *.temp
+
+# ai-inspector (ide-byebye) handoff artifacts during desktop dev
+.intent-inspector/
+apps/desktop/.intent-inspector/
+docs/

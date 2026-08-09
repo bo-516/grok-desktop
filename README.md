@@ -1,6 +1,6 @@
 # grok-desktop
 
-> **Status: 正在开发中（WIP）** — API、UI 与命令可能随时变更，暂不建议生产使用。
+> **Status: Work in progress (WIP)** — APIs, UI, and commands may change at any time; not recommended for production use.
 
 Desktop ACP client for [grok-build](https://docs.x.ai/build/overview) — **do not rewrite the agent loop**; speak Agent Client Protocol over stdio.
 
@@ -17,7 +17,7 @@ Unit tests may use an in-process ACP mock for codec/timeline isolation only.
 
 ```
 packages/acp-core/   Pure protocol codec, timeline reducers, AcpClient
-apps/bridge/         Spawns real `grok agent stdio` + WebSocket for UI
+apps/bridge/         RuntimePool of real `grok agent stdio` + WebSocket for UI
 apps/m0/             CLI handshake (default: live only)
 apps/desktop/        Vite + React shell (live-bridge only)
 demo/                Constrained workspace for live demos
@@ -27,6 +27,8 @@ demo/                Constrained workspace for live demos
 
 - Node.js ≥ 20
 - **Required for product use**: `grok` on PATH (or `~/.grok/bin/grok`) with `grok login` / auth
+  - Auth: `grok login` (writes `~/.grok/auth.json`) **or** env `XAI_API_KEY`
+  - UI shows an auth banner when the bridge reports missing credentials
 
 ## Install
 
@@ -48,9 +50,21 @@ npm run dev
 
 Open http://localhost:8172.
 
-- **New chat** / sidebar sessions: grouped by project, full history, click to resume (`session/load`)
+- **Multi-session**: one `grok agent stdio` process per live session; background chats keep streaming
+- **LRU pool**: default capacity **4** (`BRIDGE_POOL_CAPACITY`); only **idle** sessions are reclaimed
+- **New chat** / sidebar: project groups, status pips (including background live), `session/load` resume
+- **Streaming markdown** in agent bubbles (fences, lists, bold/code while tokens still arrive)
 - Composer: Enter to send, Shift+Enter for newline; Ask/Plan/Build chip
-- Bridge down → offline banner; history still shown; reconnect via footer "Connect live grok"
+- Bridge down → offline banner; history still shown; reconnect via footer
+
+### Dev: ai-inspector (⌘-click → Grok Build)
+
+Desktop **dev** embeds a vendored [ide-byebye](https://github.com/dravenLee/ide-byebye) build (`apps/desktop/vendor/ai-inspector/`) so you can pick a rendered element, describe the change, and hand off to **Grok Build** (and other agents) without leaving the UI. No external checkout is required.
+
+- **Hotkey**: `Alt+Shift+I` toggles picker mode
+- **Click**: hold ⌘ (macOS) / Ctrl (elsewhere) and click a component
+- **Enter** in the intent dialog defaults to **Grok Build**; handoff `cwd` is the monorepo root
+- Artifacts land under `apps/desktop/.intent-inspector/` (gitignored)
 
 ### Live e2e (stdio, tools, subagent)
 

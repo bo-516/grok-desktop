@@ -1,4 +1,4 @@
-- **Comments**: when updating any logical unit (function / declared object / component / method, including non-exported ones), update comments in sync — describe purpose, role, boundaries, parameter meaning, return-value meaning, and consequences of missing or wrong arguments; variables need comments too
+- **Comments(en-us)**: when updating any logical unit (function / declared object / component / method, including non-exported ones), update comments in sync — describe purpose, role, boundaries, parameter meaning, return-value meaning, and consequences of missing or wrong arguments; variables need comments too
 
 ## Agent connection policy (hard product constraint)
 
