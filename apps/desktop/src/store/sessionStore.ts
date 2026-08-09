@@ -26,6 +26,7 @@ import {
 import {
   DEFAULT_ALWAYS_APPROVE,
   startLiveBridgeSession,
+  stopPoolPoll,
   type ConnectionMode,
   type LiveHandle,
 } from "./sessionStoreLive";
@@ -55,7 +56,8 @@ type SessionStore = {
   environment: EnvironmentInfo | null;
   /**
    * Mode the user requested that is not yet confirmed by the agent.
-   * UI shows "Switching to…" while non-null; cleared on current_mode_update match or timeout.
+   * Non-null while a mode switch is in flight; UI keeps the short target mode
+   * label + busy chrome, cleared on current_mode_update match or timeout.
    */
   pendingMode: AgentMode | null;
   startLiveBridge: (opts?: StartOpts) => Promise<void>;
@@ -473,6 +475,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       persistCatalog(catalog);
       set({ catalog });
     }
+    // stopPoolPoll is also called from onClose; clear here so a close that
+    // never fires onClose (already-null live) still ends the interval.
+    stopPoolPoll();
     get().live?.close();
     set((state) => ({
       live: null,

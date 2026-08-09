@@ -30,6 +30,40 @@ import { clearPendingModeTimer } from "./pendingMode";
 /** Product UI path never auto-approves tools by default. */
 export const DEFAULT_ALWAYS_APPROVE = false;
 
+/**
+ * Footer "N running" safety poll while live-bridge is up.
+ * "Running" = pool entries with `status === "streaming"` (AI outputting),
+ * not mere process residency. Primary updates are event-driven (`onPool` /
+ * `broadcastPool`); this interval covers missed events / process death without
+ * ACP notification. 1s matches the rail status freshness expectation.
+ */
+export const POOL_POLL_MS = 1000;
+
+/** Active pool list_pool timer; null when disconnected. */
+let poolPollTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Stop the 1s list_pool poll (disconnect / reconnect / close).
+ * Safe when no timer is running.
+ */
+export function stopPoolPoll(): void {
+  if (poolPollTimer !== null) {
+    clearInterval(poolPollTimer);
+    poolPollTimer = null;
+  }
+}
+
+/**
+ * Start (or restart) the 1s list_pool poll so footer streaming counts stay fresh.
+ * @param listPool Bridge client method; return value ignored (false = WS closed).
+ */
+export function startPoolPoll(listPool: () => boolean): void {
+  stopPoolPoll();
+  poolPollTimer = setInterval(() => {
+    listPool();
+  }, POOL_POLL_MS);
+}
+
 export type ConnectionMode = "live-bridge" | "disconnected" | "connecting";
 
 export type LiveHandle = ReturnType<typeof connectLiveBridge>;
@@ -217,6 +251,7 @@ export async function startLiveBridgeSession(
           set({ bridgeInfo: `live grok-build · cwd=${cwdHello}${cap}` });
         },
         onClose: () => {
+          stopPoolPoll();
           set((s) => {
             const catalog = s.session.id
               ? normalizeCatalog(
@@ -244,7 +279,13 @@ export async function startLiveBridgeSession(
       await live.ready;
       live.checkEnvironment();
       live.listPool();
+      // Capture non-null handle for the interval closure (TS + reconnect safety).
+      const bridge = live;
+      // Event-driven onPool is primary; 1s poll keeps streaming "N running"
+      // honest if a push is missed (stream end / exit without ACP, partial WS drop).
+      startPoolPoll(() => bridge.listPool());
     } catch (e) {
+      stopPoolPoll();
       const message = e instanceof Error ? e.message : String(e);
       set({
         live: null,
@@ -277,6 +318,7 @@ export async function startLiveBridgeSession(
   };
   const started = live.start(startOpts);
   if (!started) {
+    stopPoolPoll();
     set({
       connectionMode: "disconnected",
       lastError: "WebSocket not connected",

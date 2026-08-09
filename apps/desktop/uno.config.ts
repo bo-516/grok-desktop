@@ -56,6 +56,12 @@ const colors = {
   "line-strong": "var(--color-border-strong)",
   "line-focus": "var(--color-border-focus)",
   "line-suggestion": "var(--color-border-composer-suggestion)",
+  /* Composer field chrome (wrap sole owner — color only per state) */
+  field: "var(--color-border-field)",
+  "field-focus": "var(--color-border-field-focus)",
+  "field-listening": "var(--color-border-field-listening)",
+  "field-dragover": "var(--color-border-field-dragover)",
+  "field-dragover-bg": "var(--color-bg-field-dragover)",
   "diff-add": "var(--color-diff-add)",
   "diff-add-bg": "var(--color-diff-add-bg)",
   "diff-del": "var(--color-diff-del)",
@@ -149,22 +155,28 @@ export default defineConfig({
         "overlay-in": "{from{opacity:0}to{opacity:1}}",
         "modal-in":
           "{from{opacity:0;transform:translateY(6px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}",
+        /* Mic live indicator — soft opacity pulse, not a layout thrash. */
+        "mic-pulse":
+          "{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.45;transform:scale(0.85)}}",
       },
       durations: {
         "skeleton-pulse": "1.4s",
         "cursor-blink": "1.05s",
         "overlay-in": "var(--duration-normal)",
         "modal-in": "var(--duration-slow)",
+        "mic-pulse": "1.2s",
       },
       timingFns: {
         "skeleton-pulse": "var(--ease-soft)",
         "cursor-blink": "step-end",
         "overlay-in": "var(--ease-soft)",
         "modal-in": "var(--ease-out)",
+        "mic-pulse": "var(--ease-soft)",
       },
       counts: {
         "skeleton-pulse": "infinite",
         "cursor-blink": "infinite",
+        "mic-pulse": "infinite",
       },
     },
   },
@@ -205,6 +217,10 @@ export default defineConfig({
     ["rounded-inherit", { "border-radius": "inherit" }],
     ["tabular-nums", { "font-variant-numeric": "tabular-nums" }],
     ["tracking-tight", { "letter-spacing": "var(--letter-spacing-tight)" }],
+    /* Composer suggestion menu: kill scroll-anchoring jumps while the list filters. */
+    ["overflow-anchor-none", { "overflow-anchor": "none" }],
+    /* Reserve scrollbar width so ellipsis width does not reflow when overflow starts. */
+    ["scrollbar-gutter-stable", { "scrollbar-gutter": "stable" }],
     [
       "transition-width",
       {

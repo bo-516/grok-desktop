@@ -91,34 +91,52 @@ export const appShortcuts: Record<string, string> = {
     "side-nav-search":
       "flex-1 min-w-0 h-full border-none bg-transparent text-fg text-nav p-0 placeholder:text-fg-muted focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-sidebar)])",
     "side-nav-scroll":
-      "flex-1 overflow-y-auto min-h-0 px-3 pb-2 pt-1 flex flex-col gap-1",
+      "flex-1 overflow-y-auto min-h-0 px-2.5 pb-2 pt-1 flex flex-col gap-0",
     "side-nav-empty": "px-2.5 py-4 text-12px text-fg-muted leading-snug",
     /*
-     * Row gap must stay ≥6px: with 8px radius + active/hover fills, gap-0.5 (~2px
-     * at 16px rem, ~1.6px when html is 13px) makes adjacent pills look stacked /
-     * overlapping. Prefer px so spacing is stable under the 13px root font-size.
+     * Codex-style project tree: muted "Projects" label, flat folder rows,
+     * indented session titles, "Show more" for long groups. No heavy cards.
      */
-    "time-group": "flex flex-col gap-[6px] pb-2.5",
+    "project-section-label":
+      "px-2.5 pt-1.5 pb-2 text-11px font-normal tracking-wide text-fg-muted",
+    "project-group": "flex flex-col gap-0.5 pb-3",
+    "project-group-collapsed": "pb-2",
+    "project-group-header":
+      "relative flex items-center gap-0.5 min-h-8 rounded-7px",
+    "project-group-main":
+      "flex flex-1 items-center gap-2 min-w-0 h-8 px-2 border-none rounded-7px bg-transparent text-left cursor-pointer transition-colors duration-fast ease-soft hover:bg-white-faint focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-sidebar)])",
+    "project-group-icon": "w-3.5 h-3.5 shrink-0 block text-fg-muted",
+    "project-group-name":
+      "min-w-0 flex-1 text-nav font-normal text-fg-secondary whitespace-nowrap overflow-hidden text-ellipsis leading-none",
+    "project-group-pin-mark":
+      "shrink-0 w-3 h-3 block text-fg-muted opacity-70",
+    "project-group-pin":
+      "shrink-0 flex items-center justify-center w-6 h-6 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none transition-all duration-fast ease-soft group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:(text-fg bg-white-soft) focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)])",
+    "project-group-pin-active":
+      "opacity-100 pointer-events-auto text-fg-secondary",
+    "project-group-sessions": "flex flex-col gap-0.5 pl-2",
+    "project-group-more":
+      "w-full pl-5 pr-2 py-1.5 border-none rounded-7px bg-transparent text-left text-12px text-fg-muted cursor-pointer transition-colors duration-fast ease-soft hover:(text-fg-secondary bg-white-faint) focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)])",
+    /* Legacy aliases. */
+    "time-group": "flex flex-col gap-0.5 pb-3",
     "time-group-label":
-      "px-2.5 pt-2.5 pb-1.5 text-11px font-medium tracking-wide text-fg-muted",
-    /* Design §4.3 session row height 44–52px. Use px (not h-11/rem): html font-size
-     * is --font-size-body-sm (13px), so rem-based h-11 collapses to ~36px.
-     * Grid + minmax(0,1fr) hard-caps the title so long names never paint over the
-     * relative-time / remove meta slot (flex min-w-0 alone was intermittent).
-     * Remove is absolute inside sess-meta so it replaces time on hover without
-     * changing title width; center with top/bottom + my-auto (not -translate-y)
-     * because preflight is off and Uno transform CSS vars leave transform invalid. */
+      "px-2.5 pt-1.5 pb-2 text-11px font-normal tracking-wide text-fg-muted",
+    /*
+     * Session rows under a project: flatter than standalone pills, Codex-like
+     * title list. Grid keeps title off the hover remove control. Height uses
+     * px (html font-size is 13px; rem h-* collapses).
+     */
     "sess-row":
-      "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 w-full h-[44px] px-2.5 rounded-8px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint)",
+      "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 w-full h-[34px] pl-5 pr-2 rounded-7px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint)",
     "sess-row-active": "bg-high text-fg hover:(bg-high text-fg)",
     "sess-row-process-live": "[&_.sess-title]:text-fg",
     "sess-title":
-      "block min-w-0 max-w-full whitespace-nowrap overflow-hidden text-ellipsis text-nav font-normal tracking-tight leading-none",
-    /* Owns the time label + hover remove control so title never shares that paint. */
+      "block min-w-0 max-w-full whitespace-nowrap overflow-hidden text-ellipsis text-nav font-normal tracking-tight leading-snug",
+    /* Time is hover-only so the idle list matches Codex (title only). */
     "sess-meta":
-      "relative shrink-0 flex items-center justify-end min-w-[1.75rem] h-5",
+      "relative shrink-0 flex items-center justify-end min-w-[1.25rem] h-5",
     "sess-time":
-      "shrink-0 text-11px leading-none text-fg-muted opacity-90 whitespace-nowrap tabular-nums transition-opacity duration-fast ease-soft group-hover:opacity-0 group-focus-within:opacity-0",
+      "shrink-0 text-11px leading-none text-fg-muted whitespace-nowrap tabular-nums opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-70 group-focus-within:opacity-0",
     "sess-remove":
       "absolute right-0 top-0 bottom-0 my-auto h-5 w-5 flex items-center justify-center border-none bg-transparent text-fg-muted text-15px leading-none rounded-soft opacity-0 pointer-events-none transition-opacity duration-fast ease-soft group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:(text-fg bg-white-soft)",
     "side-nav-footer":
@@ -144,9 +162,11 @@ export const appShortcuts: Record<string, string> = {
 
     /* ── Timeline ── */
     /* Bottom padding is modest: composer sits in flex flow under the timeline,
-     * so we no longer reserve a fixed absolute-dock gutter (pb-42). */
+     * so we no longer reserve a fixed absolute-dock gutter (pb-42).
+     * No scroll-smooth: session switch / stick-to-bottom must land instantly
+     * (CSS scroll-behavior would turn scrollTo({ behavior: "auto" }) into a glide). */
     timeline:
-      "flex-1 min-h-0 overflow-y-auto px-container pt-7 pb-5 flex flex-col gap-7 w-full scroll-smooth",
+      "flex-1 min-h-0 overflow-y-auto px-container pt-7 pb-5 flex flex-col gap-7 w-full",
     empty:
       "m-auto text-center text-fg-muted px-6 py-12 flex flex-col items-center gap-2",
     "empty-title":
@@ -177,11 +197,19 @@ export const appShortcuts: Record<string, string> = {
       "border-none bg-transparent text-fg-muted text-12px px-2 py-1.25 rounded-7px transition-colors duration-fast ease-soft hover:(text-fg bg-white-faint)",
     "item-thought":
       "max-w-full bg-transparent border-none text-fg-muted text-11px",
+    /** Streaming Thinking pill — faint fill signals active reasoning. */
     "thought-toggle":
       "inline-flex items-center gap-1.5 w-auto max-w-full border-none rounded-9px bg-white-faint px-2.75 py-2 text-left text-fg-muted font-normal text-11px leading-tight transition-colors duration-normal ease-soft hover:(bg-white-soft text-fg-secondary)",
+    /**
+     * Completed Thought toggle — transparent / faint so stacked history rows
+     * do not compete with agent body text (P0 visual de-weight).
+     */
+    "thought-toggle-done":
+      "bg-transparent text-fg-faint px-2 py-1 hover:(bg-white-faint text-fg-muted)",
     "thought-chevron": "w-2 text-fg-faint text-12px leading-none shrink-0",
     "thought-content":
       "mt-1.5 border-none rounded-9px bg-white-faint px-3 py-2.5 text-fg-secondary text-12px leading-snug whitespace-pre-wrap break-words",
+    "thought-group-segments": "flex flex-col gap-1.5 mt-1",
     "item-tool":
       "max-w-full bg-white-faint border-none rounded-shell px-3 py-2.5",
     "item-error":
@@ -248,22 +276,38 @@ export const appShortcuts: Record<string, string> = {
     "composer-dock":
       "shrink-0 relative z-20 px-container pt-2 pb-5 bg-timeline pointer-events-none",
     "composer-dock-inner": "w-full pointer-events-auto",
+    /* Card chrome only — field focus/listening live on .composer-input-wrap. */
     composer:
-      "relative flex flex-col gap-2.5 px-3.5 pt-3.5 pb-2.75 rounded-dock border border-transparent bg-composer shadow-composer transition-all duration-normal ease-soft focus-within:(border-line-focus)",
+      "relative flex flex-col gap-2.5 px-3.5 pt-3.5 pb-2.75 rounded-dock border border-transparent bg-composer shadow-composer transition-all duration-normal ease-soft",
+    /*
+     * Sole field chrome owner: 1px border + shared metrics; data-state / focus-within
+     * change color only. Height derives from the textarea (no min/max clamp here).
+     * overflow-hidden clips radius only — textarea owns min-h / max-h / field-sizing.
+     */
     "composer-input-wrap":
-      "relative w-full min-h-11 max-h-40 overflow-hidden",
+      "relative w-full overflow-hidden rounded-soft border border-field bg-transparent transition-[border-color,background-color,opacity] duration-fast ease-soft data-[state=idle]:focus-within:border-field-focus data-[state=listening]:border-field-listening data-[state=dragover]:(border-field-dragover bg-field-dragover-bg) data-[state=disabled]:opacity-55",
     "composer-input-highlight":
       "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words pt-0.5 px-0.5 text-body-md leading-relaxed tracking-tight text-fg",
+    /* Sole height clamp + auto-grow; padding must match .composer-input-highlight. */
     "composer-input":
-      "relative z-1 w-full min-h-11 max-h-40 resize-none border-none bg-transparent pt-0.5 px-0.5 text-body-md leading-relaxed tracking-tight text-transparent caret-fg placeholder:text-fg-muted focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-2 ring-offset-[var(--color-bg-composer)] rounded-soft)",
+      "relative z-1 w-full min-h-11 max-h-40 resize-none border-none bg-transparent pt-0.5 px-0.5 text-body-md leading-relaxed tracking-tight text-transparent caret-fg placeholder:text-fg-muted focus-visible:outline-none [field-sizing:content]",
     /* Mention chip chrome is only in base.css — dynamic class names + must not
      * change glyph metrics (font-weight/padding) or the caret misaligns. */
     /*
-     * Slash / @ menu: each row is shrink-0 so a flex-col + overflow-y parent
-     * never compresses items (min-h-0 + default shrink caused text to paint over neighbors).
+     * Slash / @ menu (bottom-anchored above the field):
+     * - each row is shrink-0 so a flex-col + overflow-y parent never compresses
+     *   items (min-h-0 + default shrink caused text to paint over neighbors)
+     * - overflow-anchor-none stops scroll anchoring from shifting rows when the
+     *   filtered list mutates mid-keystroke
+     * - scrollbar-gutter-stable keeps label ellipsis width fixed when the thumb
+     *   appears (otherwise text reflows horizontally and looks like jitter)
+     * Height ratchet (minHeight) is applied by ComposerSuggestionListView so the
+     * panel only grows while open — filter shrinks no longer drop remaining text.
      */
     "composer-suggestions":
-      "absolute right-0 bottom-[calc(100%+8px)] left-0 flex max-h-80 flex-col overflow-x-hidden overflow-y-auto border border-line-suggestion rounded-card bg-composer-suggestion shadow-composer-suggestions animate-overlay-in py-1",
+      "absolute right-0 bottom-[calc(100%+8px)] left-0 flex max-h-80 flex-col overflow-x-hidden overflow-y-auto overflow-anchor-none scrollbar-gutter-stable border border-line-suggestion rounded-card bg-composer-suggestion shadow-composer-suggestions animate-overlay-in py-1",
+    /* Inner stack measured for the height ratchet; shrink-0 so flex never crushes rows. */
+    "composer-suggestions-content": "flex w-full shrink-0 flex-col",
     "composer-suggestion":
       "block w-full shrink-0 overflow-hidden border-none border-b border-line-subtle bg-transparent px-3 py-2.5 m-0 text-left text-fg transition-colors duration-fast ease-soft hover:bg-composer-suggestion-hover last:border-b-0",
     "composer-suggestion-active": "bg-composer-suggestion-hover",
@@ -291,17 +335,28 @@ export const appShortcuts: Record<string, string> = {
       "text-mention-command bg-mention-command-bg",
     "composer-suggestion-kind-skill":
       "text-mention-skill bg-mention-skill-bg",
+    /* Secondary badge: gitignored path — muted so kind badge stays primary. */
+    "composer-suggestion-kind-gitignored":
+      "text-fg-muted bg-white-faint",
+    /* Fixed one-line min height so loading ↔ empty copy swaps do not reflow the panel. */
     "composer-suggestions-empty":
-      "m-0 p-3 text-fg-suggestion-detail text-body-sm",
+      "m-0 p-3 min-h-10 text-fg-suggestion-detail text-body-sm leading-5",
     "composer-bar": "flex items-center justify-between gap-2 m-0",
     "composer-bar-left": "flex items-center gap-1 min-w-0",
     "composer-bar-right": "relative flex items-center gap-1.5 min-w-0",
     "composer-icon-btn":
       "flex items-center justify-center w-7.5 h-7.5 border-none rounded-8px bg-transparent text-fg-secondary text-15px transition-colors duration-fast ease-soft hover:enabled:(bg-white-faint text-fg)",
     "composer-chip-btn":
-      "flex items-center gap-1.25 h-7.5 px-2.25 border-none rounded-8px bg-transparent text-fg-secondary text-12px font-normal transition-colors duration-fast ease-soft hover:enabled:(bg-white-faint text-fg)",
+      "flex items-center gap-1.25 h-7.5 px-2.25 border-none rounded-8px bg-transparent text-fg-secondary text-12px font-normal transition-colors duration-fast ease-soft hover:enabled:(bg-white-faint text-fg) disabled:(opacity-45 cursor-not-allowed)",
     "composer-chip-btn-active":
       "bg-primary text-on-primary hover:enabled:(bg-accent-hover text-on-primary)",
+    /* Mic chip: fixed label width so listening state (dot only) cannot reflow the bar. */
+    "composer-mic-chip": "min-w-14 justify-center",
+    /* Mic status pulse — idle is a muted dot; live matches danger semantic. */
+    "composer-mic-dot":
+      "w-1.5 h-1.5 rounded-full shrink-0 bg-fg-muted opacity-55",
+    "composer-mic-dot-live":
+      "bg-danger opacity-100 animate-mic-pulse",
     /* Agent mode control (sole mode UI — not top-nav) */
     "composer-mode": "relative shrink-0",
     "composer-mode-trigger":
@@ -351,6 +406,13 @@ export const appShortcuts: Record<string, string> = {
       "flex items-center justify-center w-8 h-8 border-none rounded-pill bg-primary text-on-primary text-14px font-semibold transition-all duration-fast ease-soft hover:enabled:bg-accent-hover active:enabled:scale-96 disabled:(opacity-35 cursor-not-allowed)",
     "composer-stop":
       "flex items-center justify-center h-8 px-3 border border-line-muted rounded-pill bg-white-faint text-fg-secondary text-12px font-medium transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg)",
+    /* Always-mounted status row: fixed one-line height; tone classes change color only. */
+    "composer-status":
+      "mt-2 mb-0 min-h-4.5 mx-1 text-center text-11px leading-4.5 tracking-normal truncate opacity-85",
+    "composer-status-neutral": "text-fg-muted",
+    "composer-status-info": "text-fg-secondary",
+    "composer-status-warn": "text-warning",
+    /* Legacy aliases kept for any residual class references during migration. */
     "composer-hint": "text-11px text-fg-muted tracking-normal",
     "composer-hint-footer": "mt-2 mb-0 text-center opacity-85",
     "composer-hint-warn": "mt-1.5 mx-1 mb-0 text-center text-fg-secondary",

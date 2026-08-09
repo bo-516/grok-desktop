@@ -14,6 +14,7 @@ import {
   projectNameFromWorkspace,
   pruneEmptyWeakSessions,
   rehydrateCatalogTitles,
+  resolveCatalogUpdatedAt,
   timeBucketFor,
   upsertFromLiveState,
 } from "@/store/sessionCatalog";
@@ -80,6 +81,96 @@ describe("sessionCatalog", () => {
     cat = upsertFromLiveState(cat, empty, 2000);
     assert.equal(cat[0]?.timeline.length, 2);
     assert.equal(cat[0]?.title, "Hello world prompt");
+    // Empty handshake must not advance recency (select/resume reordering).
+    assert.equal(cat[0]?.updatedAt, 1000);
+  });
+
+  it("upsert advances updatedAt only when user/agent message content changes", () => {
+    const base = createSessionState({
+      id: "s-recency",
+      workspace: "/proj/demo",
+    });
+    base.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "first prompt" }],
+      },
+    ];
+    base.lastAgentText = "";
+    let cat = upsertFromLiveState([], base, 1000);
+    assert.equal(cat[0]?.updatedAt, 1000);
+
+    // Status-only / select resume with same messages — keep prior updatedAt.
+    const same = createSessionState({
+      id: "s-recency",
+      workspace: "/proj/demo",
+    });
+    same.timeline = base.timeline;
+    same.lastAgentText = "";
+    same.status = "idle";
+    cat = upsertFromLiveState(cat, same, 5000);
+    assert.equal(cat[0]?.updatedAt, 1000);
+
+    // New agent reply advances recency.
+    const replied = createSessionState({
+      id: "s-recency",
+      workspace: "/proj/demo",
+    });
+    replied.timeline = [
+      ...base.timeline,
+      { kind: "agent", id: "a1", text: "agent answer" },
+    ];
+    replied.lastAgentText = "agent answer";
+    cat = upsertFromLiveState(cat, replied, 9000);
+    assert.equal(cat[0]?.updatedAt, 9000);
+
+    // New user message also advances.
+    const userAgain = createSessionState({
+      id: "s-recency",
+      workspace: "/proj/demo",
+    });
+    userAgain.timeline = [
+      ...replied.timeline,
+      {
+        kind: "user",
+        id: "u2",
+        blocks: [{ type: "text", text: "follow up" }],
+      },
+    ];
+    userAgain.lastAgentText = "agent answer";
+    cat = upsertFromLiveState(cat, userAgain, 12_000);
+    assert.equal(cat[0]?.updatedAt, 12_000);
+  });
+
+  it("resolveCatalogUpdatedAt prefers newer agent session_info time without content change", () => {
+    const existing = {
+      id: "s1",
+      workspace: "/p",
+      title: "T",
+      mode: "build" as const,
+      model: "m",
+      status: "idle" as const,
+      createdAt: 1,
+      updatedAt: 1000,
+      timeline: [
+        {
+          kind: "user" as const,
+          id: "u",
+          blocks: [{ type: "text" as const, text: "hi" }],
+        },
+      ],
+      toolCalls: {},
+      lastAgentText: "",
+    };
+    const next = resolveCatalogUpdatedAt(
+      existing,
+      existing.timeline,
+      "",
+      "2026-08-07T12:00:00.000Z",
+      50_000,
+    );
+    assert.equal(next, Date.parse("2026-08-07T12:00:00.000Z"));
   });
 
   it("rehydrateCatalogTitles fixes Chat id titles from timeline", () => {

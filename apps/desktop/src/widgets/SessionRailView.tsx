@@ -1,17 +1,30 @@
 /**
  * Left side-nav (Framer prototype): brand, New chat + search with kbd,
- * sessions grouped by Today / Yesterday / Earlier, soft footer status.
+ * sessions grouped by workspace folder (project), soft footer status.
+ * Recency within / across groups uses last user or agent message time
+ * (`SessionRecord.updatedAt`), not selection/focus order. Workspace groups
+ * support collapse + pin (persisted in session rail prefs).
  */
 
-import cs from "classnames";
-import { useMemo, useState, type CSSProperties } from "react";
-import { GlareHover, ShinyText } from "@/components/react-bits";
+import { useCallback, useMemo, useState, type CSSProperties } from "react";
+import { GlareHover } from "@/components/react-bits";
 import {
-  formatRelativeTime,
-  groupSessionsByTime,
-  type SessionRecord,
-} from "../store/sessionCatalog";
+  isWorkspaceCollapsed,
+  isWorkspacePinned,
+  loadSessionRailPrefs,
+  orderGroupsByPin,
+  saveSessionRailPrefs,
+  toggleCollapsedWorkspace,
+  togglePinnedWorkspace,
+  type SessionRailPrefs,
+} from "@/lib/sessionRailPrefs";
+import { groupSessionsByProject } from "../store/sessionCatalog";
 import { useSessionStore } from "../store/sessionStore";
+import { SessionRailProjectGroupView } from "./SessionRailProjectGroupView";
+import {
+  SessionRailFooterLiveStatus,
+  SessionRailSessionRowView,
+} from "./SessionRailSessionRowView";
 
 type SessionRailViewProps = {
   /**
@@ -28,8 +41,9 @@ type SessionRailViewProps = {
   /** Close overlay (backdrop / after select). Ignored when always-docked. */
   onClose?: () => void;
   /**
-   * Live process count for footer status (replaces duplicate sync chip).
-   * Missing → falls back to poolEntries length from the store.
+   * Footer "N running" count: sessions currently streaming (AI outputting).
+   * Missing → derived from poolEntries (`live && status === "streaming"`).
+   * Idle / waiting_permission / disconnected pool residents do not count.
    */
   liveCount?: number;
 };
@@ -52,6 +66,10 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
   const reconnect = useSessionStore((s) => s.reconnect);
   const runCli = useSessionStore((s) => s.runCli);
   const [query, setQuery] = useState("");
+  /** Pin + collapse prefs; seeded from localStorage once per mount. */
+  const [railPrefs, setRailPrefs] = useState<SessionRailPrefs>(() =>
+    loadSessionRailPrefs(),
+  );
   const railOpen = props.open ?? false;
 
   /** sessionId → pool status so background chats still show activity. */
@@ -65,6 +83,10 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
     return map;
   }, [poolEntries]);
 
+  /**
+   * Workspace-folder groups sorted by last message, then reordered so pinned
+   * projects stay on top (user pin order).
+   */
   const groups = useMemo(() => {
     const filtered = (() => {
       const q = query.trim().toLowerCase();
@@ -77,16 +99,18 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
           s.workspace.toLowerCase().includes(q),
       );
     })();
-    return groupSessionsByTime(filtered);
-  }, [catalog, query]);
+    const byRecency = groupSessionsByProject(filtered);
+    return orderGroupsByPin(byRecency, railPrefs.pinnedWorkspaces);
+  }, [catalog, query, railPrefs.pinnedWorkspaces]);
 
   const selectedId = viewingSessionId ?? activeSessionId;
   const live = connectionMode === "live-bridge";
-  const liveCount =
-    props.liveCount ?? poolEntries.filter((e) => e.live).length;
+  /** Sessions with a live process that is actively streaming agent output. */
   const streamingCount = poolEntries.filter(
     (e) => e.live && e.status === "streaming",
   ).length;
+  /** Footer running badge; prop wins so App shell can share one derivation. */
+  const liveCount = props.liveCount ?? streamingCount;
 
   /**
    * Select a session and dismiss the mobile rail overlay when open.
@@ -96,6 +120,37 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
     selectSession(id);
     props.onClose?.();
   };
+
+  /**
+   * Persist prefs after a local mutation so pin/collapse survive refresh.
+   * @param next Full next prefs blob.
+   */
+  const commitRailPrefs = useCallback((next: SessionRailPrefs) => {
+    setRailPrefs(next);
+    saveSessionRailPrefs(next);
+  }, []);
+
+  /**
+   * Toggle collapse for a workspace group header click.
+   * @param workspace Absolute path key for the group.
+   */
+  const onToggleCollapse = useCallback(
+    (workspace: string) => {
+      commitRailPrefs(toggleCollapsedWorkspace(railPrefs, workspace));
+    },
+    [commitRailPrefs, railPrefs],
+  );
+
+  /**
+   * Toggle pin so a workspace sticks above recency-sorted groups.
+   * @param workspace Absolute path key for the group.
+   */
+  const onTogglePin = useCallback(
+    (workspace: string) => {
+      commitRailPrefs(togglePinnedWorkspace(railPrefs, workspace));
+    },
+    [commitRailPrefs, railPrefs],
+  );
 
   return (
     <>
@@ -174,38 +229,46 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
               : "No chats yet. Send a message to start."}
           </div>
         ) : (
-          groups.map((group) => (
-            <div key={group.bucket} className="time-group">
-              <div className="time-group-label">{group.label}</div>
-              {group.sessions.map((rec) => {
-                const pooled = poolStatusById.get(rec.id);
-                const rowStatus =
-                  pooled ??
-                  (rec.id === activeSessionId || rec.id === selectedId
-                    ? liveStatus
-                    : rec.status);
-                const isProcessLive =
-                  Boolean(pooled) || (rec.id === activeSessionId && live);
-                return (
-                  <SessionRow
-                    key={rec.id}
-                    rec={rec}
-                    selected={rec.id === selectedId}
-                    isLiveActive={isProcessLive}
-                    liveStatus={rowStatus}
-                    onSelect={() => pickSession(rec.id)}
-                    onRemove={() => {
-                      if (props.onRequestDelete) {
-                        props.onRequestDelete(rec.id, rec.title);
-                      } else {
-                        removeSession(rec.id);
-                      }
-                    }}
-                  />
-                );
-              })}
-            </div>
-          ))
+          <>
+            <div className="project-section-label">Projects</div>
+            {groups.map((group) => (
+              <SessionRailProjectGroupView
+                key={group.workspace}
+                group={group}
+                pinned={isWorkspacePinned(railPrefs, group.workspace)}
+                collapsed={isWorkspaceCollapsed(railPrefs, group.workspace)}
+                onToggleCollapse={() => onToggleCollapse(group.workspace)}
+                onTogglePin={() => onTogglePin(group.workspace)}
+                renderSession={(rec) => {
+                  const pooled = poolStatusById.get(rec.id);
+                  const rowStatus =
+                    pooled ??
+                    (rec.id === activeSessionId || rec.id === selectedId
+                      ? liveStatus
+                      : rec.status);
+                  const isProcessLive =
+                    Boolean(pooled) || (rec.id === activeSessionId && live);
+                  return (
+                    <SessionRailSessionRowView
+                      key={rec.id}
+                      rec={rec}
+                      selected={rec.id === selectedId}
+                      isLiveActive={isProcessLive}
+                      liveStatus={rowStatus}
+                      onSelect={() => pickSession(rec.id)}
+                      onRemove={() => {
+                        if (props.onRequestDelete) {
+                          props.onRequestDelete(rec.id, rec.title);
+                        } else {
+                          removeSession(rec.id);
+                        }
+                      }}
+                    />
+                  );
+                }}
+              />
+            ))}
+          </>
         )}
       </div>
 
@@ -306,7 +369,7 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
           <span className="side-nav-user-meta">
             <span className="side-nav-user-name">grok-build</span>
             <span className="side-nav-user-status">
-              <FooterLiveStatus live={live} liveCount={liveCount} />
+              <SessionRailFooterLiveStatus live={live} liveCount={liveCount} />
             </span>
           </span>
           <span className="side-nav-user-action" aria-hidden="true">
@@ -316,81 +379,5 @@ export function SessionRailView(props: SessionRailViewProps = {}) {
       </div>
     </aside>
     </>
-  );
-}
-
-/**
- * Footer process status: offline / N running (with shine when live processes exist).
- * @param props live flag and process count.
- */
-function FooterLiveStatus(props: { live: boolean; liveCount: number }) {
-  if (!props.live) {
-    return <>Offline</>;
-  }
-  if (props.liveCount > 0) {
-    return (
-      <ShinyText text={`${props.liveCount} running`} speed="slow" />
-    );
-  }
-  return <>0 running</>;
-}
-
-/**
- * One session row: title (ellipsis) + meta slot (relative time / remove).
- * Grid columns keep title and meta paint-separated so long titles never
- * overlap `now` / `2h` / `yesterday` on narrow sidebar width.
- * @param props Session record, selection / live flags, select + remove handlers.
- * @returns Interactive row for the side-nav session list.
- */
-function SessionRow(props: {
-  rec: SessionRecord;
-  selected: boolean;
-  isLiveActive: boolean;
-  liveStatus: string;
-  onSelect: () => void;
-  onRemove: () => void;
-}) {
-  const { rec, selected, isLiveActive, liveStatus, onSelect, onRemove } = props;
-  const timeLabel =
-    liveStatus === "streaming" && isLiveActive
-      ? "…"
-      : formatRelativeTime(rec.updatedAt);
-
-  return (
-    <div
-      className={cs("sess-row group", {
-        "sess-row-active": selected,
-        "sess-row-process-live": isLiveActive && liveStatus === "streaming",
-      })}
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-    >
-      <span className="sess-title" title={rec.title}>
-        {rec.title}
-      </span>
-      <span className="sess-meta">
-        <span className="sess-time" title={formatRelativeTime(rec.updatedAt)}>
-          {timeLabel}
-        </span>
-        <button
-          type="button"
-          className="sess-remove"
-          title="Remove from list"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          ×
-        </button>
-      </span>
-    </div>
   );
 }

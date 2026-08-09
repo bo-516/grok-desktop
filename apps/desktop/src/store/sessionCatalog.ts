@@ -29,6 +29,11 @@ export type SessionRecord = {
   model: string;
   status: SessionStatus;
   createdAt: number;
+  /**
+   * Last user or agent message activity (epoch ms). Used for rail sort.
+   * Must not advance on select / reconnect alone — only when conversation
+   * content changes or agent reports a newer `session_info_update.updatedAt`.
+   */
   updatedAt: number;
   timeline: TimelineItem[];
   toolCalls: Record<string, ToolCallCard>;
@@ -65,8 +70,82 @@ export function projectNameFromWorkspace(workspace: string): string {
 }
 
 /**
+ * Fingerprint of user + agent conversation content used to detect real
+ * message activity (not select / status / handshake-only upserts).
+ * @param timeline Session timeline (seed-tagged ok).
+ * @param lastAgentText Accumulated agent text from SessionState.
+ * @returns Stable string; equal keys mean no new message content.
+ */
+function conversationActivityKey(
+  timeline: TimelineItem[],
+  lastAgentText: string,
+): string {
+  const parts: string[] = [];
+  for (const item of timeline) {
+    if (item.kind === "user") {
+      const text = item.blocks
+        .map((b) => (b.type === "text" ? b.text : b.type))
+        .join("\u001f");
+      parts.push(`u:${text}`);
+    } else if (item.kind === "agent") {
+      parts.push(`a:${item.text}`);
+    }
+  }
+  parts.push(`lat:${lastAgentText}`);
+  return parts.join("\0");
+}
+
+/**
+ * Catalog row recency for rail sort: last user/agent message time.
+ * Select / reconnect / status-only upserts must not advance the clock
+ * (clicking a session must not jump it to the top).
+ * Prefer a newer parseable agent `session_info_update.updatedAt` when content
+ * is unchanged; when content changes use wall clock (and agent time if later).
+ * @param existing Prior catalog row, if any.
+ * @param timeline Merged timeline after upsert.
+ * @param lastAgentText Merged last agent text.
+ * @param agentUpdatedAt Optional ISO string from SessionState.updatedAt.
+ * @param now Wall-clock ms (injectable for tests).
+ * @returns Epoch ms for SessionRecord.updatedAt.
+ */
+export function resolveCatalogUpdatedAt(
+  existing: SessionRecord | undefined,
+  timeline: TimelineItem[],
+  lastAgentText: string,
+  agentUpdatedAt: string | undefined,
+  now = Date.now(),
+): number {
+  const agentMs = (() => {
+    if (!agentUpdatedAt?.trim()) {
+      return undefined;
+    }
+    const parsed = Date.parse(agentUpdatedAt);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  })();
+
+  if (!existing) {
+    return agentMs ?? now;
+  }
+
+  const contentChanged =
+    conversationActivityKey(timeline, lastAgentText) !==
+    conversationActivityKey(existing.timeline, existing.lastAgentText);
+
+  if (contentChanged) {
+    return Math.max(now, agentMs ?? 0);
+  }
+
+  if (agentMs !== undefined && agentMs > existing.updatedAt) {
+    return agentMs;
+  }
+  return existing.updatedAt;
+}
+
+/**
  * Merge live ACP state into a catalog record (upsert by session id).
  * Preserves good titles; never replaces them with Session/Chat id labels.
+ * `updatedAt` advances only on user/agent message activity (or a newer
+ * agent-reported activity time), not on every select/resume upsert.
  */
 export function upsertFromLiveState(
   catalog: SessionRecord[],
@@ -102,12 +181,13 @@ export function upsertFromLiveState(
       ? state.plan
       : existing?.plan;
 
+  const lastAgentText = state.lastAgentText || existing?.lastAgentText || "";
   const mergedState: SessionState = {
     ...state,
     timeline,
     toolCalls,
     plan,
-    lastAgentText: state.lastAgentText || existing?.lastAgentText || "",
+    lastAgentText,
   };
 
   const next: SessionRecord = {
@@ -121,11 +201,17 @@ export function upsertFromLiveState(
     model: state.model || existing?.model || "",
     status: state.status,
     createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
+    updatedAt: resolveCatalogUpdatedAt(
+      existing,
+      timeline,
+      lastAgentText,
+      state.updatedAt,
+      now,
+    ),
     timeline,
     toolCalls,
     plan,
-    lastAgentText: mergedState.lastAgentText,
+    lastAgentText,
   };
   const without = catalog.filter((s) => s.id !== state.id);
   return [next, ...without].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -188,8 +274,9 @@ export function normalizeCatalog(catalog: SessionRecord[]): SessionRecord[] {
 }
 
 /**
- * Group sessions by workspace path; each group sorted by updatedAt desc.
- * Groups ordered by most recent session activity (Codex multi-project sidebar).
+ * Group sessions by workspace folder path; each group sorted by last-message
+ * time (`updatedAt` desc). Groups ordered by their newest session so active
+ * projects float up without Today/Yesterday buckets.
  */
 export function groupSessionsByProject(
   catalog: SessionRecord[],

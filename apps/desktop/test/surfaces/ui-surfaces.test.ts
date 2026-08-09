@@ -35,20 +35,69 @@ describe("UI surface presence", () => {
     const view = readSrc("widgets/composer/ComposerWidget.tsx");
     const hook = readSrc("widgets/composer/useComposerWidget.ts");
     const modeView = readSrc("widgets/composer/ComposerModeControlView.tsx");
+    const input = readSrc("widgets/composer/ComposerInputView.tsx");
+    const status = readSrc("widgets/composer/composerStatus.ts");
     assert.match(view, /composer-dock/);
-    assert.match(view, /@ files?/);
-    assert.match(view, /sendHint/);
+    // Default shortcut copy (incl. @ files) lives in the pure status resolver.
+    assert.match(status, /@ files?/);
+    // One status path: pure resolver + always-mounted row (no dual sendHint + footer).
+    assert.match(view, /resolveComposerStatus|statusLine/);
+    assert.match(view, /composer-status/);
+    assert.match(view, /aria-live="polite"/);
+    assert.match(view, /aria-atomic="true"/);
+    assert.doesNotMatch(view, /sendHint/);
     assert.match(view, /ComposerModelMenuView/);
     assert.match(view, /ComposerModeControlView/);
     assert.match(view, /ComposerInputView/);
+    // Mic chip toggles listening chrome that mirrors into the input field.
+    assert.match(view, /toggleDictation/);
+    assert.match(view, /aria-pressed=\{widget\.dictating\}/);
+    assert.match(view, /composer-chip-btn-active/);
+    assert.match(view, /listening=\{widget\.dictating\}/);
+    // Placeholder still says Listening… while draft empty; full sentence is status-only.
+    assert.match(view, /Listening…/);
     assert.match(hook, /sendPrompt/);
     assert.match(hook, /cancelTurn/);
     assert.match(hook, /useComposerCompletion/);
     assert.match(hook, /selectModel|selectEffort/);
     assert.match(hook, /pendingMode|selectMode|cycleMode/);
+    assert.match(hook, /toggleDictation|stopDictation/);
+    assert.match(hook, /useComposerDictation/);
+    assert.match(hook, /useComposerNotice|showNotice/);
+    assert.doesNotMatch(hook, /sendHint|setSendHint/);
+    const dictation = readSrc("widgets/composer/useComposerDictation.ts");
+    assert.match(dictation, /joinDictationDraft/);
+    assert.match(dictation, /toggleDictation/);
+    // Dictation must not own Listening status text or prefix-sniff clears.
+    assert.doesNotMatch(dictation, /startsWith\(["']Listening/);
+    assert.doesNotMatch(
+      dictation,
+      /Listening… · click Mic to stop/,
+    );
+    // Listening sentence appears exactly once across widget + dictation + status module.
+    const listeningSentence = "Listening… · click Mic to stop · Enter to send";
+    const combined = `${view}\n${dictation}\n${status}`;
+    const listeningHits = combined.split(listeningSentence).length - 1;
+    assert.equal(
+      listeningHits,
+      1,
+      "listening status sentence must exist in exactly one place (composerStatus)",
+    );
+    assert.match(status, /resolveComposerStatus/);
+    assert.match(input, /listening/);
+    // Field chrome via data-state (color only), not dual-ring listening class.
+    assert.match(input, /data-state/);
+    assert.match(input, /listening/);
+    assert.doesNotMatch(input, /composer-input-listening|data-listening/);
     assert.match(modeView, /role="radiogroup"/);
     assert.match(modeView, /aria-checked/);
     assert.match(modeView, /aria-busy/);
+    // Pending must not expand the chip with "Switching to …" (layout flash).
+    assert.doesNotMatch(modeView, /Switching to \$\{modeLabel/);
+    assert.match(modeView, /modeLabel\(displayMode\)/);
+    // Mic chip must not swap its visible label to "Listening" (bar width flash).
+    assert.doesNotMatch(view, /dictating\s*\?\s*["']Listening["']/);
+    assert.match(view, /composer-mic-chip/);
   });
 
   it("permission UI offers selectable outcomes", () => {
@@ -212,9 +261,23 @@ describe("UI surface presence", () => {
       shortcuts,
       /"side-nav-search":[\s\S]*?focus-visible:\(outline-none ring-2/,
     );
+    // Field focus chrome is on the wrap (border color), not a second ring on the textarea.
     assert.match(
       shortcuts,
-      /"composer-input":[\s\S]*?focus-visible:\(outline-none ring-2/,
+      /"composer-input-wrap":[\s\S]*?border-field/,
+    );
+    // Bound the value string so later shortcuts with ring-2 cannot false-match.
+    assert.match(
+      shortcuts,
+      /"composer-input":\s*"[^"]*focus-visible:outline-none/,
+    );
+    assert.match(
+      shortcuts,
+      /"composer-input":\s*"[^"]*field-sizing:content/,
+    );
+    assert.doesNotMatch(
+      shortcuts,
+      /"composer-input":\s*"[^"]*focus-visible:\(outline-none ring-2/,
     );
     const live = readSrc("store/sessionStoreLive.ts");
     assert.match(live, /healSessionTimeline|tagSeedUserMessages/);
@@ -267,6 +330,7 @@ describe("UI surface presence", () => {
     assert.match(menu, /buildForkCommand|runSessionMenuAction/);
     const timeline = readSrc("widgets/TimelineView.tsx");
     assert.match(timeline, /groupTimelineTools|ToolGroupView/);
+    assert.match(timeline, /groupTimelineThoughts|ThoughtGroupView/);
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
     assert.match(settings, /denyRules|allowRules|effort/);
   });
@@ -312,11 +376,12 @@ describe("UI surface presence", () => {
   it("composer drag-drop and image ContentBlock send path ship", () => {
     const input = readSrc("widgets/composer/ComposerInputView.tsx");
     assert.match(input, /onDrop|onDragOver/);
-    assert.match(input, /data-drag-over|composer-input-dragover/);
+    assert.match(input, /data-drag-over|data-state/);
     const hook = readSrc("widgets/composer/useComposerWidget.ts");
     const attachments = readSrc("widgets/composer/useComposerAttachments.ts");
     assert.match(attachments, /processDataTransfer|handleDrop/);
     assert.match(attachments, /buildPromptBlocks|acceptImageAttachment/);
+    assert.match(attachments, /showNotice/);
     assert.match(hook, /useComposerAttachments|agentCapabilities/);
     assert.doesNotMatch(
       attachments,
@@ -350,10 +415,15 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(live, /alwaysApprove:\s*true/);
   });
 
-  it("session rail is side-nav with time groups and workspace footer nav", () => {
+  it("session rail is side-nav with workspace groups and workspace footer nav", () => {
     const rail = readSrc("widgets/SessionRailView.tsx");
     assert.match(rail, /side-nav/);
-    assert.match(rail, /groupSessionsByTime/);
+    assert.match(rail, /groupSessionsByProject/);
+    assert.doesNotMatch(rail, /groupSessionsByTime/);
+    assert.match(rail, /SessionRailProjectGroupView/);
+    assert.match(rail, /orderGroupsByPin/);
+    assert.match(rail, /toggleCollapsedWorkspace|onToggleCollapse/);
+    assert.match(rail, /togglePinnedWorkspace|onTogglePin/);
     assert.match(rail, /New chat/);
     assert.match(rail, /selectSession/);
     assert.match(rail, /aria-label="Workspace"/);
@@ -362,14 +432,27 @@ describe("UI surface presence", () => {
     assert.match(rail, /detail:\s*"tasks"/);
     assert.match(rail, /detail:\s*"overview"/);
     assert.match(rail, /detail:\s*"extensions"/);
-    // Title + time must not share a free flex line (long titles overlapped "now").
-    assert.match(rail, /sess-meta/);
     assert.doesNotMatch(rail, /backgroundColor|color:\s*['"`]#|rgb\(/);
+    assert.match(rail, /project-section-label/);
+    const groupView = readSrc("widgets/SessionRailProjectGroupView.tsx");
+    assert.match(groupView, /project-group-name/);
+    assert.match(groupView, /Show more/);
+    assert.match(groupView, /PROJECT_SESSION_PREVIEW/);
+    assert.match(groupView, /onToggleCollapse/);
+    assert.match(groupView, /onTogglePin/);
+    // Title + meta stay on separate grid tracks (long titles vs remove).
+    const sessionRow = readSrc("widgets/SessionRailSessionRowView.tsx");
+    assert.match(sessionRow, /sess-meta/);
     const shortcuts = readDesktopRoot("uno.shortcuts.ts");
     assert.match(
       shortcuts,
       /"sess-row":[\s\S]*?grid-cols-\[minmax\(0,1fr\)_auto\]/,
     );
+    assert.match(
+      shortcuts,
+      /"project-group-name":\s*"min-w-0 flex-1 text-nav font-normal/,
+    );
+    assert.match(shortcuts, /"project-section-label":/);
   });
 
   it("tool card normalizes array content and plan empty is en-US", () => {
@@ -469,6 +552,56 @@ describe("UI surface presence", () => {
     assert.match(colors, /--color-mention-file-border/);
     assert.match(colors, /--color-mention-command-icon/);
     assert.match(colors, /--color-mention-trigger/);
+  });
+
+  it("only menu-committed mentions paint, and their marks reach the agent as @", () => {
+    const composerInput = readSrc("widgets/composer/ComposerInputView.tsx");
+    assert.match(
+      composerInput,
+      /!seg\.committed/,
+      "a typed @path that locked onto nothing must render as plain text",
+    );
+
+    const completion = readSrc("widgets/composer/useComposerCompletion.ts");
+    assert.doesNotMatch(
+      completion,
+      /sealCompletedMentions/,
+      "typing must not promote text to a committed mention — only the menu can",
+    );
+
+    // Zero-width marks are a rendering trick; grok-build only parses `@` / `/`,
+    // so every path out of the composer has to materialize them before send.
+    const attachments = readSrc("widgets/composer/useComposerAttachments.ts");
+    const widget = readSrc("widgets/composer/useComposerWidget.ts");
+    const submit = readSrc("widgets/composer/composerSubmit.ts");
+    assert.match(attachments, /prepareMentionSend\(args\.draft\)/);
+    assert.match(attachments, /assembleMentionBlocks/);
+    assert.match(attachments, /buildOutgoingBlocks = useCallback\(async/);
+    assert.match(submit, /materializeMentionTriggers/);
+    assert.match(submit, /buildOutgoingBlocks/);
+    assert.match(widget, /runComposerSubmit/);
+    assert.match(widget, /readWorkspaceFile: bridgeReadWorkspaceFile/);
+
+    // Without an explicit cwd the bridge indexes whichever session it started
+    // last, so the menu can offer files from a workspace you are not viewing.
+    assert.match(widget, /bridgeListWorkspaceEntries\(query, workspace/);
+    assert.match(
+      readSrc("bridge/liveBridgeFs.ts"),
+      /"list_workspace_entries",\s*requestId,\s*query,\s*cwd/,
+    );
+    assert.match(
+      readSrc("bridge/liveBridgeFs.ts"),
+      /type:\s*"read_workspace_file"/,
+    );
+
+    // gitignored secondary badge only when ignored === true (never filters).
+    const menu = readSrc("widgets/composer/ComposerSuggestionListView.tsx");
+    assert.match(menu, /gitignored/);
+    assert.match(menu, /suggestion\.ignored === true/);
+    assert.match(
+      readSrc("widgets/composer/composerCompletion.ts"),
+      /ignored:\s*entry\.ignored === true/,
+    );
   });
 
   it("shell keyboard maps ⌘N ⌘, ⌘\\ and drawers have dual reachability", () => {

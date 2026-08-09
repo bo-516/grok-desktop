@@ -108,7 +108,13 @@ export function useAppShellWidget() {
   const title =
     catalog.find((c) => c.id === session.id)?.title ||
     (session.timeline.length > 0 ? "Current chat" : "New chat");
-  const liveCount = poolEntries.filter((e) => e.live).length;
+  /**
+   * Footer "N running": only sessions whose pool process is streaming
+   * (AI currently outputting). Idle pool residents are excluded.
+   */
+  const liveCount = poolEntries.filter(
+    (e) => e.live && e.status === "streaming",
+  ).length;
   const authOk = environment?.ok !== false;
   const envKnown = environment !== null;
   const planCount = session.plan?.length ?? 0;
