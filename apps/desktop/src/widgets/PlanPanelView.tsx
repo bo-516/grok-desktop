@@ -1,43 +1,114 @@
 /**
- * Right-rail plan panel — whole-replaced from plan session updates.
- * Stateless presentation over session.plan.
+ * Plan panel + approval actions (F-PLAN-01/04).
+ * Auto / always-approve never skip plan approval (upstream contract).
  */
 
+import cs from "classnames";
+import type { PlanEntry } from "@grok-desktop/acp-core";
+import { useState } from "react";
 import { useSessionStore } from "../store/sessionStore";
 
-/**
- * Display mark for a plan step status.
- * @param status Step status; unknown or missing values fall back to an empty circle.
- */
-function planStatusMark(status: string | undefined): string {
-  if (status === "completed") {
-    return "✓";
-  }
-  if (status === "in_progress") {
-    return "●";
-  }
-  return "○";
-}
+type PlanPanelViewProps = {
+  entries: PlanEntry[] | undefined;
+  /** When true, show approve / revise / comment / exit controls. */
+  showApproval?: boolean;
+};
 
-export function PlanPanelView() {
-  const plan = useSessionStore((s) => s.session.plan);
+/**
+ * Plan list with status chips and optional approval bar.
+ * @param props Plan entries from session.plan; approval sends slash prompts.
+ */
+export function PlanPanelView(props: PlanPanelViewProps) {
+  const sendPrompt = useSessionStore((s) => s.sendPrompt);
+  const [comment, setComment] = useState("");
+  const entries = props.entries ?? [];
+  const showApproval = props.showApproval !== false && entries.length > 0;
+
+  if (entries.length === 0) {
+    return (
+      <div className="plan-empty">
+        No plan yet. Ask for an architecture plan or use /plan.
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="rail-head">Plan</div>
-      {!plan || plan.length === 0 ? (
-        <div className="plan-empty">No plan yet</div>
-      ) : (
-        plan.map((step, i) => {
-          const label = step.content ?? step.title ?? `Step ${i + 1}`;
+    <div className="plan-panel" data-kind="plan">
+      <ol className="plan-list">
+        {entries.map((entry, i) => {
+          const status = entry.status ?? "pending";
           return (
-            <div className="plan-step" key={label}>
-              <span aria-hidden="true">{planStatusMark(step.status)}</span>
-              <span>{label}</span>
-            </div>
+            <li
+              key={`${entry.title ?? entry.content ?? i}-${i}`}
+              className={cs("plan-item", {
+                "plan-item-done": status === "completed",
+                "plan-item-active": status === "in_progress",
+              })}
+            >
+              <span className={cs("plan-status", `plan-status-${status}`)}>
+                {status}
+              </span>
+              <span className="plan-text">
+                {entry.title || entry.content || `Step ${i + 1}`}
+              </span>
+            </li>
           );
-        })
-      )}
+        })}
+      </ol>
+      {showApproval ? (
+        <div className="plan-approval" role="group" aria-label="Plan approval">
+          <p className="plan-approval-hint">
+            Plan approval is required even in auto / always-approve modes.
+          </p>
+          <div className="plan-approval-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void sendPrompt("Approve the plan and execute it.")}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() =>
+                void sendPrompt(
+                  "Please revise the plan based on my feedback before executing.",
+                )
+              }
+            >
+              Request changes
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => void sendPrompt("/plan")}
+            >
+              Exit plan mode
+            </button>
+          </div>
+          <div className="plan-comment-row">
+            <input
+              className="text-input"
+              placeholder="Inline comment on the plan…"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={!comment.trim()}
+              onClick={() => {
+                const text = comment.trim();
+                setComment("");
+                void sendPrompt(`Plan comment: ${text}`);
+              }}
+            >
+              Comment
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
