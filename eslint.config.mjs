@@ -181,11 +181,46 @@ export default tseslint.config(
   // ── Tests: slightly relaxed ─────────────────────────────────────
   {
     files: ["**/*.{test,spec}.{ts,tsx}", "**/test/**/*.{ts,tsx}"],
+    languageOptions: {
+      // node:test / assert / fs even under apps/desktop (browser UI package)
+      globals: {
+        ...globals.node,
+      },
+    },
     rules: {
       "no-console": "off",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
       "max-lines": "off",
+    },
+  },
+
+  // ── src/ 内禁止出现测试文件（结构守卫）────────────────────
+  {
+    files: [
+      "apps/*/src/**/*.{test,spec}.{ts,tsx}",
+      "packages/*/src/**/*.{test,spec}.{ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Program",
+          message:
+            "Test files must live under the workspace `test/` directory, not `src/`.",
+        },
+      ],
+    },
+  },
+
+  // ── 产品代码禁止 import 测试目录 ─────────────────────────
+  {
+    files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: ["**/test/**", "**/*.test", "**/*.test.*"] },
+      ],
     },
   },
 );

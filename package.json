@@ -9,8 +9,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @grok-desktop/acp-core && npm run build -w @grok-desktop/desktop",
-    "test": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core",
-    "test:all": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core && npm run test -w @grok-desktop/bridge --if-present && npm run test -w @grok-desktop/desktop --if-present",
+    "test": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core && npm run test -w @grok-desktop/bridge --if-present && npm run test -w @grok-desktop/desktop --if-present",
+    "test:all": "npm test",
     "m0": "npm run m0 -w @grok-desktop/m0",
     "m0:mock": "npm run m0:mock -w @grok-desktop/m0",
     "m0:live": "npm run m0:live -w @grok-desktop/m0",
@@ -18,7 +18,7 @@
     "demo:e2e": "npm run demo:e2e -w @grok-desktop/bridge",
     "dev": "npm run dev -w @grok-desktop/desktop",
     "dev:full": "echo 'Terminal A: npm run bridge  |  Terminal B: npm run dev  |  UI: Live grok (demo/)'",
-    "typecheck": "npm run typecheck -w @grok-desktop/acp-core && npm run typecheck -w @grok-desktop/desktop --if-present",
+    "typecheck": "npm run typecheck -w @grok-desktop/acp-core && npm run typecheck:test -w @grok-desktop/acp-core && npm run typecheck -w @grok-desktop/bridge --if-present && npm run typecheck -w @grok-desktop/desktop --if-present && npm run typecheck:test -w @grok-desktop/desktop --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

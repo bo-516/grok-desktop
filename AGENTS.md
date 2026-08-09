@@ -8,6 +8,9 @@
 - In-process mock in unit tests (`createMockAcpPair`) is only for protocol/codec isolation tests; must not be wired into the `npm run dev` main path
 
 These are the project's hard constraints and take highest priority.
+- **测试位置**：测试文件一律放在所属 workspace 的 `test/` 下，目录结构镜像 `src/`；
+  `src/` 内不得出现 `*.test.*` / `*.spec.*`。desktop 测试用 `@/` 别名导入被测模块，
+  bridge / acp-core 用 `../src/xxx.js` 相对路径。
 - Consider splitting files at 200 lines; must split above 440 lines
 - **Colors**: all color tokens / theme colors are centralized in `src/styles/defineColor.css`; see "Color rules" below
 - **Styles**: prefer UnoCSS; write as few `.css` files as possible
