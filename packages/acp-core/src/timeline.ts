@@ -4,7 +4,6 @@
  */
 
 import type {
-  ContentBlock,
   PlanEntry,
   SessionState,
   SessionUpdate,
@@ -13,8 +12,10 @@ import type {
 } from "./types.js";
 import { normalizeAvailableCommands } from "./sessionMetadata.js";
 import { nextTimelineId } from "./timelineId.js";
+import { applyUserMessageChunk } from "./userMessageChunk.js";
 
 export { nextTimelineId, resetTimelineIdCounter } from "./timelineId.js";
+export { applyUserMessageChunk, userTextFromBlocks } from "./userMessageChunk.js";
 
 /**
  * Deep-ish merge for tool card patches.
@@ -102,9 +103,8 @@ export function applySessionUpdate(
     case "user_message_chunk": {
       const text = chunkText(update);
       if (!text) {return state;}
-      const timeline = appendOrMergeText(
+      const timeline = applyUserMessageChunk(
         stateWithCompletedThought.timeline,
-        "user",
         text,
       );
       return { ...stateWithCompletedThought, timeline };
@@ -257,8 +257,28 @@ export function applySessionUpdate(
       if (!Array.isArray(configOptions)) {return stateWithCompletedThought;}
       return { ...stateWithCompletedThought, configOptions };
     }
+    case "todos":
+    case "todo_update":
+    case "todos_update": {
+      // F-CTX-06: todos are distinct from plan; accept several agent kind names.
+      const raw =
+        (update as { todos?: unknown }).todos ??
+        (update as { entries?: unknown }).entries ??
+        (update as { items?: unknown }).items;
+      if (!Array.isArray(raw)) {
+        return stateWithCompletedThought;
+      }
+      return {
+        ...stateWithCompletedThought,
+        todos: raw as SessionState["todos"],
+      };
+    }
     default: {
-      // Unknown sessionUpdate — surface as a soft error item once
+      // Soft-ignore unknown kinds that look like metadata; only soft-error opaque ones.
+      const soft = /token|usage|context|compact|subagent|task|notification|hook/i;
+      if (soft.test(String(kind))) {
+        return stateWithCompletedThought;
+      }
       const message = `Unknown sessionUpdate: ${String(kind)}`;
       return {
         ...stateWithCompletedThought,
@@ -281,18 +301,36 @@ function chunkText(update: SessionUpdate): string {
   return typeof content.text === "string" ? content.text : "";
 }
 
+/**
+ * Map agent mode ids onto product chips (ask/plan/build).
+ * Accepts common aliases from current_mode_update / permission-mode.
+ * @param raw Agent mode string.
+ */
 function normalizeMode(raw: string): SessionState["mode"] | null {
-  const m = raw.toLowerCase();
-  if (m === "ask" || m === "plan" || m === "build") {return m;}
+  const m = raw.toLowerCase().replace(/[_-]/g, "");
+  if (m === "ask" || m === "default" || m === "defaultask") {
+    return "ask";
+  }
+  if (m === "plan") {
+    return "plan";
+  }
+  if (
+    m === "build" ||
+    m === "auto" ||
+    m === "acceptedits" ||
+    m === "bypasspermissions" ||
+    m === "yolo" ||
+    m === "alwaysapprove"
+  ) {
+    return "build";
+  }
   return null;
 }
 
 /**
- * Merge agent/user text blocks.
- * The user path aligns with optimistic `appendUserPrompt`: when an agent-replayed `user_message_chunk`
- * matches the last user text or extends it as a prefix, overwrite/extend instead of concatenating the full string twice.
+ * Merge agent text blocks (user path uses {@link applyUserMessageChunk}).
  * @param timeline Current timeline; not mutated in place.
- * @param kind user or agent.
+ * @param kind Only `"agent"` is used by callers after user path split.
  * @param text Non-empty text; empty strings are filtered by the caller.
  * @returns New timeline array.
  */
@@ -301,60 +339,20 @@ function appendOrMergeText(
   kind: "user" | "agent",
   text: string,
 ): TimelineItem[] {
-  const last = timeline[timeline.length - 1];
-  if (last && last.kind === kind) {
-    if (kind === "agent" && last.kind === "agent") {
-      return [
-        ...timeline.slice(0, -1),
-        { ...last, text: last.text + text },
-      ];
-    }
-    if (kind === "user" && last.kind === "user") {
-      const blocks = mergeUserText(last.blocks, text);
-      return [...timeline.slice(0, -1), { ...last, blocks }];
-    }
+  if (kind === "user") {
+    return applyUserMessageChunk(timeline, text);
   }
-  if (kind === "agent") {
+  const last = timeline[timeline.length - 1];
+  if (last && last.kind === "agent") {
     return [
-      ...timeline,
-      { kind: "agent", id: nextTimelineId("agent"), text },
+      ...timeline.slice(0, -1),
+      { ...last, text: last.text + text },
     ];
   }
   return [
     ...timeline,
-    {
-      kind: "user",
-      id: nextTimelineId("user"),
-      blocks: [{ type: "text", text }],
-    },
+    { kind: "agent", id: nextTimelineId("agent"), text },
   ];
-}
-
-/**
- * Merge user text blocks, compatible with optimistic send and agent replay of the same sentence.
- * @param blocks Content blocks of the last user item.
- * @param text Incremental or full sentence pushed by the agent.
- * @returns Merged blocks; identical text is not duplicated, prefix relationships keep the longer one, otherwise append.
- */
-function mergeUserText(blocks: ContentBlock[], text: string): ContentBlock[] {
-  const last = blocks[blocks.length - 1];
-  if (last && last.type === "text") {
-    const prev = last.text;
-    // Optimistic prompt already wrote the full sentence; agent echoes the same → keep as-is
-    if (text === prev || prev.endsWith(text)) {
-      return blocks;
-    }
-    // Agent chunked replay: extend when we already have the prefix
-    if (text.startsWith(prev)) {
-      return [...blocks.slice(0, -1), { type: "text", text }];
-    }
-    // True increment (not replay) — concatenate
-    return [
-      ...blocks.slice(0, -1),
-      { type: "text", text: prev + text },
-    ];
-  }
-  return [...blocks, { type: "text", text }];
 }
 
 /**

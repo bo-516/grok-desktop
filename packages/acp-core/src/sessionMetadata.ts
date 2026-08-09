@@ -3,11 +3,18 @@
  * grok-build places some capabilities under `_meta.modelState`; this module centralizes that real shape.
  */
 
-import type { AvailableCommand, InitializeResult } from "./types.js";
+import type {
+  AvailableCommand,
+  AvailableModel,
+  InitializeResult,
+} from "./types.js";
 
 /** Display data that can be projected onto SessionState immediately after initialize. */
 export type InitializeSessionMetadata = {
+  /** Current model id from agent modelState / first availableModels entry. */
   model: string;
+  /** Normalized agent model catalog for the picker; empty when agent omitted it. */
+  availableModels: AvailableModel[];
   availableCommands: AvailableCommand[];
 };
 
@@ -53,8 +60,52 @@ export function normalizeAvailableCommands(value: unknown): AvailableCommand[] {
 }
 
 /**
- * Extract model and commands from the initialize result; supports standard top-level fields and grok-build `_meta.modelState`.
- * @param init Successful initialize result; returns empty string and empty array when not an object or fields are corrupt.
+ * Convert an untrusted agent model array into a stable picker catalog.
+ * Supports `{ id|modelId|value, name|label }` objects and bare model id strings.
+ * @param value Any `availableModels` value from initialize, session/new, or session/load.
+ * @returns Deduped models with non-empty ids only; corrupt entries are dropped.
+ */
+export function normalizeAvailableModels(value: unknown): AvailableModel[] {
+  const rawModels = Array.isArray(value) ? value : [];
+  const ids = new Set<string>();
+  const models: AvailableModel[] = [];
+
+  for (const rawModel of rawModels) {
+    if (typeof rawModel === "string") {
+      const id = rawModel.trim();
+      if (!id || ids.has(id)) {
+        continue;
+      }
+      ids.add(id);
+      models.push({ id });
+      continue;
+    }
+    const record = asRecord(rawModel);
+    if (!record) {
+      continue;
+    }
+    const id = String(
+      record.id ?? record.modelId ?? record.value ?? record.name ?? "",
+    ).trim();
+    if (!id || ids.has(id)) {
+      continue;
+    }
+    ids.add(id);
+    const nameRaw = record.name ?? record.label;
+    const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : undefined;
+    models.push(name ? { id, name } : { id });
+  }
+
+  return models;
+}
+
+/**
+ * Extract model, model catalog, and commands from the initialize result.
+ * Supports standard top-level fields and grok-build shapes:
+ * - models: `_meta.modelState.availableModels` / top-level `availableModels`
+ * - commands: top-level `availableCommands`, then `_meta.availableCommands`
+ *   (real grok-build places the slash catalog on `_meta`, not under `modelState`)
+ * @param init Successful initialize result; returns empty strings/arrays when not an object or fields are corrupt.
  * @returns Display metadata that can be written into a new session without throwing protocol parse errors.
  */
 export function extractInitializeSessionMetadata(
@@ -63,27 +114,44 @@ export function extractInitializeSessionMetadata(
   const initRecord = asRecord(init) ?? {};
   const meta = asRecord(initRecord._meta);
   const modelState = asRecord(meta?.modelState);
-  const models =
+  const rawModels =
     asArray(initRecord.availableModels) ?? asArray(modelState?.availableModels);
+  const availableModels = normalizeAvailableModels(rawModels);
   const currentModelId =
     typeof modelState?.currentModelId === "string"
       ? modelState.currentModelId
       : "";
-  const firstModel = asRecord(models?.[0]);
-  /** Fallback model id order: id → modelId → name. */
-  let fallbackModel = "";
-  if (typeof firstModel?.id === "string") {
-    fallbackModel = firstModel.id;
-  } else if (typeof firstModel?.modelId === "string") {
-    fallbackModel = firstModel.modelId;
-  } else if (typeof firstModel?.name === "string") {
-    fallbackModel = firstModel.name;
-  }
-  const commands = normalizeAvailableCommands(
-    initRecord.availableCommands ?? modelState?.availableCommands,
-  );
+  /** Prefer first non-empty source so empty top-level arrays do not hide `_meta.availableCommands`. */
+  const rawCommands =
+    firstNonEmptyArray(
+      initRecord.availableCommands,
+      meta?.availableCommands,
+      modelState?.availableCommands,
+    ) ?? [];
+  const commands = normalizeAvailableCommands(rawCommands);
 
-  return { model: currentModelId || fallbackModel, availableCommands: commands };
+  return {
+    model: currentModelId || availableModels[0]?.id || "",
+    availableModels,
+    availableCommands: commands,
+  };
+}
+
+/**
+ * Prefer the first argument that is a non-empty array.
+ * @param candidates Untrusted protocol values; non-arrays and empty arrays are skipped.
+ * @returns First usable array, or undefined when every candidate is empty/invalid.
+ */
+function firstNonEmptyArray(
+  ...candidates: unknown[]
+): unknown[] | undefined {
+  for (const candidate of candidates) {
+    const arr = asArray(candidate);
+    if (arr && arr.length > 0) {
+      return arr;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -102,14 +170,27 @@ export function extractModelFromSessionResult(result: unknown): string {
   if (typeof root.currentModelId === "string" && root.currentModelId) {
     return root.currentModelId;
   }
-  const available =
+  const available = extractAvailableModelsFromSessionResult(result);
+  return available[0]?.id || "";
+}
+
+/**
+ * Extract the agent model catalog from a session/new or session/load result.
+ * Prefer nested `models.availableModels`, then top-level `availableModels`.
+ * @param result RPC result; returns [] on corruption without throwing.
+ * @returns Normalized catalog for SessionState.availableModels.
+ */
+export function extractAvailableModelsFromSessionResult(
+  result: unknown,
+): AvailableModel[] {
+  const root = asRecord(result);
+  if (!root) {
+    return [];
+  }
+  const models = asRecord(root.models);
+  const raw =
     asArray(models?.availableModels) ?? asArray(root.availableModels);
-  const first = asRecord(available?.[0]);
-  if (!first) {return "";}
-  if (typeof first.modelId === "string") {return first.modelId;}
-  if (typeof first.id === "string") {return first.id;}
-  if (typeof first.name === "string") {return first.name;}
-  return "";
+  return normalizeAvailableModels(raw);
 }
 
 /**

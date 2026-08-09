@@ -5,12 +5,17 @@
 
 import { finalizeLatestThought } from "./timeline.js";
 import { nextTimelineId } from "./timelineId.js";
+import {
+  collapseExactDoubledText,
+} from "./userMessageChunk.js";
 import type {
   ContentBlock,
   PermissionRequest,
   SessionState,
   SessionStatus,
 } from "./types.js";
+
+export { collapseExactDoubledText } from "./userMessageChunk.js";
 
 /**
  * Transition the session to an explicit status; a disconnected session may only resume streaming
@@ -31,6 +36,8 @@ export function transitionStatus(
 
 /**
  * Optimistically append a user prompt and enter the streaming status.
+ * Assigns `clientPromptId` + `origin: "local"` so later `user_message_chunk`
+ * replay is identity-matched and never double-concatenates the body.
  * @param state Current session; not mutated in place.
  * @param blocks Validated ACP content blocks; an empty array still creates a user row — callers should block empty sends first.
  * @returns New session with a user row and streaming status.
@@ -39,14 +46,62 @@ export function appendUserPrompt(
   state: SessionState,
   blocks: ContentBlock[],
 ): SessionState {
+  const clientPromptId = nextTimelineId("prompt");
   return {
     ...state,
     timeline: [
       ...state.timeline,
-      { kind: "user", id: nextTimelineId("user"), blocks },
+      {
+        kind: "user",
+        id: nextTimelineId("user"),
+        blocks,
+        clientPromptId,
+        origin: "local",
+        agentConfirmed: false,
+      },
     ],
     status: transitionStatus(state.status, "streaming"),
   };
+}
+
+/**
+ * Tag cached transcript user rows as seed so session/load replay can confirm them
+ * without concatenating. Also normalizes exact X+X bodies left by the old bug so
+ * product resume of pre-fix catalog rows is byte-identical to the original.
+ * Non-user items are left unchanged. Confirmed/agent rows are still text-healed.
+ * @param timeline Seed or disk-restored timeline; not mutated in place.
+ * @returns Timeline where each user row has origin seed, cleaned text, and agentConfirmed false (unless already confirmed).
+ */
+export function tagSeedUserMessages(
+  timeline: SessionState["timeline"],
+): SessionState["timeline"] {
+  return timeline.map((item) => {
+    if (item.kind !== "user") {
+      return item;
+    }
+    let changed = false;
+    const blocks = item.blocks.map((block) => {
+      if (block.type !== "text") {
+        return block;
+      }
+      const cleaned = collapseExactDoubledText(block.text);
+      if (cleaned === block.text) {
+        return block;
+      }
+      changed = true;
+      return { type: "text" as const, text: cleaned };
+    });
+    if (item.origin === "agent" || item.agentConfirmed) {
+      return changed ? { ...item, blocks } : item;
+    }
+    return {
+      ...item,
+      blocks,
+      origin: item.origin ?? "seed",
+      agentConfirmed: false,
+      agentEchoAcc: item.agentEchoAcc,
+    };
+  });
 }
 
 /**

@@ -118,8 +118,37 @@ export type PermissionRequest = {
   raw?: unknown;
 };
 
+/**
+ * Provenance of a user timeline row.
+ * - `local`: optimistic `appendUserPrompt` (has `clientPromptId`)
+ * - `seed`: restored from cached transcript before agent replay
+ * - `agent`: created only from `user_message_chunk` with no pending local/seed row
+ */
+export type UserMessageOrigin = "local" | "seed" | "agent";
+
 export type TimelineItem =
-  | { kind: "user"; id: string; blocks: ContentBlock[] }
+  | {
+      kind: "user";
+      id: string;
+      blocks: ContentBlock[];
+      /**
+       * Client-assigned prompt identity for optimistic rows.
+       * Agent replay matches unconfirmed rows by order + this id, not string equality alone.
+       */
+      clientPromptId?: string;
+      /** How this row was first created; missing is treated as seed-compatible for resume. */
+      origin?: UserMessageOrigin;
+      /**
+       * True once agent has fully echoed this prompt (live or session/load replay).
+       * Further matching `user_message_chunk` events for this slot are discarded.
+       */
+      agentConfirmed?: boolean;
+      /**
+       * Accumulated agent-echo text while chunked replay of this row is in progress.
+       * Used only for progress/confirm; authoritative body stays in `blocks` for local/seed.
+       */
+      agentEchoAcc?: string;
+    }
   | { kind: "agent"; id: string; text: string }
   | {
       /** Expandable reasoning fragment; body text is never mixed into agent messages. */
@@ -225,6 +254,11 @@ export type SessionState = {
   /** Snapshot of commands the current agent can run, used for `/` autocomplete in the input box. */
   availableCommands?: AvailableCommand[];
   /**
+   * Agent-declared model catalog from initialize / session models.
+   * UI model picker must use this (plus live `config_option_update`), never a hardcoded product list.
+   */
+  availableModels?: AvailableModel[];
+  /**
    * Agent-provided display title from `session_info_update`.
    * Prefer this over id-based placeholders when non-empty.
    */
@@ -233,9 +267,32 @@ export type SessionState = {
   updatedAt?: string;
   /** Last known agent config options from `config_option_update`. */
   configOptions?: unknown[];
+  /**
+   * Agent todos (F-CTX-06) — distinct from plan entries.
+   * Populated when session/update carries todos or a todos field on plan-like payloads.
+   */
+  todos?: Array<{
+    id?: string;
+    content?: string;
+    title?: string;
+    status?: string;
+  }>;
+  /**
+   * From initialize `agentCapabilities` (e.g. promptCapabilities.image).
+   * UI must consult this before sending image ContentBlocks (F-STREAM-07).
+   */
+  agentCapabilities?: unknown;
   /** Accumulated agent text for M0 logging convenience. */
   lastAgentText: string;
   errorMessage?: string;
+};
+
+/** One model the agent advertises for session/set_model and the model picker. */
+export type AvailableModel = {
+  /** Stable model id passed to session/set_model. */
+  id: string;
+  /** Optional human label from the agent; UI may fall back to formatting the id. */
+  name?: string;
 };
 
 export type InitializeResult = {

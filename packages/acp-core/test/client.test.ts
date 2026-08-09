@@ -28,6 +28,12 @@ describe("AcpClient + mock agent", () => {
 
     assert.ok(sessionId.startsWith("mock-session-"));
     assert.equal(init.availableModels?.[0]?.id, "grok-mock");
+    assert.deepEqual(client.getSessionState().availableModels, [
+      { id: "grok-mock", name: "Grok Mock" },
+    ]);
+    assert.equal(client.getSessionState().model, "grok-mock");
+    // agentCapabilities from initialize must stick for image gates (F-STREAM-07)
+    assert.ok(client.getSessionState().agentCapabilities);
 
     const result = await client.prompt(sessionId, [
       { type: "text", text: "hello mock" },

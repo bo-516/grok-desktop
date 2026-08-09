@@ -24,13 +24,16 @@ import {
   markPromptStarted,
   setPendingPermission,
   shapePermissionRequest,
+  tagSeedUserMessages,
 } from "./sessionLifecycle.js";
 import {
+  extractAvailableModelsFromSessionResult,
   extractInitializeSessionMetadata,
   extractModelFromSessionResult,
 } from "./sessionMetadata.js";
 import type { AcpTransport } from "./transport.js";
 import type {
+  AvailableCommand,
   ContentBlock,
   InitializeResult,
   JsonRpcMessage,
@@ -135,6 +138,8 @@ export class AcpClient {
       },
     })) as InitializeResult;
     const initialMetadata = extractInitializeSessionMetadata(init);
+    /** Captured for every subsequent setState so image gates stay available (F-STREAM-07). */
+    const agentCapabilities = init.agentCapabilities;
 
     const methods = new Set(
       (init.authMethods ?? []).map((m) => m.id).filter(Boolean),
@@ -157,28 +162,44 @@ export class AcpClient {
     }
 
     const model = initialMetadata.model;
+    /** Prefer session-scoped catalog when present; otherwise initialize's agent list. */
+    const modelsFromInit = initialMetadata.availableModels;
 
     if (opts.resumeId) {
       // Show cached transcript immediately, then agent replays on top.
+      // Tag seed user rows so user_message_chunk replay confirms by identity
+      // instead of concatenating the same body twice.
       if (opts.seed && opts.seed.id === opts.resumeId) {
         this.setState({
           ...opts.seed,
+          timeline: tagSeedUserMessages(opts.seed.timeline),
           workspace: opts.cwd || opts.seed.workspace,
           model: opts.seed.model || String(model),
-          availableCommands:
-            opts.seed.availableCommands ?? initialMetadata.availableCommands,
+          availableCommands: preferCommands(
+            opts.seed.availableCommands,
+            initialMetadata.availableCommands,
+          ),
+          availableModels:
+            (opts.seed.availableModels && opts.seed.availableModels.length > 0
+              ? opts.seed.availableModels
+              : undefined) ?? modelsFromInit,
+          agentCapabilities:
+            opts.seed.agentCapabilities ?? agentCapabilities,
           status: "idle",
           pendingPermission: undefined,
         });
       } else {
-        this.setState(
-          createSessionState({
+        this.setState({
+          ...createSessionState({
             id: opts.resumeId,
             workspace: opts.cwd,
             model: String(model),
             mode: "build",
           }),
-        );
+          availableCommands: initialMetadata.availableCommands,
+          availableModels: modelsFromInit,
+          agentCapabilities,
+        });
       }
       // grok-build requires session/load to include both cwd and mcpServers; missing either is Invalid params.
       const loadResult = await this.request("session/load", {
@@ -187,15 +208,25 @@ export class AcpClient {
         mcpServers: opts.mcpServers ?? [],
       });
       const loadedModel = extractModelFromSessionResult(loadResult) || model;
-      // Keep id stable; replay updates may have already populated timeline.
+      const loadedModels = extractAvailableModelsFromSessionResult(loadResult);
+      // Keep id stable; replay / available_commands_update may have already populated fields.
       const cur = this.getSessionState();
       this.setState({
         ...cur,
         id: opts.resumeId,
         workspace: opts.cwd || cur.workspace,
         model: cur.model || String(loadedModel),
-        availableCommands:
-          cur.availableCommands ?? initialMetadata.availableCommands,
+        availableCommands: preferCommands(
+          cur.availableCommands,
+          initialMetadata.availableCommands,
+        ),
+        availableModels:
+          loadedModels.length > 0
+            ? loadedModels
+            : cur.availableModels && cur.availableModels.length > 0
+              ? cur.availableModels
+              : modelsFromInit,
+        agentCapabilities: cur.agentCapabilities ?? agentCapabilities,
         status: cur.status === "disconnected" ? "idle" : cur.status,
         errorMessage: undefined,
       });
@@ -213,14 +244,29 @@ export class AcpClient {
     }
 
     const newModel = extractModelFromSessionResult(session) || model;
+    const sessionModels = extractAvailableModelsFromSessionResult(session);
+    /**
+     * session/new may emit available_commands_update / current_mode_update while the RPC
+     * is in flight. Merge those into the post-handshake snapshot instead of wiping them
+     * with a blank createSessionState().
+     */
+    const interim = this.getSessionState();
     this.setState({
       ...createSessionState({
         id: sessionId,
         workspace: opts.cwd,
         model: String(newModel),
-        mode: "build",
+        mode: interim.mode || "build",
       }),
-      availableCommands: initialMetadata.availableCommands,
+      availableCommands: preferCommands(
+        interim.availableCommands,
+        initialMetadata.availableCommands,
+      ),
+      availableModels:
+        sessionModels.length > 0 ? sessionModels : modelsFromInit,
+      agentCapabilities,
+      configOptions: interim.configOptions,
+      title: interim.title,
     });
 
     return { init, sessionId, resumed: false };
@@ -386,27 +432,40 @@ export class AcpClient {
       return;
     }
 
-    // Optional fs/terminal stubs so agents don't hang forever
+    // Reverse handlers (fs/terminal/…). Must return real errors — never silent {}.
     if (this.onAgentRequest) {
       try {
         const result = await this.onAgentRequest(method, id, params);
         this.transport.write(encodeResponse(id, result ?? {}));
       } catch (e) {
+        const code =
+          e &&
+          typeof e === "object" &&
+          "code" in e &&
+          typeof (e as { code: unknown }).code === "number"
+            ? (e as { code: number }).code
+            : -32000;
         const msg = e instanceof Error ? e.message : String(e);
+        // Prefer -32601 when handler signals method-not-found (message or code).
+        const rpcCode =
+          code === -32601 ||
+          /method not (found|implemented)/i.test(msg) ||
+          msg.includes(method)
+            ? code === -32601
+              ? -32601
+              : /method not (found|implemented)/i.test(msg)
+                ? -32601
+                : code
+            : code;
         this.transport.write(
-          encodeResponse(id, undefined, { code: -32000, message: msg }),
+          encodeResponse(id, undefined, {
+            code: rpcCode,
+            message: msg.includes(String(method))
+              ? msg
+              : `${msg} (${method})`,
+          }),
         );
       }
-      return;
-    }
-
-    if (method.startsWith("fs/") || method.startsWith("terminal/")) {
-      this.transport.write(
-        encodeResponse(id, undefined, {
-          code: -32601,
-          message: `Method not implemented: ${method}`,
-        }),
-      );
       return;
     }
 
@@ -417,4 +476,80 @@ export class AcpClient {
       }),
     );
   }
+
+  /**
+   * Mid-session model switch via `session/set_model` when the agent supports it.
+   * @param sessionId Active ACP session id.
+   * @param modelId Agent-declared model id (never a desktop hardcode).
+   * @returns Agent result; throws on RPC error (including -32601 when unsupported).
+   */
+  async setModel(sessionId: string, modelId: string): Promise<unknown> {
+    const result = await this.request("session/set_model", {
+      sessionId,
+      modelId,
+    });
+    const cur = this.getSessionState();
+    this.setState({ ...cur, model: modelId.trim() || cur.model });
+    return result;
+  }
+
+  /**
+   * Mid-session mode switch via `session/set_mode` when the agent supports it.
+   * @param sessionId Active ACP session id.
+   * @param modeId Agent mode id (e.g. plan / build); product maps UI chips to these ids.
+   * @returns Agent result; throws on RPC error.
+   */
+  async setMode(sessionId: string, modeId: string): Promise<unknown> {
+    const result = await this.request("session/set_mode", {
+      sessionId,
+      modeId,
+    });
+    const cur = this.getSessionState();
+    const mapped =
+      modeId === "ask" || modeId === "plan" || modeId === "build"
+        ? modeId
+        : cur.mode;
+    this.setState({ ...cur, mode: mapped });
+    return result;
+  }
+
+  /**
+   * Request context compact when agent exposes `session/compact`.
+   * @param sessionId Active session.
+   * @param instruction Optional retention hint for the compressor.
+   */
+  async compact(sessionId: string, instruction?: string): Promise<unknown> {
+    return this.request("session/compact", {
+      sessionId,
+      ...(instruction ? { instruction } : {}),
+    });
+  }
+
+  /**
+   * Query token usage when agent exposes `session/token_usage`.
+   * @param sessionId Active session.
+   */
+  async tokenUsage(sessionId: string): Promise<unknown> {
+    return this.request("session/token_usage", { sessionId });
+  }
+}
+
+/**
+ * Prefer a non-empty command snapshot over an empty fallback.
+ * Empty arrays are treated as missing so `??` alone cannot hide initialize / update data.
+ * @param preferred Live interim or seed commands (may be empty/undefined).
+ * @param fallback Initialize metadata or later catalog.
+ * @returns First non-empty list, or an empty array when both are empty.
+ */
+function preferCommands(
+  preferred: AvailableCommand[] | undefined,
+  fallback: AvailableCommand[] | undefined,
+): AvailableCommand[] {
+  if (preferred && preferred.length > 0) {
+    return preferred;
+  }
+  if (fallback && fallback.length > 0) {
+    return fallback;
+  }
+  return preferred ?? fallback ?? [];
 }
