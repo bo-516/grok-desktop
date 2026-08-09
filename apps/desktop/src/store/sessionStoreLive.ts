@@ -1,15 +1,19 @@
 /**
- * Live bridge connect/start logic (split from sessionStore to keep file size down).
- * Operates only on the real grok-build bridge; no mock path.
+ * Live bridge connect/start (multi-session): pool state, env probe, canvas follows viewing.
+ * Real grok-build bridge only; no mock path.
  */
 
 import {
   markDisconnected,
+  tagSeedUserMessages,
+  type AgentMode,
   type SessionState,
 } from "@grok-desktop/acp-core";
 import {
   connectLiveBridge,
   defaultBridgeUrl,
+  type EnvironmentInfo,
+  type PoolEntry,
   type StartOpts as BridgeStartOpts,
 } from "../bridge/liveBridge";
 import {
@@ -21,15 +25,16 @@ import {
   resolveResumeTarget,
   type StartOpts,
 } from "./sessionStoreSupport";
+import { clearPendingModeTimer } from "./pendingMode";
 
-/** Product UI path never auto-approves tools by default; e2e may pass true explicitly. */
+/** Product UI path never auto-approves tools by default. */
 export const DEFAULT_ALWAYS_APPROVE = false;
 
 export type ConnectionMode = "live-bridge" | "disconnected" | "connecting";
 
 export type LiveHandle = ReturnType<typeof connectLiveBridge>;
 
-/** Minimal store slice read/written by startLiveBridge; avoids a circular SessionStore type dependency. */
+/** Minimal store slice for startLiveBridge。 */
 export type LiveStoreSlice = {
   session: SessionState;
   connectionMode: ConnectionMode;
@@ -39,6 +44,19 @@ export type LiveStoreSlice = {
   catalog: ReturnType<typeof normalizeCatalog>;
   activeSessionId: string | null;
   viewingSessionId: string | null;
+  /** Resident process summaries in the pool (rail status lights). */
+  poolEntries: PoolEntry[];
+  /** CLI / login probe; null means not received yet. */
+  environment: EnvironmentInfo | null;
+  /** Queued user prompts while streaming. */
+  promptQueue: string[];
+  /** SPAWN restart banner (J-06). */
+  restartNotice: string | null;
+  /**
+   * In-flight mode switch target; cleared when inbound session.mode matches.
+   * Optional so older call sites still type-check.
+   */
+  pendingMode?: AgentMode | null;
 };
 
 type SetState = (
@@ -49,11 +67,39 @@ type SetState = (
 type GetState = () => LiveStoreSlice;
 
 /**
- * Connect to the real bridge and start/resume a session.
- * @param set Zustand set.
- * @param get Zustand get.
- * @param opts forceNew / resumeId / alwaysApprove, etc.; alwaysApprove defaults to false.
- * @returns Promise; rejects when the WebSocket fails.
+ * Whether inbound state should paint onto the main canvas.
+ * @param viewing Currently viewed session.
+ * @param active Most recently active id.
+ * @param sessionId Inbound session id.
+ */
+export function shouldFollowSession(
+  viewing: string | null,
+  active: string | null,
+  sessionId: string,
+): boolean {
+  if (!sessionId) {
+    return true;
+  }
+  if (!viewing) {
+    return true;
+  }
+  return viewing === sessionId || active === sessionId;
+}
+
+/**
+ * Heal exact X+X user bodies on any inbound live state before paint/persist.
+ * @param session Raw ACP session from bridge / pool.
+ * @returns Session with tagSeedUserMessages applied to the timeline.
+ */
+export function healSessionTimeline(session: SessionState): SessionState {
+  return {
+    ...session,
+    timeline: tagSeedUserMessages(session.timeline),
+  };
+}
+
+/**
+ * Connect to the real bridge and start/resume a session (pool acquire).
  */
 export async function startLiveBridgeSession(
   set: SetState,
@@ -66,8 +112,6 @@ export async function startLiveBridgeSession(
   const cwd = resolved.cwd ?? opts?.cwd;
   const forceNew = Boolean(opts?.forceNew);
   const alwaysApprove = opts?.alwaysApprove ?? DEFAULT_ALWAYS_APPROVE;
-  // Clear the previous error before each start/resume so send is not blocked by stale state;
-  // onError will write a new error if this attempt fails.
   set({ lastError: null });
 
   const prev = get().session;
@@ -82,7 +126,6 @@ export async function startLiveBridgeSession(
   let live = get().live;
   if (!live || get().connectionMode === "disconnected") {
     get().live?.close();
-    /** Connecting status copy: resume / new session / default connect. */
     let connectingInfo = "Connecting live grok…";
     if (resumeId) {
       connectingInfo = `Resuming session ${resumeId.slice(0, 8)}…`;
@@ -100,26 +143,57 @@ export async function startLiveBridgeSession(
     try {
       live = connectLiveBridge(url, {
         onState: (session) => {
+          const healed = healSessionTimeline(session);
           const catalog = normalizeCatalog(
-            upsertFromLiveState(get().catalog, session),
+            upsertFromLiveState(get().catalog, healed),
           );
           persistCatalog(catalog);
           const viewing = get().viewingSessionId;
-          const follow =
-            !viewing ||
-            viewing === session.id ||
-            get().activeSessionId === session.id;
+          const follow = shouldFollowSession(
+            viewing,
+            get().activeSessionId,
+            healed.id,
+          );
+          // Clear pendingMode when agent confirms the requested mode.
+          const pending = get().pendingMode ?? null;
+          const modeConfirmed =
+            pending !== null && healed.mode === pending;
+          if (modeConfirmed) {
+            clearPendingModeTimer();
+          }
           set({
             catalog,
-            activeSessionId: session.id || get().activeSessionId,
+            activeSessionId: healed.id || get().activeSessionId,
             connectionMode: "live-bridge",
             lastError: null,
+            ...(modeConfirmed ? { pendingMode: null } : {}),
             ...(follow
               ? {
-                  session: { ...session },
-                  viewingSessionId: session.id,
+                  session: healed,
+                  viewingSessionId: healed.id || viewing,
                 }
               : {}),
+          });
+          // Drain prompt queue when turn settles (F-STREAM-09).
+          if (healed.status === "idle" && follow) {
+            const queue = get().promptQueue;
+            if (queue.length > 0) {
+              const [next, ...rest] = queue;
+              set({ promptQueue: rest });
+              const sid = healed.id || get().activeSessionId;
+              if (next && sid && get().live) {
+                get().live?.prompt(next, sid);
+              }
+            }
+          }
+        },
+        onPool: (entries) => {
+          set({ poolEntries: entries });
+        },
+        onEnvironment: (env) => {
+          set({
+            environment: env,
+            bridgeInfo: env.ok ? env.message : get().bridgeInfo,
           });
         },
         onInfo: (message) => {
@@ -131,8 +205,16 @@ export async function startLiveBridgeSession(
             lastError: message,
           });
         },
-        onHello: (cwdHello) => {
-          set({ bridgeInfo: `live grok-build · cwd=${cwdHello}` });
+        onRestartRequired: (payload) => {
+          set({
+            restartNotice: `${payload.setting}: ${payload.reason}`,
+            bridgeInfo: payload.reason,
+          });
+        },
+        onHello: (cwdHello, poolCapacity) => {
+          const cap =
+            poolCapacity !== undefined ? ` · pool≤${poolCapacity}` : "";
+          set({ bridgeInfo: `live grok-build · cwd=${cwdHello}${cap}` });
         },
         onClose: () => {
           set((s) => {
@@ -149,6 +231,7 @@ export async function startLiveBridgeSession(
               live: null,
               connectionMode: "disconnected" as const,
               catalog,
+              poolEntries: [],
               session: markDisconnected(s.session),
               lastError: null,
               bridgeInfo:
@@ -159,6 +242,8 @@ export async function startLiveBridgeSession(
       });
       set({ live });
       await live.ready;
+      live.checkEnvironment();
+      live.listPool();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       set({
@@ -200,7 +285,6 @@ export async function startLiveBridgeSession(
     throw new Error("bridge WebSocket not open");
   }
 
-  /** Connected status copy: resume / new session / default connected. */
   let liveInfo = "live · connected";
   if (resumeId && !forceNew) {
     liveInfo = "live · resumed";

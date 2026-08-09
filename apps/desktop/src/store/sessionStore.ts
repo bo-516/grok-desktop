@@ -1,11 +1,8 @@
 /**
- * Zustand session store — LIVE grok-build only.
+ * Zustand session store — LIVE grok-build only (multi-session pool + env probe).
  *
- * Reconnect / open session → always resume (session/load), never spawn a new
- * ACP session unless the user explicitly clicks New chat (forceNew).
- *
- * Product default alwaysApprove=false: permissions must be confirmed in the UI,
- * never silently auto-approved.
+ * Reconnect / open session → resume (session/load); only New chat uses forceNew.
+ * Background session state still upserts the catalog; main canvas only follows viewingSessionId.
  */
 
 import { create } from "zustand";
@@ -18,6 +15,7 @@ import {
   type SessionUpdate,
   applySessionUpdate,
 } from "@grok-desktop/acp-core";
+import type { EnvironmentInfo, PoolEntry } from "../bridge/liveBridge";
 import {
   loadCatalogFromStorage,
   normalizeCatalog,
@@ -37,36 +35,79 @@ import {
   resolveResumeTarget,
   type StartOpts,
 } from "./sessionStoreSupport";
+import {
+  armPendingModeTimeout,
+  clearPendingModeTimer,
+} from "./pendingMode";
 
-export type { ConnectionMode };
+export type { ConnectionMode, EnvironmentInfo, PoolEntry };
 
 type SessionStore = {
   session: SessionState;
   connectionMode: ConnectionMode;
   bridgeInfo: string;
-  /** Last actionable bridge/agent error; cleared after a successful start/state. */
   lastError: string | null;
   live: LiveHandle | null;
   catalog: SessionRecord[];
   activeSessionId: string | null;
   viewingSessionId: string | null;
+  poolEntries: PoolEntry[];
+  environment: EnvironmentInfo | null;
+  /**
+   * Mode the user requested that is not yet confirmed by the agent.
+   * UI shows "Switching to…" while non-null; cleared on current_mode_update match or timeout.
+   */
+  pendingMode: AgentMode | null;
   startLiveBridge: (opts?: StartOpts) => Promise<void>;
-  /** Explicit new ACP session (session/new). */
   newSession: (cwd?: string) => Promise<void>;
-  /** Reconnect bridge and resume current (or last) session — no new id. */
   reconnect: () => Promise<void>;
   selectSession: (id: string) => void;
   removeSession: (id: string) => void;
-  /** Local draft from the send component; returns false on failure so the input text is kept. */
-  sendPrompt: (text: string) => Promise<boolean>;
+  /**
+   * Send prompt text and optional multi-block content (images / resource_link).
+   * @param text User text (also used for queue key).
+   * @param blocks Optional ACP ContentBlocks; when set, bridge sends full prompt array.
+   */
+  sendPrompt: (
+    text: string,
+    blocks?: ContentBlock[],
+  ) => Promise<boolean>;
   cancelTurn: () => void;
   respondPermission: (optionId: string) => void;
+  /**
+   * Request a mode switch: sets pendingMode, calls bridge; does not claim success
+   * until session.mode matches or the pending timeout settles optimistically.
+   * @param mode Target agent mode.
+   */
   setMode: (mode: AgentMode) => void;
+  /** Clear pendingMode (timeout settle or external cancel). */
+  clearPendingMode: () => void;
+  /**
+   * Select model: calls bridge session/set_model when live; optimistic local update.
+   * On ACP unsupported, bridge emits restart_required (J-06).
+   */
+  setModel: (model: string) => void;
+  /** Queue of prompts waiting while turn is streaming (F-STREAM-09). */
+  promptQueue: string[];
+  enqueuePrompt: (text: string) => void;
+  dequeuePrompt: () => string | null;
+  clearPromptQueue: () => void;
+  /** Last SPAWN restart notice for UI banner (J-06). */
+  restartNotice: string | null;
+  clearRestartNotice: () => void;
+  /** Run one-shot CLI channel via live bridge. */
+  runCli: (
+    command: string,
+    args?: Record<string, unknown>,
+  ) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
+  /** Restart session process with new SPAWN config + session/load. */
+  restartWithSpawn: (spawnConfig: Record<string, unknown>) => boolean;
   disconnect: () => void;
   hydrateCatalog: () => void;
+  refreshEnvironment: () => void;
 };
 
-/** Selection sequence while async resume is in flight; stale requests must not overwrite a later user choice. */
+/** Selection sequence while async resume is in flight. */
 let selectSeq = 0;
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -78,13 +119,118 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   catalog: [],
   activeSessionId: null,
   viewingSessionId: null,
+  poolEntries: [],
+  environment: null,
+  pendingMode: null,
+  promptQueue: [],
+  restartNotice: null,
 
   hydrateCatalog: () => {
     set({ catalog: loadCatalogFromStorage() });
   },
 
-  setMode: (mode) =>
-    set((s) => ({ session: { ...s.session, mode } })),
+  refreshEnvironment: () => {
+    get().live?.checkEnvironment();
+  },
+
+  clearRestartNotice: () => set({ restartNotice: null }),
+
+  clearPendingMode: () => {
+    clearPendingModeTimer();
+    set({ pendingMode: null });
+  },
+
+  enqueuePrompt: (text) => {
+    const t = text.trim();
+    if (!t) {
+      return;
+    }
+    set((s) => ({ promptQueue: [...s.promptQueue, t] }));
+  },
+
+  dequeuePrompt: () => {
+    const q = get().promptQueue;
+    if (q.length === 0) {
+      return null;
+    }
+    const [head, ...rest] = q;
+    set({ promptQueue: rest });
+    return head ?? null;
+  },
+
+  clearPromptQueue: () => set({ promptQueue: [] }),
+
+  setMode: (mode) => {
+    const current = get().session.mode;
+    if (current === mode && get().pendingMode === null) {
+      return;
+    }
+    // Do not optimistically claim the new mode — show pending until confirm/timeout.
+    set({ pendingMode: mode });
+    const live = get().live;
+    const sid =
+      get().session.id || get().activeSessionId || get().viewingSessionId;
+    if (live && get().connectionMode === "live-bridge" && sid) {
+      live.setMode(mode, sid);
+    }
+    // If agent never emits current_mode_update, settle optimistically after timeout.
+    armPendingModeTimeout(() => {
+      const pending = get().pendingMode;
+      if (pending === null) {
+        return;
+      }
+      set((s) => ({
+        pendingMode: null,
+        session: { ...s.session, mode: pending },
+      }));
+    });
+  },
+
+  setModel: (model) => {
+    const modelId = model.trim();
+    if (!modelId) {
+      return;
+    }
+    set((s) => ({
+      session: { ...s.session, model: modelId },
+    }));
+    const live = get().live;
+    const sid =
+      get().session.id || get().activeSessionId || get().viewingSessionId;
+    if (live && get().connectionMode === "live-bridge" && sid) {
+      live.setModel(modelId, sid);
+    }
+  },
+
+  runCli: async (command, args) => {
+    const live = get().live;
+    if (!live || get().connectionMode !== "live-bridge") {
+      return { ok: false, error: "bridge not connected" };
+    }
+    const cwd = get().session.workspace || undefined;
+    try {
+      const result = await live.cli(command, args, cwd);
+      return result;
+    } catch (e) {
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  },
+
+  restartWithSpawn: (spawnConfig) => {
+    const live = get().live;
+    const sid =
+      get().session.id || get().activeSessionId || get().viewingSessionId;
+    if (!live || !sid) {
+      return false;
+    }
+    set({
+      restartNotice: `Restarting session to apply SPAWN settings…`,
+    });
+    return live.restartSession(sid, spawnConfig, DEFAULT_ALWAYS_APPROVE);
+  },
 
   startLiveBridge: async (opts) => {
     await startLiveBridgeSession(set, get, opts);
@@ -131,25 +277,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   selectSession: (id) => {
     const rec = get().catalog.find((s) => s.id === id);
-    if (!rec) {return;}
+    if (!rec) {
+      return;
+    }
 
     const seq = ++selectSeq;
     const seeded = recordToSessionState(rec);
+    const inPool = get().poolEntries.some((e) => e.sessionId === id && e.live);
 
     set({
       viewingSessionId: id,
       session: seeded,
       lastError: null,
-      bridgeInfo: `Opened · ${rec.title}`,
+      bridgeInfo: inPool ? `live · ${rec.title}` : `Opened · ${rec.title}`,
     });
 
+    // Already in pool or current live focus: only run start hit-path / push state.
     if (
-      id === get().activeSessionId &&
       get().connectionMode === "live-bridge" &&
       get().live &&
-      !get().lastError
+      (inPool || id === get().activeSessionId)
     ) {
-      set({ bridgeInfo: `live · ${rec.title}` });
       get().live?.start({
         resumeId: id,
         cwd: rec.workspace || undefined,
@@ -167,10 +315,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           resumeId: id,
           seed: seeded,
         });
-        if (seq !== selectSeq) {return;}
+        if (seq !== selectSeq) {
+          return;
+        }
         set({ bridgeInfo: `live · ${rec.title}` });
       } catch {
-        if (seq !== selectSeq) {return;}
+        if (seq !== selectSeq) {
+          return;
+        }
         set({
           session: seeded,
           viewingSessionId: id,
@@ -181,9 +333,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   removeSession: (id) => {
+    // Reclaim child process (if in pool)
+    get().live?.closeSession(id);
     const catalog = get().catalog.filter((s) => s.id !== id);
     persistCatalog(catalog);
-    const patch: Partial<SessionStore> = { catalog };
+    const poolEntries = get().poolEntries.filter((e) => e.sessionId !== id);
+    const patch: Partial<SessionStore> = { catalog, poolEntries };
     if (get().viewingSessionId === id) {
       const next = catalog[0];
       if (next) {
@@ -200,16 +355,36 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set(patch);
   },
 
-  /**
-   * Send the Composer's local draft through the real bridge.
-   * @param draft Current input text; returns false when blank, offline, or resume failed — caller must keep the text.
-   * @returns Whether a non-empty prompt was written to the live bridge.
-   */
-  sendPrompt: async (draft) => {
+  sendPrompt: async (draft, blocks) => {
     const { connectionMode, live, session, viewingSessionId, lastError } =
       get();
     const text = draft.trim();
-    if (!text) {return false;}
+    // Allow image-only sends (blocks with image, empty text).
+    const hasBlocks = Array.isArray(blocks) && blocks.length > 0;
+    if (!text && !hasBlocks) {
+      return false;
+    }
+
+    // Queue while turn is in flight (F-STREAM-09) — never drop user text.
+    // Queued items are text-only; multi-block must wait for idle (J-06 honesty).
+    if (
+      connectionMode === "live-bridge" &&
+      live &&
+      (session.status === "streaming" || session.status === "waiting_permission")
+    ) {
+      if (hasBlocks && !text) {
+        set({
+          bridgeInfo:
+            "Attachments wait until the current turn finishes — try again when idle",
+        });
+        return false;
+      }
+      get().enqueuePrompt(text || "(attachment pending)");
+      set({
+        bridgeInfo: `Queued (${get().promptQueue.length}) — will send after turn`,
+      });
+      return true;
+    }
 
     if (connectionMode !== "live-bridge" || !live) {
       const id = viewingSessionId || session.id || get().catalog[0]?.id;
@@ -237,9 +412,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     const handle = get().live;
-    if (!handle) {return false;}
+    if (!handle) {
+      return false;
+    }
 
-    // After a failed session resume, block fake sends (would clear the draft with no agent response)
     const err = get().lastError;
     if (err) {
       set({
@@ -248,13 +424,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return false;
     }
 
-    const sid = get().session.id || get().activeSessionId;
+    const sid = get().session.id || get().activeSessionId || get().viewingSessionId;
     if (!sid) {
       set({ bridgeInfo: "Session not ready yet — wait or click New chat" });
       return false;
     }
 
-    const ok = handle.prompt(text);
+    // Slash commands route as prompt text; multi-block path carries images (F-STREAM-07).
+    const ok = handle.prompt(text, sid, hasBlocks ? blocks : undefined);
     if (!ok) {
       set({
         bridgeInfo: "Send failed: bridge not connected. Run npm run bridge",
@@ -266,16 +443,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   cancelTurn: () => {
-    const { connectionMode, live } = get();
+    const { connectionMode, live, session, viewingSessionId, activeSessionId } =
+      get();
     if (connectionMode === "live-bridge" && live) {
-      live.cancel();
+      live.cancel(session.id || viewingSessionId || activeSessionId || undefined);
     }
   },
 
   respondPermission: (optionId) => {
-    const { connectionMode, live } = get();
+    const { connectionMode, live, session, viewingSessionId, activeSessionId } =
+      get();
     if (connectionMode === "live-bridge" && live) {
-      live.permission(optionId);
+      live.permission(
+        optionId,
+        session.id || viewingSessionId || activeSessionId || undefined,
+      );
     }
   },
 
@@ -296,6 +478,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       live: null,
       connectionMode: "disconnected",
       lastError: null,
+      poolEntries: [],
       session: markDisconnected(state.session),
       bridgeInfo:
         "Disconnected — click a session or Reconnect to resume (will not create a new session)",

@@ -6,12 +6,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createSessionState } from "@grok-desktop/acp-core";
 import {
+  formatRelativeTime,
   groupSessionsByProject,
+  groupSessionsByTime,
   isWeakSessionTitle,
   pickSessionTitle,
   projectNameFromWorkspace,
   pruneEmptyWeakSessions,
   rehydrateCatalogTitles,
+  timeBucketFor,
   upsertFromLiveState,
 } from "./sessionCatalog";
 
@@ -221,5 +224,74 @@ describe("sessionCatalog", () => {
     ]);
     assert.equal(groups[0]?.projectName, "other");
     assert.equal(groups[1]?.projectName, "demo");
+  });
+
+  it("groupSessionsByTime buckets Today / Yesterday / Earlier", () => {
+    const now = new Date("2026-08-07T15:00:00").getTime();
+    const todayStart = new Date("2026-08-07T00:00:00").getTime();
+    const yesterday = new Date("2026-08-06T12:00:00").getTime();
+    const earlier = new Date("2026-08-01T12:00:00").getTime();
+    assert.equal(timeBucketFor(todayStart + 1000, now), "today");
+    assert.equal(timeBucketFor(yesterday, now), "yesterday");
+    assert.equal(timeBucketFor(earlier, now), "earlier");
+
+    const groups = groupSessionsByTime(
+      [
+        {
+          id: "t",
+          workspace: "/p",
+          title: "Today",
+          mode: "build",
+          model: "m",
+          status: "idle",
+          createdAt: todayStart,
+          updatedAt: todayStart + 2000,
+          timeline: [],
+          toolCalls: {},
+          lastAgentText: "",
+        },
+        {
+          id: "y",
+          workspace: "/p",
+          title: "Yest",
+          mode: "build",
+          model: "m",
+          status: "idle",
+          createdAt: yesterday,
+          updatedAt: yesterday,
+          timeline: [],
+          toolCalls: {},
+          lastAgentText: "",
+        },
+        {
+          id: "e",
+          workspace: "/p",
+          title: "Old",
+          mode: "build",
+          model: "m",
+          status: "idle",
+          createdAt: earlier,
+          updatedAt: earlier,
+          timeline: [],
+          toolCalls: {},
+          lastAgentText: "",
+        },
+      ],
+      now,
+    );
+    assert.deepEqual(
+      groups.map((g) => g.bucket),
+      ["today", "yesterday", "earlier"],
+    );
+    assert.equal(groups[0]?.label, "Today");
+  });
+
+  it("formatRelativeTime uses compact Framer-style labels", () => {
+    const now = 1_000_000;
+    assert.equal(formatRelativeTime(now - 10_000, now), "now");
+    assert.equal(formatRelativeTime(now - 5 * 60_000, now), "5m");
+    assert.equal(formatRelativeTime(now - 3 * 3600_000, now), "3h");
+    assert.equal(formatRelativeTime(now - 24 * 3600_000, now), "yesterday");
+    assert.equal(formatRelativeTime(now - 3 * 24 * 3600_000, now), "3d");
   });
 });

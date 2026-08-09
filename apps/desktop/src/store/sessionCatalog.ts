@@ -8,6 +8,7 @@ import {
   fallbackSessionLabel,
   isWeakSessionTitle,
   pickSessionTitle,
+  tagSeedUserMessages,
   titleFromSessionState,
   type AgentMode,
   type PlanEntry,
@@ -85,6 +86,8 @@ export function upsertFromLiveState(
   if (!useIncomingTimeline && existing) {
     timeline = existing.timeline;
   }
+  // Heal pre-fix exact X+X user bodies whenever we persist a catalog row.
+  timeline = tagSeedUserMessages(timeline);
   /** Merge toolCalls: prefer full inbound, else non-empty inbound patch, else fall back to cached. */
   let toolCalls = state.toolCalls;
   if (!useIncomingTimeline) {
@@ -177,7 +180,11 @@ export function pruneEmptyWeakSessions(
 
 /** Full hydrate pipeline: titles then prune ghosts. */
 export function normalizeCatalog(catalog: SessionRecord[]): SessionRecord[] {
-  return pruneEmptyWeakSessions(rehydrateCatalogTitles(catalog));
+  const healed = catalog.map((rec) => ({
+    ...rec,
+    timeline: tagSeedUserMessages(rec.timeline ?? []),
+  }));
+  return pruneEmptyWeakSessions(rehydrateCatalogTitles(healed));
 }
 
 /**
@@ -208,6 +215,91 @@ export function groupSessionsByProject(
     const bT = b.sessions[0]?.updatedAt ?? 0;
     return bT - aT;
   });
+  return groups;
+}
+
+/** Time-bucket label used by the Framer side-nav (Today / Yesterday / Earlier). */
+export type TimeBucket = "today" | "yesterday" | "earlier";
+
+/** One time-bucket group for the session rail. */
+export type TimeGroup = {
+  /** Bucket key. */
+  bucket: TimeBucket;
+  /** Display label (en-US). */
+  label: string;
+  /** Sessions in this bucket, newest first. */
+  sessions: SessionRecord[];
+};
+
+/**
+ * Start of local calendar day for a timestamp.
+ * @param ts Epoch ms.
+ * @returns Midnight local time as epoch ms.
+ */
+function startOfLocalDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Map a session timestamp into Today / Yesterday / Earlier.
+ * @param updatedAt Session updatedAt epoch ms.
+ * @param now Reference now (injectable for tests).
+ */
+export function timeBucketFor(
+  updatedAt: number,
+  now = Date.now(),
+): TimeBucket {
+  const todayStart = startOfLocalDay(now);
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  if (updatedAt >= todayStart) {
+    return "today";
+  }
+  if (updatedAt >= yesterdayStart) {
+    return "yesterday";
+  }
+  return "earlier";
+}
+
+const TIME_BUCKET_ORDER: TimeBucket[] = ["today", "yesterday", "earlier"];
+const TIME_BUCKET_LABEL: Record<TimeBucket, string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  earlier: "Earlier",
+};
+
+/**
+ * Group sessions by recency buckets (Framer prototype side-nav).
+ * Empty buckets are omitted. Sessions within a bucket sorted by updatedAt desc.
+ * @param catalog Full session catalog.
+ * @param now Reference now (injectable for tests).
+ */
+export function groupSessionsByTime(
+  catalog: SessionRecord[],
+  now = Date.now(),
+): TimeGroup[] {
+  const map = new Map<TimeBucket, SessionRecord[]>();
+  for (const bucket of TIME_BUCKET_ORDER) {
+    map.set(bucket, []);
+  }
+  for (const s of catalog) {
+    const bucket = timeBucketFor(s.updatedAt, now);
+    map.get(bucket)?.push(s);
+  }
+  const groups: TimeGroup[] = [];
+  for (const bucket of TIME_BUCKET_ORDER) {
+    const sessions = map.get(bucket) ?? [];
+    if (sessions.length === 0) {
+      continue;
+    }
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    groups.push({
+      bucket,
+      label: TIME_BUCKET_LABEL[bucket],
+      sessions,
+    });
+  }
   return groups;
 }
 
@@ -247,21 +339,42 @@ export function saveCatalogToStorage(catalog: SessionRecord[]): void {
 }
 
 /**
- * Format relative time for session rows.
+ * Compact relative time for session rows (Framer: now / 12m / 1h / yesterday / 3d / 1w).
+ * @param ts Event epoch ms.
+ * @param now Reference now (injectable for tests).
  */
 export function formatRelativeTime(ts: number, now = Date.now()): string {
   const sec = Math.max(0, Math.floor((now - ts) / 1000));
-  if (sec < 60) {return "just now";}
+  if (sec < 60) {
+    return "now";
+  }
   const min = Math.floor(sec / 60);
-  if (min < 60) {return `${min}m ago`;}
+  if (min < 60) {
+    return `${min}m`;
+  }
   const hr = Math.floor(min / 60);
-  if (hr < 48) {return `${hr}h ago`;}
+  if (hr < 24) {
+    return `${hr}h`;
+  }
   const day = Math.floor(hr / 24);
-  return `${day}d ago`;
+  if (day === 1) {
+    return "yesterday";
+  }
+  if (day < 7) {
+    return `${day}d`;
+  }
+  const week = Math.floor(day / 7);
+  if (week < 5) {
+    return `${week}w`;
+  }
+  const month = Math.floor(day / 30);
+  return `${Math.max(1, month)}mo`;
 }
 
 /**
  * Convert a catalog record back into SessionState for the main pane.
+ * Runs seed-user tagging so exact X+X bodies from the pre-fix resume bug
+ * are collapsed before the timeline paints (handshake will re-apply the same).
  */
 export function recordToSessionState(rec: SessionRecord): SessionState {
   return {
@@ -270,7 +383,7 @@ export function recordToSessionState(rec: SessionRecord): SessionState {
     model: rec.model,
     mode: rec.mode,
     status: rec.status === "streaming" ? "idle" : rec.status,
-    timeline: rec.timeline ?? [],
+    timeline: tagSeedUserMessages(rec.timeline ?? []),
     toolCalls: rec.toolCalls ?? {},
     plan: rec.plan,
     // Keep catalog title as agent-style title when reconnecting (session_info_update path).
