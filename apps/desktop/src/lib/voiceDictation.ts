@@ -1,23 +1,48 @@
 /**
  * Browser SpeechRecognition wrapper for voice dictation (F-MEDIA-04).
- * Returns null when API unavailable (honest degradation).
+ * Returns null-shaped unsupported when API unavailable (honest degradation).
+ * Parent owns toggle UI: call start/stop and render listening chrome from onEnd/errors.
  */
 
 export type DictationHandle = {
-  /** Start listening; appends interim/final text via onText. */
+  /** Start listening; interim/final text arrives via onText. */
   start: () => void;
+  /** Stop listening; may fire onEnd after the engine settles. */
   stop: () => void;
   supported: true;
 };
 
 /**
+ * Join frozen draft prefix with the current session transcript.
+ * Inserts a single space when the prefix does not already end in whitespace.
+ * @param prefix Draft snapshot taken when listening started (or empty).
+ * @param transcript Cumulative interim+final text from this session (may be empty while quiet).
+ * @returns Draft string that should replace the composer value for this update.
+ */
+export function joinDictationDraft(prefix: string, transcript: string): string {
+  const t = transcript.trim();
+  if (!t) {
+    return prefix;
+  }
+  if (!prefix) {
+    return t;
+  }
+  if (/\s$/u.test(prefix)) {
+    return `${prefix}${t}`;
+  }
+  return `${prefix} ${t}`;
+}
+
+/**
  * Create a dictation session if Web Speech API exists.
- * @param onText Called with cumulative transcript.
- * @param onError Called on recognition errors.
+ * @param onText Called with cumulative session transcript (final + current interim).
+ * @param onError Called on recognition errors; session should be treated as ended.
+ * @param onEnd Called when the engine ends (browser stop, silence, or explicit stop).
  */
 export function createDictation(
   onText: (text: string) => void,
   onError?: (message: string) => void,
+  onEnd?: () => void,
 ): DictationHandle | { supported: false; reason: string } {
   const w = typeof window !== "undefined" ? window : undefined;
   const SR =
@@ -36,6 +61,14 @@ export function createDictation(
   rec.continuous = true;
   rec.interimResults = true;
   let finalText = "";
+  let ended = false;
+  const finish = () => {
+    if (ended) {
+      return;
+    }
+    ended = true;
+    onEnd?.();
+  };
   rec.onresult = (ev: SpeechRecognitionEvent) => {
     let interim = "";
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -52,7 +85,16 @@ export function createDictation(
     onText((finalText + interim).trim());
   };
   rec.onerror = (ev: SpeechRecognitionErrorEvent) => {
+    // "aborted" is normal when we call stop(); treat as end, not a user-facing error.
+    if (ev.error === "aborted") {
+      finish();
+      return;
+    }
     onError?.(ev.error || "speech error");
+    finish();
+  };
+  rec.onend = () => {
+    finish();
   };
   return {
     supported: true,
@@ -61,13 +103,14 @@ export function createDictation(
         rec.start();
       } catch (e) {
         onError?.(e instanceof Error ? e.message : String(e));
+        finish();
       }
     },
     stop: () => {
       try {
         rec.stop();
       } catch {
-        /* ignore */
+        finish();
       }
     },
   };
@@ -81,6 +124,7 @@ type SpeechRecognition = {
   stop: () => void;
   onresult: ((ev: SpeechRecognitionEvent) => void) | null;
   onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
 };
 type SpeechRecognitionEvent = {
   resultIndex: number;

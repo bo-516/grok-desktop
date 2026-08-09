@@ -12,10 +12,7 @@ import {
   type ChangeEvent,
 } from "react";
 import type { AvailableCommand } from "@grok-desktop/acp-core";
-import {
-  sealCompletedMentions,
-  snapCaretToMentionEdge,
-} from "@/lib/mentionTokens";
+import { snapCaretToMentionEdge } from "@/lib/mentionTokens";
 import {
   createCommandSuggestions,
   getComposerEmptyLabel,
@@ -32,6 +29,34 @@ type ComposerCompletionConfig = {
 };
 
 /**
+ * Structural equality for bridge workspace rows.
+ * Avoids a React list rewrite (and the visible text jump) when a re-fetch returns the same index.
+ * @param left Previous entries held in state.
+ * @param right Fresh bridge payload.
+ * @returns true when kind/path/ignored match in order.
+ */
+function workspaceEntriesEqual(
+  left: ComposerWorkspaceEntry[],
+  right: ComposerWorkspaceEntry[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (
+      a.path !== b.path ||
+      a.kind !== b.kind ||
+      a.ignored !== b.ignored
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Local state and behavior for the `@` file and `/skill` menus.
  * @param config Current agent command snapshot and real bridge file reader; when the reader is missing only connection hints are shown.
  * @returns Draft, menu state, and event handlers for the textarea.
@@ -42,11 +67,15 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   const [draft, setDraft] = useState("");
   /** Caret position decides plain typing vs `@` file completion vs `/` command completion. */
   const [caret, setCaret] = useState(0);
-  /** Result of the latest real bridge file scan. */
+  /** Result of the latest real bridge file scan (stale-while-revalidate while typing). */
   const [workspaceEntries, setWorkspaceEntries] = useState<
     ComposerWorkspaceEntry[]
   >([]);
-  /** Explicit menu feedback while a file scan is in flight. */
+  /**
+   * True only for the first scan after the `@` menu opens.
+   * Subsequent keystroke refetches stay silent so the empty/list label does not
+   * flip ("Reading…" ↔ "No matching files") and paint as text jitter.
+   */
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   /** Keeps a failure state when the bridge does not answer file indexing, so protocol/connection issues are not disguised as an empty directory. */
   const [hasWorkspaceLoadError, setHasWorkspaceLoadError] = useState(false);
@@ -59,6 +88,16 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   /** Textarea selection is restored only after React commits the replacement, avoiding imperative render-attribute writes. */
   const pendingCaretRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Monotonic fetch id so an older bridge response cannot overwrite a newer query
+   * after the user has already typed further.
+   */
+  const workspaceFetchGenRef = useRef(0);
+  /**
+   * Whether this `@` open cycle has completed at least one scan.
+   * Ref (not state) so the effect can read it without re-subscribing every paint.
+   */
+  const hasLoadedEntriesRef = useRef(false);
   const trigger = useMemo(
     () => findComposerTrigger(draft, caret),
     [draft, caret],
@@ -85,41 +124,61 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   useEffect(() => {
     const mentionQuery = trigger?.kind === "mention" ? trigger.query : null;
     const canLoadEntries = mentionQuery !== null && Boolean(listWorkspaceEntries);
-    const delay = 120;
-    let active = true;
+    /** Slightly longer debounce so continuous typing does not thrash the bridge. */
+    const delay = 160;
+    let cancelled = false;
 
     if (!canLoadEntries || !listWorkspaceEntries) {
+      // Leaving `@` resets the cycle so the next open shows a single loading state.
+      workspaceFetchGenRef.current += 1;
+      hasLoadedEntriesRef.current = false;
       setIsLoadingEntries(false);
       setHasWorkspaceLoadError(false);
+      setWorkspaceEntries([]);
       return () => undefined;
     }
 
     setHasWorkspaceLoadError(false);
     const timer = setTimeout(() => {
-      setIsLoadingEntries(true);
+      const fetchGen = workspaceFetchGenRef.current + 1;
+      workspaceFetchGenRef.current = fetchGen;
+      // Only the first scan of this open cycle owns the empty-state loading copy.
+      if (!hasLoadedEntriesRef.current) {
+        setIsLoadingEntries(true);
+      }
       void listWorkspaceEntries(mentionQuery)
         .then(
           (entries) => {
-            if (active) {
-              setWorkspaceEntries(entries);
+            if (cancelled || workspaceFetchGenRef.current !== fetchGen) {
+              return;
             }
+            setWorkspaceEntries((prev) =>
+              workspaceEntriesEqual(prev, entries) ? prev : entries,
+            );
+            hasLoadedEntriesRef.current = true;
+            setHasWorkspaceLoadError(false);
           },
           () => {
-            if (active) {
-              setWorkspaceEntries([]);
-              setHasWorkspaceLoadError(true);
+            if (cancelled || workspaceFetchGenRef.current !== fetchGen) {
+              return;
             }
+            // Keep last good index when a background refresh fails mid-typing.
+            if (!hasLoadedEntriesRef.current) {
+              setWorkspaceEntries([]);
+            }
+            setHasWorkspaceLoadError(true);
           },
         )
         .finally(() => {
-          if (active) {
-            setIsLoadingEntries(false);
+          if (cancelled || workspaceFetchGenRef.current !== fetchGen) {
+            return;
           }
+          setIsLoadingEntries(false);
         });
     }, delay);
 
     return () => {
-      active = false;
+      cancelled = true;
       clearTimeout(timer);
     };
   }, [listWorkspaceEntries, trigger?.kind, trigger?.query]);
@@ -155,18 +214,14 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   };
 
   /**
-   * Track input and selection; seal finished tokens into zero-width marks so
-   * hidden triggers do not leave gaps; reopen the menu on any new edit.
+   * Track input and selection and reopen the menu on any new edit.
+   * Typing never promotes text to a mention: only pickSuggestion commits a
+   * token, because only the menu knows the path exists in the workspace.
    */
   const handleDraftChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    const nextCaret = event.target.selectionStart;
-    const sealed = sealCompletedMentions(event.target.value, nextCaret);
-    setDraft(sealed.value);
-    setCaret(sealed.caret);
+    setDraft(event.target.value);
+    setCaret(event.target.selectionStart);
     setDismissedTriggerKey(null);
-    if (sealed.value !== event.target.value) {
-      pendingCaretRef.current = sealed.caret;
-    }
   };
 
   /**

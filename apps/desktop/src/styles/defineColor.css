@@ -149,6 +149,28 @@
   --color-border-muted: color-mix(in oklch, var(--seed-ink) 10%, transparent);
   --color-border-focus: color-mix(in oklch, var(--seed-brand) 48%, transparent);
 
+  /*
+   * Composer input field chrome (sole owner: .composer-input-wrap).
+   * All states share 1px border + same box metrics; only color differs.
+   */
+  --color-border-field: transparent;
+  --color-border-field-focus: var(--color-border-focus);
+  --color-border-field-listening: color-mix(
+    in oklch,
+    var(--seed-brand) 62%,
+    transparent
+  );
+  --color-border-field-dragover: color-mix(
+    in oklch,
+    var(--seed-brand) 55%,
+    transparent
+  );
+  --color-bg-field-dragover: color-mix(
+    in oklch,
+    var(--seed-brand) 8%,
+    transparent
+  );
+
   /* Text: ink ladder + brand-tinted body for harmony */
   --color-on-surface: color-mix(
     in oklch,

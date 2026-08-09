@@ -16,7 +16,6 @@ import {
   mentionUnitForDelete,
   MENTION_AT_MARK,
   MENTION_SLASH_MARK,
-  sealCompletedMentions,
   snapCaretToMentionEdge,
   splitMentionTokens,
   splitMentionTrigger,
@@ -34,6 +33,7 @@ describe("splitMentionTokens", () => {
       assert.equal(parts[1].trigger, "@");
       assert.equal(parts[1].body, "src/App.tsx");
       assert.equal(parts[1].offset, 4);
+      assert.equal(parts[1].committed, false);
     }
     assert.deepEqual(parts[2], { type: "text", text: " please", offset: 16 });
   });
@@ -83,6 +83,20 @@ describe("splitMentionTokens", () => {
       assert.equal(mention.kind, "file");
       assert.equal(mention.trigger, "@");
       assert.equal(mention.body, '"design docs/brief.md"');
+    }
+  });
+
+  it("marks only menu-picked tokens committed, so typed paths stay plain text", () => {
+    const typed = splitMentionTokens("@doc");
+    assert.equal(typed[0]?.type, "mention");
+    if (typed[0]?.type === "mention") {
+      assert.equal(typed[0].committed, false);
+    }
+
+    const picked = splitMentionTokens(`${MENTION_AT_MARK}docs/design`);
+    assert.equal(picked[0]?.type, "mention");
+    if (picked[0]?.type === "mention") {
+      assert.equal(picked[0].committed, true);
     }
   });
 
@@ -150,20 +164,6 @@ describe("zero-width composer marks", () => {
     );
   });
 
-  it("seals a completed visible trigger once it is followed by whitespace", () => {
-    const sealed = sealCompletedMentions("/always-approve @README.md ", 26);
-    assert.equal(
-      sealed.value,
-      `${MENTION_SLASH_MARK}always-approve ${MENTION_AT_MARK}README.md `,
-    );
-    assert.equal(sealed.caret, 26);
-  });
-
-  it("does not seal a token the caret is still editing", () => {
-    const mid = sealCompletedMentions("/always-approve ", 8);
-    assert.equal(mid.value, "/always-approve ");
-  });
-
   it("deletes a mention as one unit on Backspace from its end", () => {
     const token = `${MENTION_SLASH_MARK}always-approve`;
     const text = `${token} more`;
@@ -195,5 +195,12 @@ describe("zero-width composer marks", () => {
     const text = `${MENTION_AT_MARK}README.md`;
     assert.equal(snapCaretToMentionEdge(text, 3), 0);
     assert.equal(snapCaretToMentionEdge(text, 7), text.length);
+  });
+
+  it("leaves typed @paths fully editable — they are not committed tokens", () => {
+    const text = "@README.md";
+    assert.equal(mentionUnitForBackspace(text, text.length), null);
+    assert.equal(mentionUnitForDelete(text, 0), null);
+    assert.equal(snapCaretToMentionEdge(text, 3), 3);
   });
 });

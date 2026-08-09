@@ -1,13 +1,16 @@
 /**
  * Composer state container.
  * State is computed in useComposerWidget; this component only assembles the result into UI.
+ * Status footer is always mounted (one row) and driven by resolveComposerStatus.
  */
 
+import cs from "classnames";
 import { ClickSpark, StarBorder } from "@/components/react-bits";
 import { ComposerInputView } from "./ComposerInputView";
 import { ComposerModelMenuView } from "./ComposerModelMenuView";
 import { ComposerModeControlView } from "./ComposerModeControlView";
 import { ComposerSuggestionListView } from "./ComposerSuggestionListView";
+import { resolveComposerStatus } from "./composerStatus";
 import { useComposerWidget } from "./useComposerWidget";
 
 /**
@@ -16,10 +19,18 @@ import { useComposerWidget } from "./useComposerWidget";
  */
 export function ComposerWidget() {
   const widget = useComposerWidget();
-  const placeholder =
+  const idlePlaceholder =
     widget.timelineLength > 0
       ? "Continue the conversation…"
       : "Ask Grok anything";
+  /** Listening owns the field chrome so Mic state and the textarea stay in sync. */
+  const placeholder = widget.dictating ? "Listening…" : idlePlaceholder;
+  /** Single reserved status row — text/tone only; never mounts/unmounts. */
+  const statusLine = resolveComposerStatus({
+    connectionMode: widget.connectionMode,
+    dictating: widget.dictating,
+    notice: widget.notice,
+  });
 
   return (
     <div className="composer-dock">
@@ -37,6 +48,7 @@ export function ComposerWidget() {
             draft={widget.draft}
             placeholder={placeholder}
             disabled={!widget.canType || widget.status === "waiting_permission"}
+            listening={widget.dictating}
             textareaRef={widget.textareaRef}
             ariaControls={
               widget.isMenuOpen ? "composer-suggestions" : undefined
@@ -72,10 +84,30 @@ export function ComposerWidget() {
               />
               <button
                 type="button"
-                className="composer-chip-btn"
-                title="Voice dictation (Web Speech API)"
-                onClick={widget.startDictation}
+                className={cs("composer-chip-btn", "composer-mic-chip", {
+                  "composer-chip-btn-active": widget.dictating,
+                })}
+                title={
+                  widget.dictating
+                    ? "Stop voice dictation"
+                    : "Voice dictation (Web Speech API)"
+                }
+                aria-pressed={widget.dictating}
+                aria-label={
+                  widget.dictating ? "Stop listening" : "Start voice dictation"
+                }
+                disabled={
+                  !widget.canType || widget.status === "waiting_permission"
+                }
+                onClick={widget.toggleDictation}
               >
+                <span
+                  className={cs("composer-mic-dot", {
+                    "composer-mic-dot-live": widget.dictating,
+                  })}
+                  aria-hidden="true"
+                />
+                {/* Fixed label — mic state is the pulse dot, not a wider "Listening" chip. */}
                 Mic
               </button>
             </div>
@@ -122,15 +154,18 @@ export function ComposerWidget() {
             </div>
           </div>
         </div>
-        {widget.sendHint ? (
-          <p className="composer-hint composer-hint-warn" role="status">
-            {widget.sendHint}
-          </p>
-        ) : null}
-        <p className="composer-hint composer-hint-footer">
-          {widget.connectionMode === "live-bridge"
-            ? "Enter to send · ⇧Tab mode · @ files · / commands"
-            : "Waiting for bridge (npm run bridge)"}
+        <p
+          className={cs("composer-status", {
+            "composer-status-warn": statusLine.tone === "warn",
+            "composer-status-info": statusLine.tone === "info",
+            "composer-status-neutral": statusLine.tone === "neutral",
+          })}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          title={statusLine.text}
+        >
+          {statusLine.text}
         </p>
       </div>
     </div>

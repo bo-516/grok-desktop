@@ -11,6 +11,8 @@ import { mentionMarkForSymbol } from "@/lib/mentionTokens";
 export type ComposerWorkspaceEntry = {
   path: string;
   kind: "file" | "directory";
+  /** true when git check-ignore reports ignored; undefined when unknown. */
+  ignored?: boolean;
 };
 
 /** The `@` file or `/` command token under the current caret. */
@@ -30,6 +32,11 @@ export type ComposerSuggestion = {
   label: string;
   description?: string;
   inputHint?: string;
+  /**
+   * true when bridge marked the path gitignored; only then show the secondary badge.
+   * undefined/false → no badge (unknown must never hide the entry).
+   */
+  ignored?: boolean;
 };
 
 /**
@@ -137,6 +144,8 @@ export function createMentionSuggestions(
       value: entry.path,
       label: entry.path,
       // Kind is shown only on the kind badge to avoid File/file double labels.
+      // Pass through only known true so unknown never paints a badge.
+      ignored: entry.ignored === true ? true : undefined,
     }));
 }
 

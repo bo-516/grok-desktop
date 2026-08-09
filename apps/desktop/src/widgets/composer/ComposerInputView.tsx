@@ -3,12 +3,19 @@
  * Selection and draft state stay with the parent; this is pure presentation.
  * Supports paste images and drag-drop files (handlers from useComposerWidget).
  *
- * Committed tokens store a zero-width mark instead of `@`/`/`, so the body can
- * paint in the accent color without a trigger gap and without shifting caret
- * metrics. Incomplete visible `@`/`/` (while typing) still render in the mirror
- * so the user sees the active trigger. Glyph metrics must not change otherwise
- * (no padding, margin, weight, or letter-spacing). Timeline history still uses
- * full MentionChipView pills (icon + label, no raw trigger).
+ * Only *committed* tokens paint — the ones picked from the completion menu,
+ * which is the only place that knows the path exists. Commit stores a
+ * zero-width mark instead of `@`/`/`, so the body can take the accent color
+ * without a trigger gap and without shifting caret metrics. Freely typed
+ * `@foo` renders as plain text: an accent on a path that resolves to nothing
+ * would promise an attachment the agent never receives. Glyph metrics must not
+ * change either way (no padding, margin, weight, or letter-spacing). Timeline
+ * history still uses full MentionChipView pills (icon + label, no raw trigger).
+ *
+ * Field chrome (border / fill / radius) lives on `.composer-input-wrap` via
+ * `data-state`. Padding must stay identical and duplicated on `.composer-input`
+ * and `.composer-input-highlight` — the mirror is `absolute inset-0` against the
+ * wrap padding box; moving padding onto the wrap desyncs caret alignment.
  */
 
 import cs from "classnames";
@@ -20,11 +27,7 @@ import type {
   RefObject,
   UIEvent,
 } from "react";
-import {
-  isVisibleMentionTrigger,
-  mentionKindClass,
-  splitMentionTokens,
-} from "@/lib/mentionTokens";
+import { mentionKindClass, splitMentionTokens } from "@/lib/mentionTokens";
 import type { ImageAttachment } from "../../lib/mediaInput";
 
 type ComposerInputViewProps = {
@@ -39,6 +42,11 @@ type ComposerInputViewProps = {
   attachments?: ImageAttachment[];
   /** Highlight when a file is dragged over. */
   dragOver?: boolean;
+  /**
+   * Voice dictation active — drives wrap `data-state=listening` (color only).
+   * Parent owns the boolean; missing/false is the idle look.
+   */
+  listening?: boolean;
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
   onSelect: (event: { currentTarget: HTMLTextAreaElement }) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -50,6 +58,31 @@ type ComposerInputViewProps = {
   onDrop?: (event: DragEvent<HTMLDivElement>) => void;
   onRemoveAttachment?: (index: number) => void;
 };
+
+/**
+ * Resolve wrap data-state for sole chrome ownership (color only, shared metrics).
+ * Priority: disabled → dragover → listening → idle (focus via :focus-within CSS).
+ * @param disabled When true, field is non-interactive.
+ * @param dragOver File is dragged over the wrap.
+ * @param listening Mic is capturing.
+ * @returns Attribute value for `data-state` on the wrap.
+ */
+function resolveFieldState(
+  disabled: boolean,
+  dragOver: boolean,
+  listening: boolean,
+): "disabled" | "dragover" | "listening" | "idle" {
+  if (disabled) {
+    return "disabled";
+  }
+  if (dragOver) {
+    return "dragover";
+  }
+  if (listening) {
+    return "listening";
+  }
+  return "idle";
+}
 
 /**
  * Renders synchronized plain text + mention pills under a transparent textarea.
@@ -66,6 +99,7 @@ export function ComposerInputView(props: ComposerInputViewProps) {
     ariaActivedescendant,
     attachments = [],
     dragOver = false,
+    listening = false,
     onChange,
     onSelect,
     onKeyDown,
@@ -77,12 +111,12 @@ export function ComposerInputView(props: ComposerInputViewProps) {
     onRemoveAttachment,
   } = props;
   const segments = splitMentionTokens(draft);
+  const fieldState = resolveFieldState(disabled, dragOver, listening);
 
   return (
     <div
-      className={cs("composer-input-wrap", {
-        "composer-input-dragover": dragOver,
-      })}
+      className="composer-input-wrap"
+      data-state={fieldState}
       data-drag-over={dragOver ? "1" : undefined}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -114,23 +148,19 @@ export function ComposerInputView(props: ComposerInputViewProps) {
           if (seg.type === "text") {
             return <span key={`t-${seg.offset}`}>{seg.text}</span>;
           }
+          if (!seg.committed) {
+            // Typed but never locked onto a workspace entry — plain draft text.
+            return <span key={`m-${seg.offset}`}>{seg.text}</span>;
+          }
           return (
             <span
               key={`m-${seg.offset}`}
               className={cs("composer-mention", mentionKindClass(seg.kind))}
               data-mention-kind={seg.kind}
             >
-              {/* Always keep the trigger char in the DOM so metrics match the
-                  textarea. Zero-width marks are invisible; live `@`/`/` paint. */}
-              <span
-                className={cs("composer-mention-trigger", {
-                  "composer-mention-trigger-live": isVisibleMentionTrigger(
-                    seg.trigger,
-                  ),
-                })}
-              >
-                {seg.trigger}
-              </span>
+              {/* Keep the zero-width trigger in the DOM so the mirror consumes
+                  exactly the draft's characters and caret metrics still match. */}
+              <span className="composer-mention-trigger">{seg.trigger}</span>
               {seg.body}
             </span>
           );
@@ -144,7 +174,7 @@ export function ComposerInputView(props: ComposerInputViewProps) {
         placeholder={placeholder}
         value={draft}
         disabled={disabled}
-        rows={2}
+        rows={1}
         aria-controls={ariaControls}
         aria-expanded={ariaExpanded}
         aria-activedescendant={ariaActivedescendant}

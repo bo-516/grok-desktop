@@ -8,10 +8,12 @@
  *
  * Pure text in, segment model out — no DOM, store, or bridge access.
  *
- * Composer draft nuance: completed tokens may use zero-width marks instead of
- * visible `@` / `/` so the mirror can hide the trigger without leaving a gap
- * (transparent `@` still occupies advance width). Marks materialize back to
- * `@` / `/` only when sending to the agent.
+ * Committed vs. typed: a token is *committed* only when it was picked from the
+ * completion menu, which is the only place that knows the path exists. Commit
+ * rewrites the trigger to a zero-width mark, so `committed` is readable from
+ * the text alone. Freely typed `@foo` stays plain text — the composer must not
+ * dress up a path that resolves to nothing. Marks materialize back to
+ * `@` / `/` when sending to the agent.
  */
 
 /** How a token is classified for icon + tint selection. */
@@ -46,6 +48,12 @@ export type MentionSegment =
       trigger: string;
       /** Remainder after the trigger (path or command name). */
       body: string;
+      /**
+       * Picked from the completion menu (zero-width trigger) rather than typed.
+       * Only committed tokens point at something the workspace scan confirmed,
+       * so only they earn chip treatment and atomic caret/delete behavior.
+       */
+      committed: boolean;
     };
 
 /**
@@ -170,6 +178,7 @@ export function splitMentionTokens(text: string): MentionSegment[] {
           kind: isDir ? "directory" : "file",
           trigger,
           body,
+          committed: !isVisibleMentionTrigger(trigger),
         });
       }
     } else {
@@ -181,6 +190,7 @@ export function splitMentionTokens(text: string): MentionSegment[] {
         kind: "command",
         trigger,
         body,
+        committed: !isVisibleMentionTrigger(trigger),
       });
     }
 
@@ -235,50 +245,6 @@ export function materializeMentionTriggers(text: string): string {
 }
 
 /**
- * Seal completed visible triggers into zero-width marks so the mirror can hide
- * them without leaving an advance-width hole between neighboring tokens.
- * A token is sealed only when followed by whitespace and the caret is not
- * inside it (still editing). Length stays the same; caret index is unchanged.
- * @param text Current draft.
- * @param caret Caret index; tokens containing this caret are left unsealed.
- * @returns Draft with completed triggers marked; same caret.
- */
-export function sealCompletedMentions(
-  text: string,
-  caret: number,
-): { value: string; caret: number } {
-  const safeCaret = Math.max(0, Math.min(caret, text.length));
-  const segments = splitMentionTokens(text);
-  let out = "";
-
-  for (const seg of segments) {
-    if (seg.type === "text") {
-      out += seg.text;
-      continue;
-    }
-
-    const end = seg.offset + seg.text.length;
-    const after = text[end] ?? "";
-    const followedByWhitespace = after.length > 0 && /\s/.test(after);
-    const caretInside = safeCaret > seg.offset && safeCaret < end;
-    const canSeal =
-      followedByWhitespace &&
-      !caretInside &&
-      isVisibleMentionTrigger(seg.trigger);
-
-    if (canSeal) {
-      const mark =
-        seg.trigger === "@" ? MENTION_AT_MARK : MENTION_SLASH_MARK;
-      out += `${mark}${seg.body}`;
-    } else {
-      out += seg.text;
-    }
-  }
-
-  return { value: out, caret: safeCaret };
-}
-
-/**
  * Inclusive range of a mention unit for atomic editing.
  * @param start Token start index in the source string.
  * @param end Exclusive end index of the token (not including trailing space).
@@ -286,7 +252,8 @@ export function sealCompletedMentions(
 export type MentionUnitRange = { start: number; end: number };
 
 /**
- * Find the mention that owns the caret for Backspace (inside or just after).
+ * Find the committed mention that owns the caret for Backspace (inside or just
+ * after). Typed `@foo` is ordinary text and is left to normal editing.
  * @param text Draft text.
  * @param caret Collapsed caret index.
  * @returns Token range, or null when Backspace should delete one normal char.
@@ -297,7 +264,7 @@ export function mentionUnitForBackspace(
 ): MentionUnitRange | null {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
   for (const seg of splitMentionTokens(text)) {
-    if (seg.type !== "mention") {
+    if (seg.type !== "mention" || !seg.committed) {
       continue;
     }
     const start = seg.offset;
@@ -310,7 +277,7 @@ export function mentionUnitForBackspace(
 }
 
 /**
- * Find the mention that owns the caret for Delete (inside or at start).
+ * Find the committed mention that owns the caret for Delete (inside or at start).
  * @param text Draft text.
  * @param caret Collapsed caret index.
  * @returns Token range, or null when Delete should remove one normal char.
@@ -321,7 +288,7 @@ export function mentionUnitForDelete(
 ): MentionUnitRange | null {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
   for (const seg of splitMentionTokens(text)) {
-    if (seg.type !== "mention") {
+    if (seg.type !== "mention" || !seg.committed) {
       continue;
     }
     const start = seg.offset;
@@ -352,16 +319,17 @@ export function deleteMentionUnit(
 }
 
 /**
- * Snap a caret that sits inside a mention to the nearer edge so partial
- * in-token editing is not offered (tokens are atomic once committed).
+ * Snap a caret that sits inside a committed mention to the nearer edge so
+ * partial in-token editing is not offered (tokens are atomic once committed).
+ * Typed `@foo` keeps a free caret — it is still being written.
  * @param text Draft text.
  * @param caret Proposed caret index.
- * @returns Edge index when inside a mention; otherwise the original caret.
+ * @returns Edge index when inside a committed mention; otherwise the original caret.
  */
 export function snapCaretToMentionEdge(text: string, caret: number): number {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
   for (const seg of splitMentionTokens(text)) {
-    if (seg.type !== "mention") {
+    if (seg.type !== "mention" || !seg.committed) {
       continue;
     }
     const start = seg.offset;

@@ -12,7 +12,7 @@ import { modeLabel, type AgentModeOption } from "./composerModes";
 export type ComposerModeControlViewProps = {
   /** Confirmed session mode (not the in-flight target). */
   mode: AgentMode | string;
-  /** Non-null while a mode switch is in flight — shows Switching… + aria-busy. */
+  /** Non-null while a mode switch is in flight — short target label + spinner + aria-busy. */
   pendingMode: AgentMode | null;
   /** Catalog of modes with descriptions. */
   options: readonly AgentModeOption[];
@@ -37,10 +37,15 @@ export function ComposerModeControlView(props: ComposerModeControlViewProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const { open, onClose, pendingMode, mode } = props;
   const pending = pendingMode !== null;
+  /**
+   * Optimistic target while a switch is in flight so the chip keeps a short
+   * Ask/Plan/Build label (avoids "Switching to …" expanding then shrinking).
+   */
   const displayMode: AgentMode | string = pendingMode ?? mode;
-  const label = pending
-    ? `Switching to ${modeLabel(pendingMode)}…`
-    : modeLabel(mode);
+  const label = modeLabel(displayMode);
+  const triggerTitle = pending
+    ? `Switching to ${label}…`
+    : "Agent mode — click to choose · ⇧Tab to cycle";
 
   useEffect(() => {
     if (!open) {
@@ -76,10 +81,11 @@ export function ComposerModeControlView(props: ComposerModeControlViewProps) {
           "composer-mode-plan": !pending && displayMode === "plan",
           "composer-mode-ask": !pending && displayMode === "ask",
         })}
-        title="Agent mode — click to choose · ⇧Tab to cycle"
+        title={triggerTitle}
         aria-haspopup="listbox"
         aria-expanded={props.open}
         aria-busy={pending}
+        aria-label={pending ? `Switching to ${label}` : undefined}
         disabled={pending}
         onClick={props.onToggle}
       >

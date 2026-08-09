@@ -264,9 +264,10 @@ code {
  * from plain-text metrics; any width delta after a token makes the caret look
  * inset into following characters.
  *
- * Committed triggers are zero-width marks in the draft string itself (see
- * mentionTokens MENTION_*_MARK), so omitting them from the mirror does not
- * desync the caret. Incomplete visible `@`/`/` while typing still paint here.
+ * Only committed tokens get this class. Their trigger is a zero-width mark in
+ * the draft string itself (see mentionTokens MENTION_*_MARK), so hiding it does
+ * not desync the caret. Typed `@`/`/` stay plain draft text — see
+ * ComposerInputView for why an unresolved path must not look attached.
  */
 .composer-input-highlight .composer-mention {
   color: var(--color-composer-mention);
@@ -275,15 +276,9 @@ code {
   -webkit-box-decoration-break: clone;
 }
 
-/*
- * Trigger glyph: zero-width marks inherit accent but have no advance width.
- * Live `@`/`/` (unsealed, still typing) paint in the same accent.
- */
+/* Trigger glyph: zero-width marks, kept in the DOM only to match draft chars. */
 .composer-input-highlight .composer-mention-trigger {
   color: transparent;
-}
-.composer-input-highlight .composer-mention-trigger-live {
-  color: var(--color-composer-mention);
 }
 
 /* Kind classes keep the same accent; no fill/ring (unlike timeline chips). */

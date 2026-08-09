@@ -1,46 +1,26 @@
 /**
  * Unified Composer state entry.
  * Connects the session store, real prompt send, mode / model / thinking controls;
- * completion interaction is owned by useComposerCompletion;
- * attachments by useComposerAttachments.
+ * completion by useComposerCompletion; attachments by useComposerAttachments;
+ * voice mic by useComposerDictation; notice lifetime by useComposerNotice;
+ * bar chrome (mode/model menus) by useComposerBarControls.
  */
 
 import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
   type KeyboardEvent,
 } from "react";
-import type {
-  AvailableCommand,
-  AvailableModel,
-  AgentMode,
-} from "@grok-desktop/acp-core";
+import type { AvailableCommand, AvailableModel } from "@grok-desktop/acp-core";
 import { useSessionStore } from "../../store/sessionStore";
-import { createDictation } from "../../lib/voiceDictation";
-import {
-  defaultComposerControls,
-  formatModelLabel,
-  formatThinkingLabel,
-  loadPreferredModel,
-  loadThinkingEffort,
-  resolveAgentDefaultModel,
-  resolveModelOptions,
-  savePreferredModel,
-  saveThinkingEffort,
-  THINKING_OPTIONS,
-  type ThinkingEffort,
-} from "./composerModels";
-import type { ComposerMenuPanel } from "./ComposerModelMenuView";
 import { useComposerCompletion } from "./useComposerCompletion";
 import { useComposerAttachments } from "./useComposerAttachments";
-import {
-  AGENT_MODE_OPTIONS,
-  modeLabel,
-  nextMode,
-  normalizeAgentMode,
-} from "./composerModes";
+import { useComposerDictation } from "./useComposerDictation";
+import { useComposerNotice } from "./useComposerNotice";
+import { useComposerBarControls } from "./useComposerBarControls";
+import { modeLabel } from "./composerModes";
+import { runComposerSubmit } from "./composerSubmit";
 
 /**
  * Reusable empty command snapshot so the Zustand selector does not allocate a new array
@@ -76,17 +56,40 @@ export function useComposerWidget() {
   const commands = useSessionStore(
     (state) => state.session.availableCommands ?? EMPTY_AVAILABLE_COMMANDS,
   );
-  const listWorkspaceEntries = useSessionStore(
+  const bridgeListWorkspaceEntries = useSessionStore(
     (state) => state.live?.listWorkspaceEntries,
   );
+  const bridgeReadWorkspaceFile = useSessionStore(
+    (state) => state.live?.readWorkspaceFile,
+  );
+  const workspace = useSessionStore((state) => state.session.workspace);
   const agentCapabilities = useSessionStore(
     (state) => state.session.agentCapabilities,
   );
+  /**
+   * Index the workspace of the session on screen, not whichever session the
+   * bridge happened to start last. Stable identity keeps the completion effect
+   * from refetching on every render.
+   */
+  const listWorkspaceEntries = useMemo(() => {
+    if (!bridgeListWorkspaceEntries) {
+      return undefined;
+    }
+    return (query: string) =>
+      bridgeListWorkspaceEntries(query, workspace || undefined);
+  }, [bridgeListWorkspaceEntries, workspace]);
   const completion = useComposerCompletion({ commands, listWorkspaceEntries });
-  /** Send-policy hint (streaming / permission / send failure); stays out of the global store. */
-  const [sendHint, setSendHint] = useState("");
-  /** Mode popover open state (local to composer). */
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  /** Tone-aware notice channel; status text is resolved outside this hook. */
+  const { notice, showNotice, clearNotice } = useComposerNotice();
+  const bar = useComposerBarControls({
+    mode,
+    pendingMode,
+    model,
+    configOptions,
+    availableModels,
+    setMode,
+    setModel,
+  });
 
   const setDraft = completion.setDraft;
   const textareaRef = completion.textareaRef;
@@ -96,7 +99,9 @@ export function useComposerWidget() {
     draft: completion.draft,
     setDraft,
     textareaRef,
-    setSendHint,
+    showNotice,
+    readWorkspaceFile: bridgeReadWorkspaceFile,
+    workspace,
   });
 
   /**
@@ -110,7 +115,7 @@ export function useComposerWidget() {
         return;
       }
       setDraft(text);
-      setSendHint("Edit the prompt, then Enter to send");
+      showNotice("Edit the prompt, then Enter to send", "info");
       requestAnimationFrame(() => {
         const el = textareaRef.current;
         if (!el) {
@@ -124,30 +129,7 @@ export function useComposerWidget() {
     window.addEventListener("grok-desktop:prefill-composer", onPrefill);
     return () =>
       window.removeEventListener("grok-desktop:prefill-composer", onPrefill);
-  }, [setDraft, textareaRef]);
-
-  /** Local thinking intensity; persisted separately from session protocol state. */
-  const [effort, setEffort] = useState<ThinkingEffort>(() => loadThinkingEffort());
-  /** Floating model/thinking menu visibility + nested panel. */
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPanel, setMenuPanel] = useState<ComposerMenuPanel>(null);
-
-  const preferredModel = useMemo(() => loadPreferredModel(), []);
-  /** Prefer live session model; else local preference; else first agent catalog entry. */
-  const effectiveModel =
-    model ||
-    preferredModel ||
-    availableModels[0]?.id ||
-    "";
-  const models = useMemo(
-    () =>
-      resolveModelOptions(configOptions, availableModels, effectiveModel),
-    [configOptions, availableModels, effectiveModel],
-  );
-  const modelLabel =
-    models.find((m) => m.id === effectiveModel)?.label ??
-    formatModelLabel(effectiveModel);
-  const effortLabel = formatThinkingLabel(effort);
+  }, [setDraft, showNotice, textareaRef]);
 
   const streaming = status === "streaming";
   const waitingPermission = status === "waiting_permission";
@@ -158,152 +140,40 @@ export function useComposerWidget() {
     (completion.draft.trim().length > 0 || media.attachments.length > 0) &&
     !streaming;
 
-  const confirmedMode = normalizeAgentMode(mode);
-
-  /**
-   * Select a mode explicitly from the popover (or ⇧Tab cycle).
-   * @param next Target mode; no-op when same as confirmed and nothing pending.
-   */
-  const selectMode = useCallback(
-    (next: AgentMode) => {
-      setModeMenuOpen(false);
-      setMode(next);
-    },
-    [setMode],
-  );
-
-  /** Cycle mode via nextMode helper (⇧Tab when composer focused). */
-  const cycleMode = useCallback(() => {
-    const base = pendingMode ?? confirmedMode;
-    selectMode(nextMode(base));
-  }, [confirmedMode, pendingMode, selectMode]);
-
-  const closeModeMenu = useCallback(() => {
-    setModeMenuOpen(false);
-  }, []);
-
-  const toggleModeMenu = useCallback(() => {
-    if (pendingMode !== null) {
-      return;
-    }
-    setModeMenuOpen((o) => !o);
-  }, [pendingMode]);
-
-  const closeMenu = useCallback(() => {
-    setMenuOpen(false);
-    setMenuPanel(null);
-  }, []);
-
-  const toggleMenu = useCallback(() => {
-    setMenuOpen((open) => {
-      if (open) {
-        setMenuPanel(null);
-        return false;
-      }
-      setMenuPanel("root");
-      return true;
-    });
-  }, []);
-
-  const openPanel = useCallback((panel: ComposerMenuPanel) => {
-    setMenuPanel(panel);
-  }, []);
-
-  /**
-   * Selects a model for the session chrome and persists the preference.
-   * @param id Model id from the submenu.
-   */
-  const selectModel = useCallback(
-    (id: string) => {
-      setModel(id);
-      savePreferredModel(id);
-      setMenuPanel("root");
-    },
-    [setModel],
-  );
-
-  /**
-   * Selects thinking intensity and persists it for the next open.
-   * @param id Effort level id.
-   */
-  const selectEffort = useCallback((id: ThinkingEffort) => {
-    setEffort(id);
-    saveThinkingEffort(id);
-    setMenuPanel("root");
-  }, []);
-
-  /**
-   * Resets model + thinking to agent/product defaults and closes the menu.
-   * Model default is taken from agent config current / first availableModels entry.
-   */
-  const resetControls = useCallback(() => {
-    const agentDefault = resolveAgentDefaultModel(
-      configOptions,
-      models,
-      model,
-    );
-    const defaults = defaultComposerControls(agentDefault);
-    if (defaults.modelId) {
-      setModel(defaults.modelId);
-      savePreferredModel(defaults.modelId);
-    }
-    setEffort(defaults.effort);
-    saveThinkingEffort(defaults.effort);
-    closeMenu();
-  }, [closeMenu, configOptions, model, models, setModel]);
+  const dictation = useComposerDictation({
+    draft: completion.draft,
+    canType,
+    waitingPermission,
+    setDraftWithCaret: completion.setDraftWithCaret,
+    textareaRef,
+    showNotice,
+    onDraftChange: completion.handleDraftChange,
+  });
 
   /**
    * Sends the current draft snapshot; newer typing while the bridge connects asynchronously is not cleared.
-   * While streaming / waiting_permission, draft is queued (F-STREAM-09) via store.sendPrompt — never dropped.
-   * Images go as ACP ContentBlock.image when agentCapabilities.promptCapabilities.image is true.
+   * Mentions embed via bridge read; queue path is plain text with an explicit notice.
    */
   const submitDraft = () => {
-    const sentDraft = completion.draft;
-    if (!sentDraft.trim() && media.attachments.length === 0) {
-      return;
-    }
-    if (connectionMode === "disconnected") {
-      setSendHint("Bridge not connected — run npm run bridge and reconnect");
-      return;
-    }
-    if (streaming || waitingPermission) {
-      if (media.attachments.length > 0) {
-        setSendHint(
-          "Attachments wait until the current turn finishes — send again when idle",
-        );
-        return;
-      }
-      setSendHint("Queued — will send after this turn finishes");
-      void sendPrompt(sentDraft).then((sent) => {
-        if (sent) {
-          completion.setDraft((current) =>
-            current === sentDraft ? "" : current,
-          );
-        }
-      });
-      return;
-    }
-    if (!canSend) {
-      return;
-    }
-
-    const { blocks, text } = media.buildOutgoingBlocks();
-    setSendHint("");
-    void sendPrompt(text, blocks).then((sent) => {
-      if (sent) {
+    runComposerSubmit({
+      sentDraft: completion.draft,
+      attachmentCount: media.attachments.length,
+      connectionMode,
+      streaming,
+      waitingPermission,
+      canSend,
+      bridgeInfo,
+      buildOutgoingBlocks: media.buildOutgoingBlocks,
+      sendPrompt,
+      showNotice,
+      clearNotice,
+      clearDraftIfUnchanged: (sentDraft) => {
         completion.setDraft((current) =>
           current === sentDraft ? "" : current,
         );
-        media.clearAttachments();
-        setSendHint("");
-      } else {
-        setSendHint(
-          bridgeInfo.startsWith("error:") ||
-            /unable|cannot|failed/i.test(bridgeInfo)
-            ? bridgeInfo
-            : "Send failed — draft kept; check the connection or start a new chat",
-        );
-      }
+      },
+      clearAttachments: media.clearAttachments,
+      stopDictation: dictation.stopDictation,
     });
   };
 
@@ -342,7 +212,7 @@ export function useComposerWidget() {
       pendingMode === null
     ) {
       event.preventDefault();
-      cycleMode();
+      bar.cycleMode();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
@@ -368,66 +238,53 @@ export function useComposerWidget() {
     mirror.scrollLeft = ta.scrollLeft;
   }, [completion.textareaRef]);
 
-  /** F-MEDIA-04: voice dictation via Web Speech API when available. */
-  const startDictation = useCallback(() => {
-    const handle = createDictation(
-      (text) => {
-        completion.setDraft((d) => (d ? `${d} ${text}` : text));
-      },
-      (err) => setSendHint(`Dictation: ${err}`),
-    );
-    if (!handle.supported) {
-      setSendHint(handle.reason);
-      return;
-    }
-    handle.start();
-    setSendHint("Listening… (stop via browser / mic UI)");
-  }, [completion]);
-
   return {
     ...completion,
     attachments: media.attachments,
     canSend,
     canType,
     cancelTurn,
-    closeMenu,
-    closeModeMenu,
+    closeMenu: bar.closeMenu,
+    closeModeMenu: bar.closeModeMenu,
     connectionMode,
+    dictating: dictation.dictating,
     dragOver: media.dragOver,
-    effort,
-    effortLabel,
+    effort: bar.effort,
+    effortLabel: bar.effortLabel,
     handleDragLeave: media.handleDragLeave,
     handleDragOver: media.handleDragOver,
     handleDrop: media.handleDrop,
+    handleDraftChange: dictation.handleDraftChange,
     handleInputScroll,
     handleKeyDown,
     handlePaste: media.handlePaste,
     imageCapable: media.imageCapable,
-    mode: confirmedMode,
-    modeMenuOpen,
-    modeOptions: AGENT_MODE_OPTIONS,
+    mode: bar.confirmedMode,
+    modeMenuOpen: bar.modeMenuOpen,
+    modeOptions: bar.modeOptions,
+    notice,
     pendingMode,
     removeAttachment: media.removeAttachment,
-    startDictation,
-    menuOpen,
-    menuPanel,
-    model: effectiveModel,
-    modelLabel,
-    models,
-    openPanel,
-    resetControls,
-    selectEffort,
-    selectMode,
-    selectModel,
-    sendHint,
+    stopDictation: dictation.stopDictation,
+    toggleDictation: dictation.toggleDictation,
+    menuOpen: bar.menuOpen,
+    menuPanel: bar.menuPanel,
+    model: bar.model,
+    modelLabel: bar.modelLabel,
+    models: bar.models,
+    openPanel: bar.openPanel,
+    resetControls: bar.resetControls,
+    selectEffort: bar.selectEffort,
+    selectMode: bar.selectMode,
+    selectModel: bar.selectModel,
     status,
     streaming,
     submitDraft,
-    thinkingOptions: THINKING_OPTIONS,
+    thinkingOptions: bar.thinkingOptions,
     timelineLength,
-    toggleMenu,
-    toggleModeMenu,
-    cycleMode,
+    toggleMenu: bar.toggleMenu,
+    toggleModeMenu: bar.toggleModeMenu,
+    cycleMode: bar.cycleMode,
   };
 }
 
