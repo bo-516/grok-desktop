@@ -1,9 +1,0 @@
-/**
- * Grok Developer Studio styles entry.
- * All colors live in defineColor.css; layout modules only consume tokens.
- */
-@import "./shell-layout.css";
-@import "./side-nav.css";
-@import "./timeline.css";
-@import "./composer.css";
-@import "./chrome.css";

@@ -10,7 +10,7 @@
   "scripts": {
     "build": "npm run build -w @grok-desktop/acp-core && npm run build -w @grok-desktop/desktop",
     "test": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core",
-    "test:all": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core && npm run test -w @grok-desktop/desktop --if-present",
+    "test:all": "npm run build -w @grok-desktop/acp-core && npm run test -w @grok-desktop/acp-core && npm run test -w @grok-desktop/bridge --if-present && npm run test -w @grok-desktop/desktop --if-present",
     "m0": "npm run m0 -w @grok-desktop/m0",
     "m0:mock": "npm run m0:mock -w @grok-desktop/m0",
     "m0:live": "npm run m0:live -w @grok-desktop/m0",

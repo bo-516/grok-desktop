@@ -1,184 +1,579 @@
 /**
- * All color tokens for grok-desktop (Grok Developer Studio palette).
- * Business TSX must only consume these variables (or classes derived from them)
- * — never raw hex/rgb in components.
+ * Generative color system for grok-desktop.
  *
- * Palette aligned to design mock: neutral dark surfaces, white primary,
- * high-density agent chrome.
+ * Approach (CSS Color Level 5 — relative colors + color-mix in oklch):
+ *   1. Author only a few seeds (--seed-brand, scheme polarity, chroma factors).
+ *   2. Derive the full semantic scale with oklch(from …) and color-mix(in oklch, …).
+ *   3. Switching palette = change --seed-brand (+ chroma); every surface/text/border
+ *      retints because tokens are formulas, not hardcoded hex tables.
+ *
+ * Refs: MDN relative colors; OKLCH scales via color-mix(in oklch, brand, black|white);
+ *       contrast-color() where supported for on-brand text.
+ *
+ * Business TSX / Uno theme must only consume --color-* / --gradient-* / --shadow-*.
+ * Never raw hex/rgb in components.
  */
-:root {
-  /* ── Surfaces (Material-like container scale) ── */
-  --color-surface-lowest: #0e0e0e;
-  --color-surface-low: #1c1b1b;
-  --color-surface: #131313;
-  --color-surface-dim: #131313;
-  --color-surface-container: #201f1f;
-  --color-surface-high: #2a2a2a;
-  --color-surface-highest: #353534;
-  --color-surface-bright: #3a3939;
-  --color-surface-variant: #353534;
 
-  /* App semantic aliases (layout consumers) */
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Primitive seeds + derivation recipes (dark default = :root)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /*
+   * SEEDS — the only “authored” colors for a look.
+   * --seed-brand: brand / primary swatch (palette picker sets this).
+   * --seed-canvas: absolute canvas anchor (mixed into lowest surface).
+   * --seed-ink: absolute ink for text (mixed toward brand for harmony).
+   * --seed-on-brand: text/icon on solid primary (contrast against brand).
+   * --seed-danger / --seed-success: fixed semantic hues (still formula-derived).
+   */
+  --seed-brand: #e8e9eb;
+  --seed-canvas: #08090a;
+  --seed-ink: #f2f3f5;
+  --seed-on-brand: #0c0d0f;
+  --seed-danger: #ff6b63;
+  --seed-success: #3dd68c;
+
+  /*
+   * SCHEME knobs — polarity & tint strength (not hex).
+   * --scheme-brand-in-surface: how much brand bleeds into backgrounds (0 = pure mono).
+   * --scheme-elevate: how much ink is mixed in as surfaces rise (cards, chips).
+   * --scheme-fg-strength: text opacity ladder vs ink.
+   */
+  --scheme-brand-in-surface: 0%;
+  --scheme-elevate: 6%;
+  --scheme-elevate-2: 10%;
+  --scheme-elevate-3: 14%;
+  --scheme-elevate-4: 18%;
+  --scheme-elevate-5: 22%;
+  --scheme-fg-strength: 100%;
+  --scheme-muted: 38%;
+  --scheme-faint: 28%;
+  --scheme-secondary: 62%;
+  --scheme-border: 8%;
+  --scheme-border-strong: 14%;
+  --scheme-overlay: 55%;
+
+  /* ── Brand ladder (tints / shades from seed) ── */
+  --brand: var(--seed-brand);
+  --brand-hover: color-mix(in oklch, var(--seed-brand) 78%, white);
+  --brand-pressed: color-mix(in oklch, var(--seed-brand) 72%, black);
+  --brand-soft: color-mix(in oklch, var(--seed-brand) 16%, transparent);
+  --brand-softer: color-mix(in oklch, var(--seed-brand) 10%, transparent);
+  --brand-ghost: color-mix(in oklch, var(--seed-brand) 6%, transparent);
+
+  /* ── Surfaces: canvas + brand tint, then elevate toward ink ── */
+  --color-surface-lowest: color-mix(
+    in oklch,
+    var(--seed-canvas) calc(100% - var(--scheme-brand-in-surface)),
+    var(--seed-brand)
+  );
+  --color-surface-low: color-mix(
+    in oklch,
+    var(--color-surface-lowest) calc(100% - var(--scheme-elevate)),
+    var(--seed-ink)
+  );
+  --color-surface: var(--color-surface-low);
+  --color-surface-dim: color-mix(in oklch, var(--color-surface-lowest) 96%, black);
+  --color-surface-container: color-mix(
+    in oklch,
+    var(--color-surface-lowest) calc(100% - var(--scheme-elevate-2)),
+    var(--seed-ink)
+  );
+  --color-surface-high: color-mix(
+    in oklch,
+    var(--color-surface-lowest) calc(100% - var(--scheme-elevate-3)),
+    var(--seed-ink)
+  );
+  --color-surface-highest: color-mix(
+    in oklch,
+    var(--color-surface-lowest) calc(100% - var(--scheme-elevate-4)),
+    var(--seed-ink)
+  );
+  --color-surface-bright: color-mix(
+    in oklch,
+    var(--color-surface-lowest) calc(100% - var(--scheme-elevate-5)),
+    var(--seed-ink)
+  );
+  --color-surface-variant: var(--color-surface-high);
+
+  /* ── App semantic aliases (layout chrome) ── */
   --color-bg-app: var(--color-surface-lowest);
   --color-bg-surface: var(--color-surface-low);
-  --color-bg-elevated: var(--color-surface-high);
+  --color-bg-elevated: var(--color-surface-container);
   --color-bg-timeline: var(--color-surface-lowest);
-  --color-bg-composer: var(--color-surface-high);
-  --color-bg-composer-suggestion: var(--color-surface-container);
+  --color-bg-composer: var(--color-surface-container);
+  --color-bg-composer-suggestion: var(--color-surface-high);
   --color-bg-composer-suggestion-hover: var(--color-surface-highest);
-  --color-border-composer-suggestion: var(--color-border-muted);
+  --color-border-composer-suggestion: var(--color-border-subtle);
   --color-text-composer-suggestion-detail: var(--color-text-secondary);
   --color-text-composer-suggestion-kind: var(--color-text-muted);
-  --color-bg-thought: var(--color-surface-container);
-  --color-bg-tool: var(--color-surface-container);
-  --color-bg-user: var(--color-surface-highest);
-  --color-bg-overlay: color-mix(in srgb, var(--color-surface-lowest) 55%, transparent);
-  --color-bg-sidebar: color-mix(in srgb, var(--color-surface-low) 80%, transparent);
-  --color-bg-titlebar: color-mix(in srgb, var(--color-surface) 90%, transparent);
-  --color-bg-secondary-container: #474746;
+  --color-bg-thought: var(--brand-ghost);
+  --color-bg-tool: var(--brand-ghost);
+  --color-bg-user: var(--color-surface-container);
+  --color-bg-overlay: color-mix(
+    in oklch,
+    black var(--scheme-overlay),
+    transparent
+  );
+  --color-bg-sidebar: var(--color-surface-low);
+  --color-bg-titlebar: color-mix(
+    in oklch,
+    var(--color-surface-lowest) 88%,
+    transparent
+  );
+  --color-bg-secondary-container: var(--color-surface-high);
 
-  /* Borders / outline */
-  --color-outline: #8e9192;
-  --color-outline-variant: #444748;
-  --color-border-default: var(--color-outline-variant);
-  --color-border-strong: var(--color-outline);
-  --color-border-subtle: color-mix(in srgb, var(--color-outline-variant) 30%, transparent);
-  --color-border-muted: color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
-  --color-border-focus: #ffffff;
+  /* Soft fills = ink at low alpha (tracks scheme automatically) */
+  --color-bg-white-soft: color-mix(in oklch, var(--seed-ink) 6%, transparent);
+  --color-bg-white-faint: color-mix(in oklch, var(--seed-ink) 3%, transparent);
+  --color-bg-white-hover: color-mix(in oklch, var(--seed-ink) 8%, transparent);
+  --color-bg-kbd: color-mix(in oklch, var(--seed-ink) 7%, transparent);
+  --color-bg-skeleton: color-mix(in oklch, var(--seed-ink) 7%, transparent);
+  --color-bg-skeleton-mid: color-mix(in oklch, var(--seed-ink) 5%, transparent);
+  --color-bg-skeleton-faint: color-mix(in oklch, var(--seed-ink) 4%, transparent);
 
-  /* Text */
-  --color-on-surface: #e5e2e1;
-  --color-on-surface-variant: #c4c7c8;
-  --color-on-secondary-container: #b7b5b4;
+  /* Borders from ink alpha */
+  --color-outline: color-mix(in oklch, var(--seed-ink) 18%, transparent);
+  --color-outline-variant: color-mix(in oklch, var(--seed-ink) 10%, transparent);
+  --color-border-default: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-border),
+    transparent
+  );
+  --color-border-strong: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-border-strong),
+    transparent
+  );
+  --color-border-subtle: color-mix(in oklch, var(--seed-ink) 6%, transparent);
+  --color-border-muted: color-mix(in oklch, var(--seed-ink) 10%, transparent);
+  --color-border-focus: color-mix(in oklch, var(--seed-brand) 48%, transparent);
+
+  /* Text: ink ladder + brand-tinted body for harmony */
+  --color-on-surface: color-mix(
+    in oklch,
+    var(--seed-ink) 96%,
+    var(--seed-brand)
+  );
+  --color-on-surface-variant: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-secondary),
+    transparent
+  );
+  --color-on-secondary-container: var(--color-on-surface);
   --color-text-primary: var(--color-on-surface);
   --color-text-secondary: var(--color-on-surface-variant);
-  --color-text-muted: color-mix(in srgb, var(--color-on-surface-variant) 70%, transparent);
-  --color-text-inverse: #2f3131;
-  --color-primary: #ffffff;
-  --color-on-primary: #2f3131;
-  --color-primary-container: #e2e2e2;
-  --color-on-primary-container: #636565;
-  --color-primary-fixed: #e2e2e2;
+  --color-text-muted: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-muted),
+    transparent
+  );
+  --color-text-faint: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-faint),
+    transparent
+  );
+  --color-text-inverse: var(--seed-canvas);
 
-  /* Accent / semantic */
-  --color-accent: var(--color-primary);
-  --color-accent-hover: var(--color-primary-fixed);
-  --color-accent-muted: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  --color-danger: #ffb4ab;
-  --color-danger-muted: color-mix(in srgb, #93000a 55%, transparent);
-  --color-on-error: #690005;
-  --color-warning: #e8c07a;
-  --color-warning-muted: color-mix(in srgb, var(--color-warning) 14%, transparent);
-  --color-success: #8fbf8f;
-  --color-success-muted: color-mix(in srgb, var(--color-success) 16%, transparent);
-  --color-streaming: #c6c6c7;
+  /* Primary / accent = brand scale */
+  --color-primary: var(--seed-brand);
+  --color-on-primary: var(--seed-on-brand);
+  --color-primary-container: var(--seed-brand);
+  --color-on-primary-container: var(--seed-on-brand);
+  --color-primary-fixed: var(--brand-hover);
+  --color-accent: var(--seed-brand);
+  --color-accent-hover: var(--brand-hover);
+  --color-accent-muted: var(--brand-soft);
 
-  /* Diff */
-  --color-diff-add: #8fbf8f;
-  --color-diff-add-bg: color-mix(in srgb, var(--color-diff-add) 15%, transparent);
-  --color-diff-del: #ffb4ab;
-  --color-diff-del-bg: color-mix(in srgb, var(--color-diff-del) 12%, transparent);
+  /* Semantic: danger / success seeds → relative steps */
+  --color-danger: color-mix(in oklch, var(--seed-danger) 88%, var(--seed-ink));
+  --color-danger-muted: color-mix(in oklch, var(--seed-danger) 28%, transparent);
+  --color-on-error: color-mix(in oklch, var(--seed-danger) 35%, black);
+  --color-warning: color-mix(in oklch, var(--seed-brand) 55%, var(--seed-ink));
+  --color-warning-muted: var(--brand-ghost);
+  /* Keyboard focus ring (WCAG 2.4.7) — high-contrast against surfaces */
+  --color-focus-ring: color-mix(in oklch, var(--seed-brand) 70%, var(--seed-ink));
+  --color-success: color-mix(
+    in oklch,
+    var(--seed-success) 80%,
+    var(--seed-ink)
+  );
+  --color-success-muted: color-mix(
+    in oklch,
+    var(--seed-success) 14%,
+    transparent
+  );
+  --color-streaming: color-mix(
+    in oklch,
+    var(--seed-brand) 70%,
+    var(--seed-ink)
+  );
 
-  /* Modes */
-  --color-mode-ask: #8ab4d9;
-  --color-mode-plan: #b0a8d9;
-  --color-mode-build: #e8a87c;
+  /* Diff: success/danger mixes on surface */
+  --color-diff-add: color-mix(in oklch, var(--seed-success) 72%, var(--seed-ink));
+  --color-diff-add-bg: color-mix(
+    in oklch,
+    var(--seed-success) 14%,
+    transparent
+  );
+  --color-diff-del: color-mix(in oklch, var(--seed-danger) 70%, var(--seed-ink));
+  --color-diff-del-bg: color-mix(in oklch, var(--seed-danger) 12%, transparent);
+
+  /* Modes follow brand ink */
+  --color-mode-ask: color-mix(in oklch, var(--seed-ink) 72%, transparent);
+  --color-mode-plan: color-mix(in oklch, var(--seed-ink) 72%, transparent);
+  --color-mode-build: color-mix(in oklch, var(--seed-ink) 72%, transparent);
+
+  /*
+   * Mentions / command chips — app-native, no borrowed brand blue.
+   * Text sits near primary ink for readability; fill is a soft elevated surface
+   * so tokens read as chips without competing with the send controls.
+   * -border draws a hairline ring around the fill (chip edge); -icon dims the
+   * kind glyph one step below the label so the path stays the loudest part.
+   *
+   * Composer draft mirror is different: plain accent text (no fill/ring) so the
+   * caret stays on plain-text metrics. Timeline chips keep the pill chrome.
+   */
+  --color-composer-mention: #1479c9;
+  --color-mention-file: color-mix(
+    in oklch,
+    var(--seed-ink) 88%,
+    var(--seed-brand)
+  );
+  --color-mention-file-bg: color-mix(
+    in oklch,
+    var(--seed-ink) 10%,
+    transparent
+  );
+  --color-mention-file-border: color-mix(
+    in oklch,
+    var(--seed-ink) 16%,
+    transparent
+  );
+  --color-mention-file-icon: color-mix(
+    in oklch,
+    var(--color-mention-file) 62%,
+    transparent
+  );
+  --color-mention-dir: var(--color-mention-file);
+  --color-mention-dir-bg: var(--color-mention-file-bg);
+  --color-mention-dir-border: var(--color-mention-file-border);
+  --color-mention-dir-icon: var(--color-mention-file-icon);
+  /* Slash commands: slightly stronger fill so they scan as actions vs files. */
+  --color-mention-command: color-mix(
+    in oklch,
+    var(--seed-ink) 92%,
+    var(--seed-brand)
+  );
+  --color-mention-command-bg: color-mix(
+    in oklch,
+    var(--seed-ink) 14%,
+    transparent
+  );
+  --color-mention-command-border: color-mix(
+    in oklch,
+    var(--seed-ink) 22%,
+    transparent
+  );
+  --color-mention-command-icon: color-mix(
+    in oklch,
+    var(--color-mention-command) 70%,
+    transparent
+  );
+  --color-mention-skill: var(--color-mention-command);
+  --color-mention-skill-bg: var(--color-mention-command-bg);
+  --color-mention-skill-border: var(--color-mention-command-border);
+  --color-mention-skill-icon: var(--color-mention-command-icon);
+  /* Trigger glyph (`@` / `/`) inside a chip: present but never the focal point. */
+  --color-mention-trigger: color-mix(
+    in oklch,
+    var(--seed-ink) 45%,
+    transparent
+  );
 
   /* Scrollbar */
-  --color-scrollbar-thumb: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  --color-scrollbar-thumb-hover: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  --color-scrollbar-thumb: color-mix(in oklch, var(--seed-ink) 10%, transparent);
+  --color-scrollbar-thumb-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 18%,
+    transparent
+  );
 
-  /* Composer gradient fade */
+  /* Composer gradient fade into canvas */
   --gradient-composer-fade: linear-gradient(
     to top,
     var(--color-surface-lowest) 0%,
-    var(--color-surface-lowest) 40%,
+    var(--color-surface-lowest) 36%,
     transparent 100%
   );
 
-  /* Shadows */
-  --shadow-modal: 0 24px 64px color-mix(in srgb, #000 45%, transparent);
-  --shadow-popover: 0 8px 24px color-mix(in srgb, #000 35%, transparent);
-  --shadow-composer: 0 8px 32px color-mix(in srgb, #000 40%, transparent);
-  --shadow-composer-suggestions: 0 12px 28px color-mix(in srgb, #000 42%, transparent);
+  /* Shadows from canvas ink */
+  --shadow-modal: 0 24px 64px
+    color-mix(in oklch, var(--seed-canvas) 55%, transparent);
+  --shadow-popover: 0 8px 24px
+    color-mix(in oklch, var(--seed-canvas) 42%, transparent);
+  --shadow-composer: 0 12px 32px
+    color-mix(in oklch, var(--seed-canvas) 48%, transparent);
+  --shadow-composer-suggestions: 0 12px 28px
+    color-mix(in oklch, var(--seed-canvas) 44%, transparent);
 
-  /* Layout density */
-  --sidebar-width: 240px;
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --duration-slow: 240ms;
+
+  /* Layout density (non-color) */
+  --sidebar-width: 272px;
   --topnav-height: 48px;
-  --container-padding: 24px;
+  --container-padding: clamp(32px, 4.5vw, 80px);
+  --chat-max-width: none;
   --gutter: 12px;
   --unit: 4px;
   --item-gap: 2px;
-  --radius-control: 6px;
-  --radius-card: 8px;
-  --radius-lg: 4px;
-  --radius-xl: 8px;
-  --radius-full: 12px;
+  --radius-control: 8px;
+  --radius-card: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-full: 16px;
   --radius-bubble: 16px;
-  --radius-modal: 12px;
-  --radius-sm: 2px;
+  --radius-modal: 14px;
+  --radius-sm: 6px;
+  --radius-kbd: 5px;
+  --radius-pill: 100px;
 
   /* Typography */
-  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --font-size-mono-label: 11px;
-  --line-height-mono-label: 14px;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "PingFang SC", "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, monospace;
+  --font-size-mono-label: 12px;
+  --line-height-mono-label: 16px;
   --font-size-body-sm: 13px;
-  --line-height-body-sm: 18px;
-  --font-size-nav-item: 12.5px;
-  --line-height-nav-item: 16px;
-  --font-size-body-md: 14px;
-  --line-height-body-md: 20px;
-  --font-size-headline-sm: 18px;
-  --line-height-headline-sm: 24px;
+  --line-height-body-sm: 1.55;
+  --font-size-nav-item: 13px;
+  --line-height-nav-item: 15.6px;
+  --font-size-body-md: 15px;
+  --line-height-body-md: 1.65;
+  --font-size-headline-sm: 20px;
+  --line-height-headline-sm: 25px;
+  --letter-spacing-tight: -0.02em;
+  --letter-spacing-body: -0.01em;
+
+  /*
+   * Palette swatch faces (Settings picker only).
+   * These are the authored brand seeds mirrored as display chips.
+   */
+  --palette-swatch-black: #0c0d0f;
+  --palette-swatch-white: #f4f5f7;
+  --palette-swatch-blue: #057aff;
+  --palette-swatch-purple: #a550a6;
+  --palette-swatch-pink: #f74f9f;
+  --palette-swatch-red: #ff5257;
+  --palette-swatch-orange: #f78219;
+  --palette-swatch-yellow: #ffc600;
+  --palette-swatch-green: #62ba46;
+  --palette-swatch-gray: #8c8c8b;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-  background: var(--color-bg-app);
-  color: var(--color-text-primary);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-body-sm);
-  line-height: 1.45;
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
+/* Prefer engine contrast for on-brand text when available (CSS Color 5). */
+@supports (color: contrast-color(red)) {
+  :root {
+    --color-on-primary: contrast-color(var(--seed-brand));
+    --color-on-primary-container: contrast-color(var(--seed-brand));
+  }
 }
 
-* {
-  box-sizing: border-box;
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Light polarity — invert canvas/ink; formulas stay identical
+ * ═══════════════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] {
+  --seed-canvas: #f4f5f7;
+  --seed-ink: #12141a;
+  --seed-brand: #12141a;
+  --seed-on-brand: #ffffff;
+  --scheme-brand-in-surface: 0%;
+  --scheme-elevate: 4%;
+  --scheme-elevate-2: 7%;
+  --scheme-elevate-3: 11%;
+  --scheme-elevate-4: 15%;
+  --scheme-elevate-5: 19%;
+  --scheme-muted: 45%;
+  --scheme-faint: 35%;
+  --scheme-secondary: 70%;
+  --scheme-border: 10%;
+  --scheme-border-strong: 16%;
+  --scheme-overlay: 35%;
+
+  --brand-hover: color-mix(in oklch, var(--seed-brand) 78%, white);
+  --brand-pressed: color-mix(in oklch, var(--seed-brand) 70%, black);
+
+  --shadow-modal: 0 24px 64px
+    color-mix(in oklch, black 18%, transparent);
+  --shadow-popover: 0 8px 24px color-mix(in oklch, black 12%, transparent);
+  --shadow-composer: 0 12px 32px color-mix(in oklch, black 10%, transparent);
+  --shadow-composer-suggestions: 0 12px 28px
+    color-mix(in oklch, black 10%, transparent);
 }
 
-button,
-textarea,
-input {
-  font: inherit;
-  color: inherit;
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Palettes — ONLY seeds change. Whole page retints via the formulas above.
+ * Chromatic schemes raise --scheme-brand-in-surface so surfaces carry hue.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Mono (default): no brand bleed into surfaces */
+html[data-palette="mono"] {
+  --scheme-brand-in-surface: 0%;
 }
 
-button {
-  cursor: pointer;
+/* Dark mono brand seed (black swatch / default dark) */
+html[data-theme="dark"][data-palette="mono"],
+html[data-palette="mono"]:not([data-theme="light"]) {
+  --seed-brand: #e8e9eb;
+  --seed-on-brand: #0c0d0f;
+  --seed-canvas: #08090a;
+  --seed-ink: #f2f3f5;
 }
 
-code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
+/* Light mono already set under data-theme=light; keep brand ink */
+html[data-theme="light"][data-palette="mono"] {
+  --seed-brand: #12141a;
+  --seed-on-brand: #ffffff;
+  --scheme-brand-in-surface: 0%;
 }
 
-/* High-density custom scrollbar */
-::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+/*
+ * Shared chromatic dark canvas: deep, brand-tinted.
+ * Light chromatic keeps light canvas and uses brand as primary with soft tint.
+ */
+html[data-palette="blue"],
+html[data-palette="purple"],
+html[data-palette="pink"],
+html[data-palette="red"],
+html[data-palette="orange"],
+html[data-palette="yellow"],
+html[data-palette="green"],
+html[data-palette="gray"] {
+  --scheme-brand-in-surface: 14%;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+html[data-theme="light"][data-palette="blue"],
+html[data-theme="light"][data-palette="purple"],
+html[data-theme="light"][data-palette="pink"],
+html[data-theme="light"][data-palette="red"],
+html[data-theme="light"][data-palette="orange"],
+html[data-theme="light"][data-palette="yellow"],
+html[data-theme="light"][data-palette="green"],
+html[data-theme="light"][data-palette="gray"] {
+  /* Light mode: softer brand bleed so pages stay airy */
+  --scheme-brand-in-surface: 6%;
+  --seed-canvas: #f4f5f7;
+  --seed-ink: #12141a;
 }
-::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar-thumb);
-  border-radius: 4px;
+
+html[data-palette="blue"] {
+  --seed-brand: #057aff;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #070a12 88%, #057aff);
+  --seed-ink: #eef4ff;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-scrollbar-thumb-hover);
+
+html[data-theme="light"][data-palette="blue"] {
+  --seed-canvas: color-mix(in oklch, #f4f7fc 92%, #057aff);
+  --seed-ink: #0b1a33;
+  --seed-on-brand: #ffffff;
+}
+
+html[data-palette="purple"] {
+  --seed-brand: #a550a6;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #0c0810 88%, #a550a6);
+  --seed-ink: #f8eef8;
+}
+
+html[data-theme="light"][data-palette="purple"] {
+  --seed-canvas: color-mix(in oklch, #faf5fa 92%, #a550a6);
+  --seed-ink: #241028;
+  --seed-on-brand: #ffffff;
+}
+
+html[data-palette="pink"] {
+  --seed-brand: #f74f9f;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #12080e 88%, #f74f9f);
+  --seed-ink: #ffeff6;
+}
+
+html[data-theme="light"][data-palette="pink"] {
+  --seed-canvas: color-mix(in oklch, #fff5f9 92%, #f74f9f);
+  --seed-ink: #33101f;
+  --seed-on-brand: #ffffff;
+}
+
+html[data-palette="red"] {
+  --seed-brand: #ff5257;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #120808 88%, #ff5257);
+  --seed-ink: #ffefef;
+}
+
+html[data-theme="light"][data-palette="red"] {
+  --seed-canvas: color-mix(in oklch, #fff5f5 92%, #ff5257);
+  --seed-ink: #331014;
+  --seed-on-brand: #ffffff;
+}
+
+html[data-palette="orange"] {
+  --seed-brand: #f78219;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #120c06 88%, #f78219);
+  --seed-ink: #fff4e8;
+}
+
+html[data-theme="light"][data-palette="orange"] {
+  --seed-canvas: color-mix(in oklch, #fff7ef 92%, #f78219);
+  --seed-ink: #2e1808;
+  --seed-on-brand: #ffffff;
+}
+
+html[data-palette="yellow"] {
+  --seed-brand: #ffc600;
+  --seed-on-brand: #1a1400;
+  --seed-canvas: color-mix(in oklch, #100e06 88%, #ffc600);
+  --seed-ink: #fff8df;
+}
+
+html[data-theme="light"][data-palette="yellow"] {
+  --seed-canvas: color-mix(in oklch, #fffcf0 92%, #ffc600);
+  --seed-ink: #2a2200;
+  --seed-on-brand: #1a1400;
+}
+
+html[data-palette="green"] {
+  --seed-brand: #62ba46;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #080e08 88%, #62ba46);
+  --seed-ink: #eef8ea;
+}
+
+html[data-theme="light"][data-palette="green"] {
+  --seed-canvas: color-mix(in oklch, #f4faf1 92%, #62ba46);
+  --seed-ink: #122410;
+  --seed-on-brand: #ffffff;
+}
+
+html[data-palette="gray"] {
+  --seed-brand: #8c8c8b;
+  --seed-on-brand: #ffffff;
+  --seed-canvas: color-mix(in oklch, #0a0a0a 92%, #8c8c8b);
+  --seed-ink: #f0f0f0;
+  --scheme-brand-in-surface: 8%;
+}
+
+html[data-theme="light"][data-palette="gray"] {
+  --seed-canvas: color-mix(in oklch, #f5f5f5 94%, #8c8c8b);
+  --seed-ink: #1a1a1a;
+  --seed-on-brand: #ffffff;
+  --scheme-brand-in-surface: 4%;
 }
