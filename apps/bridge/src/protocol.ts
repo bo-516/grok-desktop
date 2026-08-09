@@ -73,6 +73,16 @@ export type ClientMsg =
       content: string;
       cwd?: string;
     }
+  /**
+   * Read text under workspace cwd for @mention embedding.
+   * Guards (sensitive / size / binary / directory / path sandbox) run on bridge only.
+   */
+  | {
+      type: "read_workspace_file";
+      requestId: string;
+      path: string;
+      cwd?: string;
+    }
   | { type: "ping" }
   /** Mid-session ACP set_model when supported. */
   | { type: "set_model"; sessionId?: string; modelId: string }
@@ -131,12 +141,27 @@ export type ServerMsg =
   | {
       type: "workspace_entries";
       requestId: string;
-      entries: Array<{ path: string; kind: "file" | "directory" }>;
+      entries: Array<{
+        path: string;
+        kind: "file" | "directory";
+        /** true when git check-ignore reports ignored; undefined when unknown. */
+        ignored?: boolean;
+      }>;
     }
   | {
       type: "write_workspace_file_result";
       requestId: string;
       ok: boolean;
+      error?: string;
+    }
+  | {
+      type: "read_workspace_file_result";
+      requestId: string;
+      ok: boolean;
+      content?: string;
+      mimeType?: string;
+      bytes: number;
+      reason?: string;
       error?: string;
     }
   | { type: "cli_result"; result: CliChannelResult }

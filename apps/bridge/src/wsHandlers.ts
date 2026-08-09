@@ -9,6 +9,7 @@ import type { WebSocket } from "ws";
 import type { SessionState } from "@grok-desktop/acp-core";
 import { checkEnvironment } from "./environment.js";
 import type { ClientMsg, ServerMsg } from "./protocol.js";
+import { readWorkspaceFileForEmbed } from "./readWorkspaceFile.js";
 import type { RuntimePool } from "./runtimePool.js";
 import {
   createSessionRuntime,
@@ -305,6 +306,21 @@ export function createBridgeHandlers(deps: BridgeHandlerDeps) {
           error: e instanceof Error ? e.message : String(e),
         });
       }
+      return;
+    }
+    if (msg.type === "read_workspace_file") {
+      const readCwd = msg.cwd ? path.resolve(msg.cwd) : state.defaultListCwd;
+      const result = await readWorkspaceFileForEmbed(readCwd, msg.path);
+      send(ws, {
+        type: "read_workspace_file_result",
+        requestId: msg.requestId,
+        ok: result.ok,
+        content: result.content,
+        mimeType: result.mimeType,
+        bytes: result.bytes,
+        reason: result.reason,
+        error: result.error,
+      });
       return;
     }
     if (msg.type === "close_session") {
