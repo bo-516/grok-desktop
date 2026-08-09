@@ -46,15 +46,24 @@ export function normalizeBackgroundTasks(raw: unknown): BackgroundTask[] {
         typeof r.exitCode === "number" || r.exitCode === null
           ? (r.exitCode as number | null)
           : undefined,
-      outputPreview:
-        typeof r.output === "string"
-          ? r.output.slice(-200)
-          : typeof r.outputPreview === "string"
-            ? r.outputPreview
-            : undefined,
+      outputPreview: pickOutputPreview(r),
     });
   });
   return out;
+}
+
+/**
+ * Prefer full output tail, else a dedicated preview field.
+ * @param r Raw task/terminal object fields.
+ */
+function pickOutputPreview(r: Record<string, unknown>): string | undefined {
+  if (typeof r.output === "string") {
+    return r.output.slice(-200);
+  }
+  if (typeof r.outputPreview === "string") {
+    return r.outputPreview;
+  }
+  return undefined;
 }
 
 function normalizeStatus(raw: unknown): BackgroundTaskStatus {

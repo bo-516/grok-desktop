@@ -32,8 +32,13 @@ export function matchPermissionRule(
   if (!m) {
     return p === toolName || p === detail;
   }
-  const family = m[1]!.toLowerCase();
-  const selector = m[2]!;
+  const familyRaw = m[1];
+  const selectorRaw = m[2];
+  if (familyRaw === undefined || selectorRaw === undefined) {
+    return p === toolName || p === detail;
+  }
+  const family = familyRaw.toLowerCase();
+  const selector = selectorRaw;
   const name = toolName.toLowerCase();
   const hay = `${toolName} ${detail}`.toLowerCase();
 

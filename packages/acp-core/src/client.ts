@@ -30,10 +30,12 @@ import {
   extractAvailableModelsFromSessionResult,
   extractInitializeSessionMetadata,
   extractModelFromSessionResult,
+  preferCommands,
+  resolveAvailableModels,
+  resolveReverseErrorCode,
 } from "./sessionMetadata.js";
 import type { AcpTransport } from "./transport.js";
 import type {
-  AvailableCommand,
   ContentBlock,
   InitializeResult,
   JsonRpcMessage,
@@ -220,12 +222,11 @@ export class AcpClient {
           cur.availableCommands,
           initialMetadata.availableCommands,
         ),
-        availableModels:
-          loadedModels.length > 0
-            ? loadedModels
-            : cur.availableModels && cur.availableModels.length > 0
-              ? cur.availableModels
-              : modelsFromInit,
+        availableModels: resolveAvailableModels(
+          loadedModels,
+          cur.availableModels,
+          modelsFromInit,
+        ),
         agentCapabilities: cur.agentCapabilities ?? agentCapabilities,
         status: cur.status === "disconnected" ? "idle" : cur.status,
         errorMessage: undefined,
@@ -447,16 +448,7 @@ export class AcpClient {
             : -32000;
         const msg = e instanceof Error ? e.message : String(e);
         // Prefer -32601 when handler signals method-not-found (message or code).
-        const rpcCode =
-          code === -32601 ||
-          /method not (found|implemented)/i.test(msg) ||
-          msg.includes(method)
-            ? code === -32601
-              ? -32601
-              : /method not (found|implemented)/i.test(msg)
-                ? -32601
-                : code
-            : code;
+        const rpcCode = resolveReverseErrorCode(code, msg);
         this.transport.write(
           encodeResponse(id, undefined, {
             code: rpcCode,
@@ -532,24 +524,4 @@ export class AcpClient {
   async tokenUsage(sessionId: string): Promise<unknown> {
     return this.request("session/token_usage", { sessionId });
   }
-}
-
-/**
- * Prefer a non-empty command snapshot over an empty fallback.
- * Empty arrays are treated as missing so `??` alone cannot hide initialize / update data.
- * @param preferred Live interim or seed commands (may be empty/undefined).
- * @param fallback Initialize metadata or later catalog.
- * @returns First non-empty list, or an empty array when both are empty.
- */
-function preferCommands(
-  preferred: AvailableCommand[] | undefined,
-  fallback: AvailableCommand[] | undefined,
-): AvailableCommand[] {
-  if (preferred && preferred.length > 0) {
-    return preferred;
-  }
-  if (fallback && fallback.length > 0) {
-    return fallback;
-  }
-  return preferred ?? fallback ?? [];
 }

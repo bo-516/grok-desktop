@@ -90,15 +90,18 @@ export function ComposerInputView(props: ComposerInputViewProps) {
     >
       {attachments.length > 0 ? (
         <ul className="composer-attachments" aria-label="Image attachments">
-          {attachments.map((att, i) => (
-            <li key={`${att.mimeType}-${i}`} className="composer-attachment">
+          {attachments.map((att, attIndex) => (
+            <li
+              key={`${att.mimeType}:${att.name ?? "image"}:${att.data.slice(0, 24)}`}
+              className="composer-attachment"
+            >
               <span>
                 {att.name ?? "image"} ({att.mimeType})
               </span>
               <button
                 type="button"
                 className="btn-ghost"
-                onClick={() => onRemoveAttachment?.(i)}
+                onClick={() => onRemoveAttachment?.(attIndex)}
               >
                 Remove
               </button>

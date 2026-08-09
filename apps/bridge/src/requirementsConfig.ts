@@ -18,7 +18,11 @@ export function parseSimpleToml(text: string): Record<string, unknown> {
     }
     const sec = line.match(/^\[([^\]]+)\]$/);
     if (sec) {
-      section = sec[1]!.trim();
+      const name = sec[1]?.trim();
+      if (!name) {
+        continue;
+      }
+      section = name;
       if (!out[section] || typeof out[section] !== "object") {
         out[section] = {};
       }
@@ -28,8 +32,12 @@ export function parseSimpleToml(text: string): Record<string, unknown> {
     if (!kv) {
       continue;
     }
-    const key = kv[1]!;
-    let val: unknown = kv[2]!.trim();
+    const key = kv[1];
+    const rawVal = kv[2];
+    if (key === undefined || rawVal === undefined) {
+      continue;
+    }
+    let val: unknown = rawVal.trim();
     if (val === "true") {
       val = true;
     } else if (val === "false") {

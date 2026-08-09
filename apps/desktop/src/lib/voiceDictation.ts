@@ -39,7 +39,10 @@ export function createDictation(
   rec.onresult = (ev: SpeechRecognitionEvent) => {
     let interim = "";
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const r = ev.results[i]!;
+      const r = ev.results[i];
+      if (!r) {
+        continue;
+      }
       if (r.isFinal) {
         finalText += r[0]?.transcript ?? "";
       } else {

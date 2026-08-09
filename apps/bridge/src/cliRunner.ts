@@ -94,8 +94,12 @@ export function tryParseJson(text: string): unknown | null {
     // NDJSON: last non-empty line
     const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
     for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (line === undefined) {
+        continue;
+      }
       try {
-        return JSON.parse(lines[i]!);
+        return JSON.parse(line);
       } catch {
         /* continue */
       }

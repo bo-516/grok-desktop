@@ -27,6 +27,7 @@ export type CommandPaletteWidgetProps = {
  * @param props open/onClose — parent owns visibility; Escape closes even when focus leaves the input
  */
 export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
+  const { open, onClose } = props;
   const catalog = useSessionStore((s) => s.catalog);
   const commands = useSessionStore((s) => s.session.availableCommands);
   const selectSession = useSessionStore((s) => s.selectSession);
@@ -49,30 +50,30 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
 
   useEffect(() => {
     setActive(0);
-  }, [query, props.open]);
+  }, [query, open]);
 
   useEffect(() => {
-    if (!props.open) {
+    if (!open) {
       setQuery("");
     }
-  }, [props.open]);
+  }, [open]);
 
   // Escape closes even when focus left the search input (global while open).
   useEffect(() => {
-    if (!props.open) {
+    if (!open) {
       return;
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        props.onClose();
+        onClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props.open, props.onClose]);
+  }, [open, onClose]);
 
-  if (!props.open) {
+  if (!open) {
     return null;
   }
 
@@ -81,7 +82,7 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
    * @param item Ranked row from filterPaletteItems
    */
   const run = async (item: PaletteItem) => {
-    props.onClose();
+    onClose();
     if (item.kind === "session" && item.runValue) {
       selectSession(item.runValue);
       return;
@@ -159,9 +160,12 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
               e.preventDefault();
               setActive((i) => Math.max(i - 1, 0));
             }
-            if (e.key === "Enter" && items[active]) {
-              e.preventDefault();
-              void run(items[active]!);
+            if (e.key === "Enter") {
+              const selected = items[active];
+              if (selected) {
+                e.preventDefault();
+                void run(selected);
+              }
             }
           }}
         />

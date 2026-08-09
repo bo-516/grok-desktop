@@ -28,7 +28,10 @@ export function groupTimelineTools(
   const out: TimelineRenderUnit[] = [];
   let i = 0;
   while (i < timeline.length) {
-    const item = timeline[i]!;
+    const item = timeline[i];
+    if (item === undefined) {
+      break;
+    }
     if (item.kind !== "tool") {
       out.push({ type: "item", item });
       i += 1;
@@ -45,8 +48,8 @@ export function groupTimelineTools(
     const kinds: string[] = [kind];
     let j = i + 1;
     while (j < timeline.length) {
-      const next = timeline[j]!;
-      if (next.kind !== "tool") {
+      const next = timeline[j];
+      if (next === undefined || next.kind !== "tool") {
         break;
       }
       const nextCard = toolCalls[next.toolCallId];

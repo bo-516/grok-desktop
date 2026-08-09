@@ -97,17 +97,15 @@ export function DiffReviewView(props: DiffReviewViewProps) {
             </button>
             <span className="palette-kind">{h.decision}</span>
           </div>
-          {h.lines.map((line, li) => (
+          {h.lines.map((line) => (
             <div
-              key={`${h.id}-${li}`}
+              key={`${h.id}:${line.type}:${String(line.lineNo ?? "")}:${line.text}`}
               className={cs("diff-line", {
                 "diff-line-add": line.type === "add",
                 "diff-line-del": line.type === "del",
               })}
             >
-              <span className="diff-gutter">
-                {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
-              </span>
+              <span className="diff-gutter">{diffGutterMark(line.type)}</span>
               <span className="diff-text">{line.text}</span>
             </div>
           ))}
@@ -126,4 +124,18 @@ export function DiffReviewView(props: DiffReviewViewProps) {
       </div>
     </div>
   );
+}
+
+/**
+ * Gutter character for a unified-diff style line.
+ * @param type Line kind from buildLineDiff.
+ */
+function diffGutterMark(type: "same" | "add" | "del"): string {
+  if (type === "add") {
+    return "+";
+  }
+  if (type === "del") {
+    return "-";
+  }
+  return " ";
 }

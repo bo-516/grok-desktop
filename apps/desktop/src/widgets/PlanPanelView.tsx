@@ -35,11 +35,12 @@ export function PlanPanelView(props: PlanPanelViewProps) {
   return (
     <div className="plan-panel" data-kind="plan">
       <ol className="plan-list">
-        {entries.map((entry, i) => {
+        {entries.map((entry, step) => {
           const status = entry.status ?? "pending";
+          const label = entry.title || entry.content || `Step ${step + 1}`;
           return (
             <li
-              key={`${entry.title ?? entry.content ?? i}-${i}`}
+              key={`${status}|${label}|${entry.content ?? ""}`}
               className={cs("plan-item", {
                 "plan-item-done": status === "completed",
                 "plan-item-active": status === "in_progress",
@@ -48,9 +49,7 @@ export function PlanPanelView(props: PlanPanelViewProps) {
               <span className={cs("plan-status", `plan-status-${status}`)}>
                 {status}
               </span>
-              <span className="plan-text">
-                {entry.title || entry.content || `Step ${i + 1}`}
-              </span>
+              <span className="plan-text">{label}</span>
             </li>
           );
         })}

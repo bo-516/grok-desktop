@@ -70,7 +70,10 @@ export function applyHunkDecisions(
 
   let i = 0;
   while (i < full.lines.length) {
-    const line = full.lines[i]!;
+    const line = full.lines[i];
+    if (line === undefined) {
+      break;
+    }
     if (line.type === "same") {
       out.push(line.text);
       i += 1;
@@ -78,8 +81,12 @@ export function applyHunkDecisions(
     }
     // Consume a change run
     const run: DiffLine[] = [];
-    while (i < full.lines.length && full.lines[i]!.type !== "same") {
-      run.push(full.lines[i]!);
+    while (i < full.lines.length) {
+      const cur = full.lines[i];
+      if (cur === undefined || cur.type === "same") {
+        break;
+      }
+      run.push(cur);
       i += 1;
     }
     const hunkMeta = currentHunks[hunkCursor++];

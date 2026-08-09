@@ -47,22 +47,23 @@ export type SessionActionsMenuViewProps = {
  * @returns Fragment with trigger + optional menu
  */
 export function SessionActionsMenuView(props: SessionActionsMenuViewProps) {
+  const { open, onClose, onToggle, onSelect, items } = props;
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!props.open) {
+    if (!open) {
       return;
     }
     const onDoc = (e: MouseEvent) => {
       const el = rootRef.current;
       if (el && e.target instanceof Node && !el.contains(e.target)) {
-        props.onClose();
+        onClose();
       }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        props.onClose();
+        onClose();
       }
     };
     document.addEventListener("mousedown", onDoc);
@@ -71,25 +72,25 @@ export function SessionActionsMenuView(props: SessionActionsMenuViewProps) {
       document.removeEventListener("mousedown", onDoc);
       window.removeEventListener("keydown", onKey);
     };
-  }, [props.open, props.onClose]);
+  }, [open, onClose]);
 
   return (
     <div className="top-nav-menu" ref={rootRef}>
       <button
         type="button"
         className={cs("top-nav-icon-btn", {
-          "top-nav-link-active": props.open,
+          "top-nav-link-active": open,
         })}
         title="Session actions"
         aria-haspopup="menu"
-        aria-expanded={props.open}
-        onClick={props.onToggle}
+        aria-expanded={open}
+        onClick={onToggle}
       >
         ⋯
       </button>
-      {props.open ? (
+      {open ? (
         <ul className="top-nav-menu-list" role="menu" aria-label="Session actions">
-          {props.items.map((item) => (
+          {items.map((item) => (
             <li key={item.id} role="none">
               <button
                 type="button"
@@ -97,7 +98,7 @@ export function SessionActionsMenuView(props: SessionActionsMenuViewProps) {
                 className={cs("top-nav-menu-item", {
                   "top-nav-menu-item-danger": Boolean(item.danger),
                 })}
-                onClick={() => props.onSelect(item.id)}
+                onClick={() => onSelect(item.id)}
               >
                 <span className="top-nav-menu-label">{item.label}</span>
                 {item.hint ? (

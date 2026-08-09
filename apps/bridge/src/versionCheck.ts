@@ -31,10 +31,12 @@ export function compareSemver(
   b: [number, number, number],
 ): number {
   for (let i = 0; i < 3; i++) {
-    if (a[i]! < b[i]!) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av < bv) {
       return -1;
     }
-    if (a[i]! > b[i]!) {
+    if (av > bv) {
       return 1;
     }
   }

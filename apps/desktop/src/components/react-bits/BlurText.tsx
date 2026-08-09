@@ -60,6 +60,15 @@ export function BlurText(props: BlurTextProps) {
     () => (animateBy === "words" ? text.split(" ") : text.split("")),
     [animateBy, text],
   );
+  /** Stable React keys without using the map index as key (occurrence counters). */
+  const keyedElements = useMemo(() => {
+    const counts = new Map<string, number>();
+    return elements.map((segment, index) => {
+      const n = counts.get(segment) ?? 0;
+      counts.set(segment, n + 1);
+      return { segment, index, key: `${segment}#${n}` };
+    });
+  }, [elements]);
   const [inView, setInView] = useState(false);
   const ref = useRef<HTMLParagraphElement>(null);
 
@@ -111,7 +120,7 @@ export function BlurText(props: BlurTextProps) {
 
   return (
     <p ref={ref} className={cs("rb-blur-text", className)}>
-      {elements.map((segment, index) => {
+      {keyedElements.map(({ segment, key, index }) => {
         const spanTransition: Transition = {
           duration: totalDuration,
           times,
@@ -119,17 +128,19 @@ export function BlurText(props: BlurTextProps) {
         };
         return (
           <motion.span
-            key={`${segment}-${index}`}
+            key={key}
             className="rb-blur-text-unit"
             initial={fromSnapshot}
             animate={inView ? animateKeyframes : fromSnapshot}
             transition={spanTransition}
             onAnimationComplete={
-              index === elements.length - 1 ? onAnimationComplete : undefined
+              index === keyedElements.length - 1
+                ? onAnimationComplete
+                : undefined
             }
           >
             {segment === " " ? "\u00A0" : segment}
-            {animateBy === "words" && index < elements.length - 1
+            {animateBy === "words" && index < keyedElements.length - 1
               ? "\u00A0"
               : null}
           </motion.span>

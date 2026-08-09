@@ -174,27 +174,10 @@ export function TimelineView() {
                 className="msg-agent-inner group"
                 data-find-hit={highlight ? "1" : undefined}
               >
-                {item.text ? (
-                  <div className="item-agent" data-kind="agent">
-                    <StreamingMarkdownView
-                      text={item.text}
-                      showCursor={showCursor}
-                    />
-                  </div>
-                ) : showCursor ? (
-                  <div className="item-agent" data-kind="agent">
-                    <div className="msg-status">
-                      <ShinyText text="Generating response…" speed="fast" />
-                    </div>
-                    <div className="msg-status-bars" aria-hidden="true">
-                      <div className="msg-status-bar" />
-                      <div className="msg-status-bar-mid" />
-                      <div className="msg-status-bar-faint" />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="item-agent" data-kind="agent" />
-                )}
+                <AgentMessageBody
+                  text={item.text}
+                  showCursor={showCursor}
+                />
                 {item.text ? (
                   <div className="msg-actions">
                     <button
@@ -238,4 +221,39 @@ export function TimelineView() {
       })}
     </div>
   );
+}
+
+/**
+ * Agent bubble body: streamed markdown, generating shimmer, or empty shell.
+ * @param props text from timeline item; showCursor only on last streaming row.
+ */
+function AgentMessageBody(props: {
+  text: string;
+  showCursor: boolean;
+}) {
+  if (props.text) {
+    return (
+      <div className="item-agent" data-kind="agent">
+        <StreamingMarkdownView
+          text={props.text}
+          showCursor={props.showCursor}
+        />
+      </div>
+    );
+  }
+  if (props.showCursor) {
+    return (
+      <div className="item-agent" data-kind="agent">
+        <div className="msg-status">
+          <ShinyText text="Generating response…" speed="fast" />
+        </div>
+        <div className="msg-status-bars" aria-hidden="true">
+          <div className="msg-status-bar" />
+          <div className="msg-status-bar-mid" />
+          <div className="msg-status-bar-faint" />
+        </div>
+      </div>
+    );
+  }
+  return <div className="item-agent" data-kind="agent" />;
 }

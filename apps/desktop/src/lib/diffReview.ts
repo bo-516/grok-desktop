@@ -23,25 +23,27 @@ export type DiffHunk = {
  * @param oldText Previous file content (empty for new files).
  * @param newText Updated file content.
  */
+/**
+ * Split file text into lines; drop a single trailing empty segment from split("\n").
+ * @param text Source text; null/empty → no lines.
+ */
+function splitContentLines(text: string | undefined | null): string[] {
+  if (text == null || text === "") {
+    return [];
+  }
+  const parts = String(text).split("\n");
+  if (parts.length > 1 && parts[parts.length - 1] === "") {
+    return parts.slice(0, -1);
+  }
+  return parts;
+}
+
 export function buildLineDiff(
   oldText: string | undefined | null,
   newText: string | undefined | null,
 ): DiffHunk {
-  const oldLines = String(oldText ?? "").split("\n");
-  const newLines = String(newText ?? "").split("\n");
-  // Empty single trailing: treat fully empty as zero lines
-  const a =
-    oldText == null || oldText === ""
-      ? []
-      : oldLines[oldLines.length - 1] === "" && oldLines.length > 1
-        ? oldLines.slice(0, -1)
-        : oldLines;
-  const b =
-    newText == null || newText === ""
-      ? []
-      : newLines[newLines.length - 1] === "" && newLines.length > 1
-        ? newLines.slice(0, -1)
-        : newLines;
+  const a = splitContentLines(oldText);
+  const b = splitContentLines(newText);
 
   const lines: DiffLine[] = [];
   let i = 0;
@@ -49,31 +51,35 @@ export function buildLineDiff(
   let added = 0;
   let removed = 0;
   while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      lines.push({ type: "same", text: a[i]!, lineNo: j + 1 });
+    const oldLine = a[i];
+    const newLine = b[j];
+    if (oldLine !== undefined && newLine !== undefined && oldLine === newLine) {
+      lines.push({ type: "same", text: oldLine, lineNo: j + 1 });
       i += 1;
       j += 1;
       continue;
     }
     // Prefer deletions then additions when mismatch
     if (
-      i < a.length &&
-      (j >= b.length || !b.slice(j).includes(a[i]!))
+      oldLine !== undefined &&
+      (newLine === undefined || !b.slice(j).includes(oldLine))
     ) {
-      lines.push({ type: "del", text: a[i]!, lineNo: i + 1 });
+      lines.push({ type: "del", text: oldLine, lineNo: i + 1 });
       removed += 1;
       i += 1;
       continue;
     }
-    if (j < b.length) {
-      lines.push({ type: "add", text: b[j]!, lineNo: j + 1 });
+    if (newLine !== undefined) {
+      lines.push({ type: "add", text: newLine, lineNo: j + 1 });
       added += 1;
       j += 1;
       continue;
     }
-    lines.push({ type: "del", text: a[i]!, lineNo: i + 1 });
-    removed += 1;
-    i += 1;
+    if (oldLine !== undefined) {
+      lines.push({ type: "del", text: oldLine, lineNo: i + 1 });
+      removed += 1;
+      i += 1;
+    }
   }
   return {
     summary: `+${added}/-${removed}`,

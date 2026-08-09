@@ -77,10 +77,11 @@ export function normalizeSessionsList(data: unknown): Array<{
           const m = line.match(
             /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
           );
-          if (!m) {
+          const id = m?.[1];
+          if (!id) {
             return null;
           }
-          return { id: m[1]!, title: line };
+          return { id, title: line };
         })
         .filter((r): r is { id: string; title: string } => Boolean(r));
     }
@@ -100,15 +101,25 @@ function normalizeOneSession(
     return null;
   }
   const title = String(r.title ?? r.name ?? id).trim() || id;
-  const workspace = r.cwd
-    ? String(r.cwd)
-    : r.workspace
-      ? String(r.workspace)
-      : undefined;
-  const updatedAt = r.updatedAt
-    ? String(r.updatedAt)
-    : r.updated_at
-      ? String(r.updated_at)
-      : undefined;
+  const workspace = firstStringField(r, ["cwd", "workspace"]);
+  const updatedAt = firstStringField(r, ["updatedAt", "updated_at"]);
   return { id, title, workspace, updatedAt };
+}
+
+/**
+ * First non-empty string among keys, or undefined.
+ * @param r Source record.
+ * @param keys Preference order.
+ */
+function firstStringField(
+  r: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  for (const key of keys) {
+    const v = r[key];
+    if (v != null && String(v).length > 0) {
+      return String(v);
+    }
+  }
+  return undefined;
 }

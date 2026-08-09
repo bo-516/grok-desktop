@@ -7,6 +7,7 @@ import type {
   AvailableCommand,
   AvailableModel,
   InitializeResult,
+  SessionState,
 } from "./types.js";
 
 /** Display data that can be projected onto SessionState immediately after initialize. */
@@ -211,4 +212,56 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  */
 function asArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined;
+}
+
+/**
+ * Prefer a non-empty command snapshot over an empty fallback.
+ * Empty arrays are treated as missing so `??` alone cannot hide initialize / update data.
+ * @param preferred Live interim or seed commands (may be empty/undefined).
+ * @param fallback Initialize metadata or later catalog.
+ * @returns First non-empty list, or an empty array when both are empty.
+ */
+export function preferCommands(
+  preferred: AvailableCommand[] | undefined,
+  fallback: AvailableCommand[] | undefined,
+): AvailableCommand[] {
+  if (preferred && preferred.length > 0) {
+    return preferred;
+  }
+  if (fallback && fallback.length > 0) {
+    return fallback;
+  }
+  return preferred ?? fallback ?? [];
+}
+
+/**
+ * Pick availableModels after session/load: loaded list, then current, then init.
+ * @param loaded From session/load result.
+ * @param current Existing client state.
+ * @param fromInit From initialize metadata.
+ */
+export function resolveAvailableModels(
+  loaded: NonNullable<SessionState["availableModels"]>,
+  current: SessionState["availableModels"] | undefined,
+  fromInit: NonNullable<SessionState["availableModels"]>,
+): NonNullable<SessionState["availableModels"]> {
+  if (loaded.length > 0) {
+    return loaded;
+  }
+  if (current && current.length > 0) {
+    return current;
+  }
+  return fromInit;
+}
+
+/**
+ * Map reverse-handler throw to JSON-RPC error code (-32601 for method-not-found).
+ * @param code Numeric code from error object, or fallback.
+ * @param msg Error message text.
+ */
+export function resolveReverseErrorCode(code: number, msg: string): number {
+  if (code === -32601 || /method not (found|implemented)/i.test(msg)) {
+    return -32601;
+  }
+  return code;
 }

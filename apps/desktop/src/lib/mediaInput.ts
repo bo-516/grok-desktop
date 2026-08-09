@@ -28,7 +28,11 @@ export async function fileToImageAttachment(
   const bytes = new Uint8Array(buf);
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
+    const code = bytes[i];
+    if (code === undefined) {
+      continue;
+    }
+    binary += String.fromCharCode(code);
   }
   const data = btoa(binary);
   const name = "name" in file && typeof file.name === "string" ? file.name : undefined;
