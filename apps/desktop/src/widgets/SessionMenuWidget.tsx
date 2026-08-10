@@ -5,10 +5,7 @@
 
 import { useState } from "react";
 import { useSessionStore } from "../store/sessionStore";
-import {
-  buildForkCommand,
-  normalizeSessionsList,
-} from "../lib/sessionActions";
+import { buildForkCommand } from "../lib/sessionActions";
 import {
   SessionActionsMenuView,
   type SessionMenuActionId,
@@ -46,9 +43,9 @@ export function SessionMenuWidget(props: SessionMenuWidgetProps) {
   const session = useSessionStore((s) => s.session);
   const catalog = useSessionStore((s) => s.catalog);
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
-  const runCli = useSessionStore((s) => s.runCli);
   const selectSession = useSessionStore((s) => s.selectSession);
   const newSession = useSessionStore((s) => s.newSession);
+  const syncRemoteSessions = useSessionStore((s) => s.syncRemoteSessions);
   const [open, setOpen] = useState(false);
 
   /**
@@ -66,13 +63,16 @@ export function SessionMenuWidget(props: SessionMenuWidgetProps) {
       return;
     }
     if (id === "sync") {
-      void runCli("sessions_list").then((r) => {
-        if (!r.ok) {
+      void syncRemoteSessions().then((r) => {
+        if (!r.ok || r.count === 0) {
           return;
         }
-        const rows = normalizeSessionsList(r.data);
-        if (rows[0] && catalog.length === 0) {
-          selectSession(rows[0].id);
+        // First successful sync with an empty local catalog opens the newest row.
+        if (catalog.length === 0) {
+          const first = useSessionStore.getState().catalog[0];
+          if (first) {
+            selectSession(first.id);
+          }
         }
       });
       return;

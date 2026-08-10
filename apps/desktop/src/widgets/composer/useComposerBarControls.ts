@@ -3,19 +3,20 @@
  * Extracted from useComposerWidget so the main entry stays under the 440-line limit.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, AvailableModel } from "@grok-desktop/acp-core";
 import {
   defaultComposerControls,
   formatModelLabel,
   formatThinkingLabel,
   loadPreferredModel,
-  loadThinkingEffort,
+  loadThinkingEffortRaw,
   resolveAgentDefaultModel,
   resolveModelOptions,
+  resolveThinkingEffort,
+  resolveThinkingOptions,
   savePreferredModel,
   saveThinkingEffort,
-  THINKING_OPTIONS,
   type ThinkingEffort,
 } from "./composerModels";
 import type { ComposerMenuPanel } from "./ComposerModelMenuView";
@@ -44,6 +45,7 @@ export type UseComposerBarControlsArgs = {
 
 /**
  * Local mode/model/thinking menus and selection handlers for the composer bar.
+ * Thinking options prefer grok-build `config_option_update`; otherwise official low/medium/high.
  * @param args Session mode/model + store writers; missing model falls back to preference/catalog.
  * @returns Labels, open state, and handlers for ComposerModeControlView + ComposerModelMenuView.
  */
@@ -59,7 +61,13 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
   } = args;
 
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
-  const [effort, setEffort] = useState<ThinkingEffort>(() => loadThinkingEffort());
+  const [effort, setEffort] = useState<ThinkingEffort>(() =>
+    resolveThinkingEffort(
+      undefined,
+      resolveThinkingOptions(undefined),
+      loadThinkingEffortRaw(),
+    ),
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPanel, setMenuPanel] = useState<ComposerMenuPanel>(null);
 
@@ -70,11 +78,35 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     () => resolveModelOptions(configOptions, availableModels, effectiveModel),
     [configOptions, availableModels, effectiveModel],
   );
+  /** Agent-advertised effort ladder, or official Grok 4.5 defaults. */
+  const thinkingOptions = useMemo(
+    () => resolveThinkingOptions(configOptions),
+    [configOptions],
+  );
   const modelLabel =
     models.find((m) => m.id === effectiveModel)?.label ??
     formatModelLabel(effectiveModel);
-  const effortLabel = formatThinkingLabel(effort);
+  const effortLabel = formatThinkingLabel(effort, thinkingOptions);
   const confirmedMode = normalizeAgentMode(mode);
+
+  /**
+   * When grok-build pushes config options (or the model changes the effort menu),
+   * clamp the selected effort to a valid id. Drops stale local prefs such as
+   * `xhigh` when the agent only advertises low/medium/high.
+   */
+  useEffect(() => {
+    setEffort((prev) => {
+      const next = resolveThinkingEffort(
+        configOptions,
+        thinkingOptions,
+        loadThinkingEffortRaw() ?? prev,
+      );
+      if (next !== prev) {
+        saveThinkingEffort(next);
+      }
+      return next;
+    });
+  }, [configOptions, thinkingOptions]);
 
   /**
    * Select a mode explicitly from the popover (or ⇧Tab cycle).
@@ -149,7 +181,8 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
   }, []);
 
   /**
-   * Resets model + thinking to agent/product defaults and closes the menu.
+   * Resets model + thinking to agent defaults and closes the menu.
+   * Effort uses agent currentValue when present, else official `high`.
    */
   const resetControls = useCallback(() => {
     const agentDefault = resolveAgentDefaultModel(
@@ -157,7 +190,7 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
       models,
       model,
     );
-    const defaults = defaultComposerControls(agentDefault);
+    const defaults = defaultComposerControls(agentDefault, configOptions);
     if (defaults.modelId) {
       setModel(defaults.modelId);
       savePreferredModel(defaults.modelId);
@@ -188,6 +221,6 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     selectModel,
     closeMenu,
     toggleMenu,
-    thinkingOptions: THINKING_OPTIONS,
+    thinkingOptions,
   };
 }

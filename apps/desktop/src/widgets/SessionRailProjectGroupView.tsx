@@ -1,75 +1,63 @@
 /**
- * Codex-style workspace project group for the session rail:
- * folder + name header, indented sessions, optional "Show more",
- * collapse on header click, pin on hover.
+ * Workspace project group for the session rail: tree-style folder header
+ * (animated chevron + flat folder glyph + name + count), indented sessions
+ * with a vertical guide, optional "Show more", collapse on header click.
+ * Pin lives on individual session rows, not on the folder header.
  */
 
 import cs from "classnames";
-import { Folder, Pin } from "lucide-react";
+import { ChevronDown, Folder, FolderOpen } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { ProjectGroup, SessionRecord } from "@/store/sessionCatalog";
 
 /**
- * How many sessions show under a project before "Show more" (Codex-style
- * preview). Full list appears after expand or when the group is smaller.
+ * How many sessions show under a project before "Show more" (preview cap).
+ * Full list appears after expand or when the group is smaller.
  */
 export const PROJECT_SESSION_PREVIEW = 5;
 
 export type SessionRailProjectGroupViewProps = {
   /** Workspace-clustered sessions for one project folder. */
   group: ProjectGroup;
-  /** Whether this workspace is pinned to the top of the rail. */
-  pinned: boolean;
   /** When true, session rows are fully hidden (folder-only). */
   collapsed: boolean;
   /** Toggle full collapse for this workspace. */
   onToggleCollapse: () => void;
-  /** Toggle pin for this workspace. */
-  onTogglePin: () => void;
-  /** Render one session row (keeps selection/live wiring in the parent). */
+  /** Render one session row (keeps selection/live/pin wiring in the parent). */
   renderSession: (rec: SessionRecord) => ReactNode;
 };
 
 /**
- * One project block: minimal folder header + indented session list.
- * Matches Codex mission-control hierarchy (not a heavy card header).
- * @param props Group data, pin/collapse flags, and session row renderer.
+ * One project block: folder header + nested session list with tree guide.
+ * Hierarchy is stronger than a flat pill list so project vs chat stays clear.
+ * Folder glyph has no well: closed `Folder` / open `FolderOpen` crossfade in
+ * place; chevron rotates. Two UI states with a short opacity+scale transition.
+ * @param props Group data, collapse flag, and session row renderer.
  * @returns Project section for the side-nav scroll area.
  */
 export function SessionRailProjectGroupView(
   props: SessionRailProjectGroupViewProps,
 ) {
-  const {
-    group,
-    pinned,
-    collapsed,
-    onToggleCollapse,
-    onTogglePin,
-    renderSession,
-  } = props;
+  const { group, collapsed, onToggleCollapse, renderSession } = props;
   /** Local "show full list" for this mount; resets when group collapses. */
   const [showAll, setShowAll] = useState(false);
   const total = group.sessions.length;
   const previewing =
     !collapsed && !showAll && total > PROJECT_SESSION_PREVIEW;
-  const visible = collapsed
-    ? []
-    : previewing
-      ? group.sessions.slice(0, PROJECT_SESSION_PREVIEW)
-      : group.sessions;
-  const collapseLabel = collapsed
-    ? `Expand ${group.projectName}`
-    : `Collapse ${group.projectName}`;
-  const pinLabel = pinned
-    ? `Unpin ${group.projectName}`
-    : `Pin ${group.projectName} to top`;
+  let visible = group.sessions;
+  let collapseLabel = `Collapse ${group.projectName}`;
+  if (collapsed) {
+    visible = [];
+    collapseLabel = `Expand ${group.projectName}`;
+  } else if (previewing) {
+    visible = group.sessions.slice(0, PROJECT_SESSION_PREVIEW);
+  }
 
   return (
     <div
       className={cs("project-group", {
         "project-group-collapsed": collapsed,
       })}
-      data-pinned={pinned ? "true" : "false"}
     >
       <div className="project-group-header group">
         <button
@@ -85,40 +73,39 @@ export function SessionRailProjectGroupView(
           aria-label={collapseLabel}
           title={group.workspace || group.projectName}
         >
-          <Folder
-            className="project-group-icon"
-            strokeWidth={1.6}
+          {/* One chevron rotated −90° when collapsed (points right). */}
+          <ChevronDown
+            className={cs("project-group-chevron", {
+              "project-group-chevron-collapsed": collapsed,
+            })}
+            strokeWidth={2}
             aria-hidden="true"
           />
-          <span className="project-group-name">{group.projectName}</span>
-          {pinned ? (
-            <Pin
-              className="project-group-pin-mark"
-              strokeWidth={2}
-              fill="currentColor"
-              aria-hidden="true"
+          {/* Both glyphs stacked; active one fades/scales in (no well). */}
+          <span className="project-group-folder" aria-hidden="true">
+            <Folder
+              className={cs("project-group-icon", {
+                "project-group-icon-active": collapsed,
+                "project-group-icon-idle": !collapsed,
+              })}
+              strokeWidth={1.75}
             />
-          ) : null}
+            <FolderOpen
+              className={cs("project-group-icon", {
+                "project-group-icon-active": !collapsed,
+                "project-group-icon-idle": collapsed,
+              })}
+              strokeWidth={1.75}
+            />
+          </span>
+          <span className="project-group-name">{group.projectName}</span>
         </button>
-        <button
-          type="button"
-          className={cs("project-group-pin", {
-            "project-group-pin-active": pinned,
-          })}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin();
-          }}
-          aria-pressed={pinned}
-          aria-label={pinLabel}
-          title={pinLabel}
+        <span
+          className="project-group-count"
+          aria-label={`${total} chats`}
         >
-          <Pin
-            className="project-group-icon"
-            strokeWidth={1.75}
-            fill={pinned ? "currentColor" : "none"}
-          />
-        </button>
+          {total}
+        </span>
       </div>
 
       {collapsed ? null : (
@@ -130,7 +117,7 @@ export function SessionRailProjectGroupView(
               className="project-group-more"
               onClick={() => setShowAll(true)}
             >
-              Show more
+              Show {total - PROJECT_SESSION_PREVIEW} more
             </button>
           ) : null}
         </div>

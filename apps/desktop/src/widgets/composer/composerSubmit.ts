@@ -19,6 +19,8 @@ export type ComposerSubmitContext = {
   bridgeInfo: string;
   /**
    * Resolve outgoing blocks (mentions + images). Async because bridge read.
+   * Captures draft/attachments from the submit render; safe to clear the
+   * input before the promise settles.
    */
   buildOutgoingBlocks: () => Promise<{
     blocks: ContentBlock[] | undefined;
@@ -29,6 +31,8 @@ export type ComposerSubmitContext = {
   showNotice: (text: string, tone: ComposerNoticeTone) => void;
   clearNotice: () => void;
   clearDraftIfUnchanged: (sentDraft: string) => void;
+  /** Put text back into the composer after a hard send failure. */
+  restoreDraft: (sentDraft: string) => void;
   clearAttachments: () => void;
   stopDictation: () => void;
 };
@@ -36,6 +40,8 @@ export type ComposerSubmitContext = {
 /**
  * Run one submit attempt for the current draft snapshot.
  * Queued path is plain text only (queue stores strings) with an explicit notice.
+ * Idle path clears the input immediately so create-session latency does not
+ * leave the draft sitting in the dock while the timeline already shows the bubble.
  * @param ctx Freeze-frame of composer + bridge capabilities at click time.
  * @returns void; all outcomes surface via showNotice / sendPrompt side effects.
  */
@@ -77,23 +83,27 @@ export function runComposerSubmit(ctx: ComposerSubmitContext): void {
   }
 
   ctx.clearNotice();
+  // Clear the dock immediately; buildOutgoingBlocks still uses the click-time
+  // closure values. On hard failure we restore the text (attachments are not
+  // re-hydrated — rare path after create/connect failure).
+  ctx.clearDraftIfUnchanged(ctx.sentDraft);
+  ctx.clearAttachments();
   void ctx.buildOutgoingBlocks().then(({ blocks, text, hint }) => {
     if (hint) {
       ctx.showNotice(hint, "warn");
     }
     return ctx.sendPrompt(text, blocks).then((sent) => {
       if (sent) {
-        ctx.clearDraftIfUnchanged(ctx.sentDraft);
-        ctx.clearAttachments();
         if (!hint) {
           ctx.clearNotice();
         }
       } else {
+        ctx.restoreDraft(ctx.sentDraft);
         ctx.showNotice(
           ctx.bridgeInfo.startsWith("error:") ||
             /unable|cannot|failed/i.test(ctx.bridgeInfo)
             ? ctx.bridgeInfo
-            : "Send failed — draft kept; check the connection or start a new chat",
+            : "Send failed — draft restored; check the connection or start a new chat",
           "warn",
         );
       }

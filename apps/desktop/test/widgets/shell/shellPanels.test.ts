@@ -35,4 +35,11 @@ describe("shellPanels", () => {
     assert.equal(shouldAutoOpenPlanRail(2, "plan", false), false);
     assert.equal(shouldAutoOpenPlanRail(2, null, true), false);
   });
+
+  it("shouldAutoOpenPlanRail does not steal an open preview rail", () => {
+    // openPreview sets contextRail to "preview"; plan auto-open must not flip it.
+    assert.equal(shouldAutoOpenPlanRail(2, "preview", false), false);
+    assert.equal(shouldAutoOpenPlanRail(1, "preview", false), false);
+    assert.equal(shouldAutoOpenPlanRail(5, "preview", true), false);
+  });
 });

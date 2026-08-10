@@ -1,11 +1,10 @@
 /**
  * Pure presentation layer for the Composer completion menu.
  * Does not read the store or own focus; selection and keyboard state are fully orchestrated by ComposerWidget.
- * Local min-height ratchet is presentation-only (no store) so filter updates do not drop row text.
+ * Panel height follows the current candidate count (capped by CSS max-h-80); no min-height ratchet.
  */
 
 import cs from "classnames";
-import { useLayoutEffect, useRef, useState } from "react";
 import { MentionIconView } from "@/widgets/shared";
 import type { ComposerSuggestion } from "./composerCompletion";
 
@@ -105,12 +104,6 @@ function formatInputHint(hint: string | undefined): string | null {
 const GITIGNORED_BADGE_TITLE =
   "grok 的工具默认看不到此文件，发送时会附带完整内容";
 
-/**
- * Caps the open-cycle height ratchet at the menu max height (`max-h-80` = 20rem).
- * Without this, min-height can win over max-height in CSS and grow past the scrollport.
- */
-const SUGGESTIONS_MAX_HEIGHT_PX = 320;
-
 function suggestionTooltip(suggestion: ComposerSuggestion): string | undefined {
   const parts: string[] = [];
   const description = suggestion.description?.trim() ?? "";
@@ -130,8 +123,7 @@ function suggestionTooltip(suggestion: ComposerSuggestion): string | undefined {
 /**
  * Renders the candidate list shared by `@` and `/`.
  * Each row is a non-shrinking block: title, description, and args hint stay on separate lines.
- * While the menu stays mounted, min-height only grows so bottom-anchored filter shrinks
- * do not drop remaining labels toward the input (the visual "text jitter" while typing).
+ * Shell height tracks the current suggestion count (content-sized); CSS `max-h-80` caps long lists.
  * @param props Candidates, keyboard highlight, and pick callback.
  * @returns Menu view for the textarea to associate via aria-controls.
  */
@@ -139,26 +131,6 @@ export function ComposerSuggestionListView(
   props: ComposerSuggestionListViewProps,
 ) {
   const { suggestions, activeIndex, emptyLabel, onPick } = props;
-  /** Measures the row stack only — outer minHeight must not inflate this reading. */
-  const contentRef = useRef<HTMLDivElement>(null);
-  /**
-   * Ratcheted content height in px for this open cycle.
-   * Reset automatically when the parent unmounts the menu (isMenuOpen → false).
-   */
-  const [minHeightPx, setMinHeightPx] = useState(0);
-
-  useLayoutEffect(() => {
-    const content = contentRef.current;
-    if (!content) {
-      return;
-    }
-    const measured = Math.min(content.offsetHeight, SUGGESTIONS_MAX_HEIGHT_PX);
-    setMinHeightPx((prev) => (measured > prev ? measured : prev));
-  }, [suggestions, emptyLabel]);
-
-  /** Layout-only minHeight; never carries color (color rules forbid paint styles). */
-  const shellStyle =
-    minHeightPx > 0 ? ({ minHeight: minHeightPx } as const) : undefined;
 
   if (suggestions.length === 0) {
     return (
@@ -166,9 +138,8 @@ export function ComposerSuggestionListView(
         className="composer-suggestions"
         id="composer-suggestions"
         role="status"
-        style={shellStyle}
       >
-        <div ref={contentRef} className="composer-suggestions-content">
+        <div className="composer-suggestions-content">
           <p className="composer-suggestions-empty">{emptyLabel}</p>
         </div>
       </div>
@@ -180,9 +151,8 @@ export function ComposerSuggestionListView(
       className="composer-suggestions"
       id="composer-suggestions"
       role="listbox"
-      style={shellStyle}
     >
-      <div ref={contentRef} className="composer-suggestions-content">
+      <div className="composer-suggestions-content">
         {suggestions.map((suggestion, index) => {
           const kindLabel = suggestionKindLabel(suggestion.kind);
           const optionClassName = cs("composer-suggestion", {

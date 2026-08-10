@@ -1,5 +1,5 @@
 /**
- * Slim top chrome (IA): session identity + sync + context-rail toggle + session ⋯.
+ * Slim top chrome (IA): session identity + sync + context-drawer toggle + session ⋯.
  * Mode lives in Composer; drawers live in sidebar footer + ⌘K.
  */
 
@@ -14,11 +14,16 @@ export type TopNavWidgetProps = {
   syncLabel: string;
   /** Live bridge connected. */
   live: boolean;
-  /** Whether the context rail is open (aria-pressed on ⧉). */
+  /** Whether the context drawer is open (aria-expanded on ⧉). */
   contextRailOpen: boolean;
-  /** Plan step count for the context-rail badge (0 hides badge). */
+  /**
+   * True when the open drawer is in push mode — shortens top-nav to the rail edge.
+   * When false (closed or overlay), top-nav stays full width.
+   */
+  pushMode: boolean;
+  /** Plan step count for the context-drawer badge (0 hides badge). */
   planCount: number;
-  /** Toggle right context rail (plan). */
+  /** Toggle right context drawer (plan). */
   onToggleContextRail: () => void;
   /** Open rewind confirm. */
   onRequestRewind: () => void;
@@ -34,7 +39,7 @@ export type TopNavWidgetProps = {
 };
 
 /**
- * Stateful top chrome: title, sync, context rail toggle, session menu.
+ * Stateful top chrome: title, sync, context drawer toggle, session menu.
  * @param props Shell state from useAppShellWidget.
  * @returns Fixed top-nav header.
  */
@@ -44,7 +49,11 @@ export function TopNavWidget(props: TopNavWidgetProps) {
     props.planCount > 0 ? String(props.planCount) : null;
 
   return (
-    <header className="top-nav">
+    <header
+      className={cs("top-nav", {
+        "top-nav-railed": props.pushMode,
+      })}
+    >
       <div className="top-nav-left">
         {props.onToggleRail ? (
           <button
@@ -84,7 +93,7 @@ export function TopNavWidget(props: TopNavWidgetProps) {
             })}
             title="Toggle plan / context rail (⌘\\)"
             aria-label="Toggle context rail"
-            aria-pressed={props.contextRailOpen}
+            aria-expanded={props.contextRailOpen}
             aria-controls="context-rail"
             onClick={props.onToggleContextRail}
           >

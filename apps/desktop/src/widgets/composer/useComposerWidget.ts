@@ -10,10 +10,18 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
+  type CompositionEvent,
   type KeyboardEvent,
 } from "react";
 import type { AvailableCommand, AvailableModel } from "@grok-desktop/acp-core";
 import { useSessionStore } from "../../store/sessionStore";
+import {
+  caretJumpOverMention,
+  deleteMentionUnit,
+  mentionUnitForBackspace,
+  mentionUnitForDelete,
+} from "@/lib/mentionTokens";
 import { useComposerCompletion } from "./useComposerCompletion";
 import { useComposerAttachments } from "./useComposerAttachments";
 import { useComposerDictation } from "./useComposerDictation";
@@ -30,6 +38,28 @@ import { runComposerSubmit } from "./composerSubmit";
 const EMPTY_AVAILABLE_COMMANDS: AvailableCommand[] = [];
 const EMPTY_CONFIG_OPTIONS: unknown[] = [];
 const EMPTY_AVAILABLE_MODELS: AvailableModel[] = [];
+
+/**
+ * True while an IME is composing or the key event is the platform composition
+ * marker (keyCode 229). Used so Enter confirms candidates instead of sending.
+ * @param event Keyboard event from the composer textarea.
+ * @param composing Session-local flag still true until the frame after compositionend
+ *   (some engines fire a non-composing Enter on the same tick as compositionend).
+ * @returns Whether the key must be left to the input method.
+ */
+export function isComposerImeKey(
+  event: Pick<KeyboardEvent<HTMLTextAreaElement>, "keyCode"> & {
+    nativeEvent: Pick<KeyboardEvent<HTMLTextAreaElement>["nativeEvent"], "isComposing">;
+  },
+  composing: boolean,
+): boolean {
+  return (
+    composing ||
+    event.nativeEvent.isComposing ||
+    // Deprecated but still the reliable IME marker across Chromium / Safari.
+    event.keyCode === 229
+  );
+}
 
 /**
  * Assembles state needed for Composer presentation and behavior.
@@ -134,11 +164,16 @@ export function useComposerWidget() {
   const streaming = status === "streaming";
   const waitingPermission = status === "waiting_permission";
   const canType = connectionMode !== "connecting";
+  /**
+   * Images alone only count as sendable when the agent advertises image input.
+   * Unsupported thumbs still render for local preview; send stays disabled until
+   * there is wire-ready content (text / mentions / capable images).
+   */
+  const hasSendableContent =
+    completion.draft.trim().length > 0 ||
+    (media.attachments.length > 0 && media.imageCapable);
   const canSend =
-    canType &&
-    !waitingPermission &&
-    (completion.draft.trim().length > 0 || media.attachments.length > 0) &&
-    !streaming;
+    canType && !waitingPermission && hasSendableContent && !streaming;
 
   const dictation = useComposerDictation({
     draft: completion.draft,
@@ -172,16 +207,64 @@ export function useComposerWidget() {
           current === sentDraft ? "" : current,
         );
       },
+      restoreDraft: (sentDraft) => {
+        completion.setDraft(sentDraft);
+      },
       clearAttachments: media.clearAttachments,
       stopDictation: dictation.stopDictation,
     });
   };
 
   /**
-   * Handles completion-menu keys, ⇧Tab mode cycle, and Enter send.
-   * ⇧Tab only when the completion menu is closed so Tab still accepts suggestions.
+   * Tracks IME composition across compositionend → confirming Enter.
+   * Cleared on the next animation frame so the Enter that commits a candidate
+   * does not also submit the draft.
+   */
+  const isComposingRef = useRef(false);
+
+  /**
+   * Marks the start of IME composition (pinyin / kana / hangul, etc.).
+   * @param _event Composition event from the textarea; unused (presence is enough).
+   */
+  const handleCompositionStart = useCallback((_event: CompositionEvent<HTMLTextAreaElement>) => {
+    isComposingRef.current = true;
+  }, []);
+
+  /**
+   * Marks the end of IME composition after the browser finishes committing text.
+   * Defers clearing so a same-tick confirming Enter still sees composing=true.
+   * @param _event Composition event from the textarea; unused.
+   */
+  const handleCompositionEnd = useCallback((_event: CompositionEvent<HTMLTextAreaElement>) => {
+    requestAnimationFrame(() => {
+      isComposingRef.current = false;
+    });
+  }, []);
+
+  /**
+   * Handles completion-menu keys, ⇧Tab mode cycle, atomic mention arrows /
+   * Backspace / Delete, and Enter send.
+   * ⇧Tab always cycles Build → Plan → Ask (from pendingMode when in flight) so
+   * the three modes can be flipped without waiting for agent confirmation; plain
+   * Tab still accepts the active completion row when the menu is open.
+   * While an IME is composing, all shortcuts are suppressed so Enter confirms
+   * the candidate instead of sending.
+   * Committed @file / /command chips are one unit for Left/Right (and delete):
+   * a single ArrowLeft from just after the path lands before the chip body.
    */
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isComposerImeKey(event, isComposingRef.current)) {
+      return;
+    }
+    // Mode cycle wins over completion: ⇧Tab never inserts a suggestion.
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      if (completion.isMenuOpen) {
+        completion.dismissMenu();
+      }
+      bar.cycleMode();
+      return;
+    }
     if (completion.isMenuOpen && completion.activeSuggestion) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -204,17 +287,66 @@ export function useComposerWidget() {
       completion.dismissMenu();
       return;
     }
-    // ⇧Tab cycles mode only when composer is focused and completion is closed.
+
+    const ta = event.currentTarget;
+    const selStart = ta.selectionStart;
+    const selEnd = ta.selectionEnd;
+    const collapsed = selStart === selEnd;
+    /**
+     * Plain Left/Right only (no Alt/Meta/Ctrl word-line jumps). Shift extends
+     * a selection over the whole chip; without Shift the caret hops the unit.
+     */
+    const plainArrow =
+      !event.altKey && !event.metaKey && !event.ctrlKey;
     if (
-      event.key === "Tab" &&
-      event.shiftKey &&
-      !completion.isMenuOpen &&
-      pendingMode === null
+      plainArrow &&
+      collapsed &&
+      (event.key === "ArrowLeft" || event.key === "ArrowRight")
     ) {
-      event.preventDefault();
-      bar.cycleMode();
-      return;
+      const direction = event.key === "ArrowLeft" ? "left" : "right";
+      const jumped = caretJumpOverMention(
+        completion.draft,
+        selStart,
+        direction,
+      );
+      if (jumped !== null) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          const from = Math.min(jumped, selStart);
+          const to = Math.max(jumped, selStart);
+          ta.setSelectionRange(from, to);
+        } else {
+          ta.setSelectionRange(jumped, jumped);
+        }
+        completion.handleSelection({ currentTarget: ta });
+        return;
+      }
     }
+
+    /**
+     * Atomic delete of a committed chip when the caret is collapsed on its
+     * edge (or inside after a failed snap). Range selections keep browser
+     * default so multi-char cuts still work.
+     */
+    if (
+      collapsed &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      (event.key === "Backspace" || event.key === "Delete")
+    ) {
+      const unit =
+        event.key === "Backspace"
+          ? mentionUnitForBackspace(completion.draft, selStart)
+          : mentionUnitForDelete(completion.draft, selStart);
+      if (unit) {
+        event.preventDefault();
+        const next = deleteMentionUnit(completion.draft, unit);
+        completion.setDraftWithCaret(next.value, next.caret);
+        return;
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submitDraft();
@@ -251,10 +383,14 @@ export function useComposerWidget() {
     dragOver: media.dragOver,
     effort: bar.effort,
     effortLabel: bar.effortLabel,
+    fileInputRef: media.fileInputRef,
     handleDragLeave: media.handleDragLeave,
     handleDragOver: media.handleDragOver,
     handleDrop: media.handleDrop,
     handleDraftChange: dictation.handleDraftChange,
+    handleCompositionEnd,
+    handleCompositionStart,
+    handleFileInputChange: media.handleFileInputChange,
     handleInputScroll,
     handleKeyDown,
     handlePaste: media.handlePaste,
@@ -263,6 +399,7 @@ export function useComposerWidget() {
     modeMenuOpen: bar.modeMenuOpen,
     modeOptions: bar.modeOptions,
     notice,
+    openFilePicker: media.openFilePicker,
     pendingMode,
     removeAttachment: media.removeAttachment,
     stopDictation: dictation.stopDictation,

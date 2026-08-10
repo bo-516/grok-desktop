@@ -42,15 +42,18 @@ export function TasksPanelWidget(props: {
       title="Tasks & subagents"
       onClose={props.onClose}
     >
-      <div className="side-panel-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => void sendPrompt(buildListTasksCommand())}
-        >
-          Refresh /tasks
-        </button>
-      </div>
+      {/* Sections own the drawer's vertical rhythm — side-panel-body adds no gap. */}
+      <section className="side-panel-section">
+        <div className="side-panel-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void sendPrompt(buildListTasksCommand())}
+          >
+            Refresh /tasks
+          </button>
+        </div>
+      </section>
       <section className="side-panel-section">
         <h3 className="side-panel-section-title">Subagents</h3>
         {subagents.length === 0 ? (

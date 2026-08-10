@@ -45,3 +45,31 @@ export function readDesktopRoot(rel: string): string {
 export function srcExists(rel: string): boolean {
   return existsSync(path.join(SRC_ROOT, rel));
 }
+
+/**
+ * Concatenate all UnoCSS shortcut modules (entry + domain slices).
+ * Structural tests should match against this so domain splits stay transparent.
+ * @returns Joined source of uno.shortcuts*.ts under apps/desktop.
+ */
+export function readAllUnoShortcuts(): string {
+  const files = [
+    "uno.shortcuts.ts",
+    "uno.shortcuts.sidenav.ts",
+    "uno.shortcuts.shell.ts",
+    "uno.shortcuts.timeline.ts",
+    "uno.shortcuts.composer.ts",
+    "uno.shortcuts.chrome.ts",
+  ];
+  return files.map((f) => readDesktopRoot(f)).join("\n");
+}
+
+/**
+ * Concatenate document chrome CSS (base + react-bits adaptations).
+ * @returns Joined base.css + base.react-bits.css under src/styles.
+ */
+export function readBaseStyles(): string {
+  return [
+    readSrc("styles/base.css"),
+    readSrc("styles/base.react-bits.css"),
+  ].join("\n");
+}

@@ -4,10 +4,12 @@
  * Live grok-build only (bridge → agent stdio).
  */
 
-import { TimelineView } from "./widgets/TimelineView";
+import cs from "classnames";
+import type { CSSProperties } from "react";
+import { TimelineWidget } from "@/widgets/timeline";
 import { ComposerWidget } from "@/widgets/composer";
 import { PermissionModalView } from "./widgets/PermissionModalView";
-import { SessionRailView } from "./widgets/SessionRailView";
+import { SessionRailWidget } from "@/widgets/sessionRail";
 import { TopNavWidget } from "./widgets/TopNavWidget";
 import { CommandPaletteWidget } from "./widgets/CommandPaletteWidget";
 import { ExtensionsPanelWidget } from "./widgets/ExtensionsPanelWidget";
@@ -15,7 +17,8 @@ import { SettingsPanelWidget } from "./widgets/SettingsPanelWidget";
 import { MultiSessionOverviewWidget } from "./widgets/MultiSessionOverviewWidget";
 import { TasksPanelWidget } from "./widgets/TasksPanelWidget";
 import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
-import { ContextRailWidget } from "./widgets/contextRail/ContextRailWidget";
+import { ContextDrawerWidget } from "@/widgets/contextRail";
+import { PreviewDrawerWidget } from "@/widgets/preview";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
@@ -35,19 +38,29 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <SessionRailView
+      <SessionRailWidget
         open={shell.railOpen}
         onClose={() => shell.setRailOpen(false)}
         onRequestDelete={shell.requestDelete}
         liveCount={shell.liveCount}
       />
 
-      <div className="main-column">
+      <div
+        className="main-column"
+        style={
+          shell.contextRailOpen
+            ? ({
+                ["--rail-right-width" as string]: `${shell.railWidthPx}px`,
+              } as CSSProperties)
+            : undefined
+        }
+      >
         <TopNavWidget
           title={shell.title}
           syncLabel={shell.syncLabel}
           live={shell.live}
-          contextRailOpen={shell.contextRail === "plan"}
+          contextRailOpen={shell.contextRailOpen}
+          pushMode={shell.pushMode}
           planCount={shell.planCount}
           onToggleContextRail={shell.toggleContext}
           onRequestRewind={shell.requestRewind}
@@ -56,7 +69,11 @@ export function App() {
           onToggleRail={() => shell.setRailOpen((o) => !o)}
         />
 
-        <div className="main-body">
+        <div
+          className={cs("main-body", {
+            "main-body-railed": shell.pushMode,
+          })}
+        >
           <section className="main">
             <ShellBannersView
               live={shell.live}
@@ -71,16 +88,24 @@ export function App() {
               onLogin={() => void shell.runCli("auth_login")}
               onDismissRestart={shell.clearRestartNotice}
             />
-            <TimelineView />
+            <TimelineWidget />
             <ComposerWidget />
           </section>
 
-          {shell.contextRail === "plan" ? (
-            <ContextRailWidget
-              plan={shell.session.plan}
-              onClose={shell.closeContextRail}
-            />
-          ) : null}
+          <ContextDrawerWidget
+            open={shell.planRailOpen}
+            plan={shell.session.plan}
+            effectiveLayout={shell.drawerEffectiveLayout}
+            pushPreferred={shell.drawerLayoutPref === "push"}
+            layoutClamped={shell.layoutClamped}
+            onClose={shell.closeContextRail}
+            onLayoutChange={shell.setDrawerLayout}
+          />
+          <PreviewDrawerWidget
+            open={shell.previewRailOpen}
+            effectiveLayout={shell.drawerEffectiveLayout}
+            onClose={shell.closeContextRail}
+          />
           <ExtensionsPanelWidget
             open={shell.activePanel === "extensions"}
             onClose={shell.closePanel}

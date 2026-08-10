@@ -1,9 +1,35 @@
 /**
- * Model list + thinking intensity options for the composer control menu.
- * Pure helpers; model catalog comes from the agent (availableModels / configOptions).
+ * Model list helpers for the composer control menu.
+ * Model catalog comes from the agent (availableModels / configOptions).
+ * Thinking effort lives in `composerThinking.ts` and is re-exported here for a
+ * single composer-models import path used by the bar controls and tests.
  */
 
 import type { AvailableModel } from "@grok-desktop/acp-core";
+import {
+  resolveThinkingEffort,
+  resolveThinkingOptions,
+  type ThinkingEffort,
+} from "./composerThinking";
+
+export type {
+  ThinkingEffort,
+  ThinkingOption,
+} from "./composerThinking";
+export {
+  currentEffortFromConfig,
+  DEFAULT_THINKING_EFFORT,
+  DEFAULT_THINKING_OPTIONS,
+  formatEffortIdLabel,
+  formatThinkingLabel,
+  loadThinkingEffort,
+  loadThinkingEffortRaw,
+  resolveThinkingEffort,
+  resolveThinkingOptions,
+  saveThinkingEffort,
+  thinkingFromConfigOptions,
+  THINKING_OPTIONS,
+} from "./composerThinking";
 
 /** One selectable model entry for the picker. */
 export type ComposerModelOption = {
@@ -11,23 +37,6 @@ export type ComposerModelOption = {
   label: string;
 };
 
-/** Thinking / reasoning effort levels shown in the intensity submenu. */
-export type ThinkingEffort = "low" | "medium" | "high" | "xhigh";
-
-export type ThinkingOption = {
-  id: ThinkingEffort;
-  label: string;
-};
-
-/** Thinking intensity ladder (screenshot-style light / medium / high / very high). */
-export const THINKING_OPTIONS: ThinkingOption[] = [
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "Max" },
-];
-
-const THINKING_STORAGE_KEY = "grok-desktop.thinking-effort.v1";
 const MODEL_STORAGE_KEY = "grok-desktop.preferred-model.v1";
 
 /**
@@ -52,15 +61,6 @@ export function formatModelLabel(modelId: string): string {
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join(" ");
-}
-
-/**
- * Label for a thinking effort id.
- * @param effort Selected intensity; unknown values fall back to High.
- */
-export function formatThinkingLabel(effort: string): string {
-  const hit = THINKING_OPTIONS.find((o) => o.id === effort);
-  return hit?.label ?? "High";
 }
 
 /**
@@ -203,15 +203,21 @@ export function resolveModelOptions(
 /**
  * Default model + thinking for "Reset to defaults".
  * Model comes from the agent (config current, else first catalog entry, else session model).
+ * Effort prefers agent currentValue when present and valid; else official default `high`.
  * @param agentDefaultModel Agent-preferred id; empty string leaves model unset for the caller to skip.
+ * @param configOptions Optional agent config snapshot for effort currentValue / allowed list.
  */
-export function defaultComposerControls(agentDefaultModel = ""): {
+export function defaultComposerControls(
+  agentDefaultModel = "",
+  configOptions?: unknown[],
+): {
   modelId: string;
   effort: ThinkingEffort;
 } {
+  const options = resolveThinkingOptions(configOptions);
   return {
     modelId: agentDefaultModel.trim(),
-    effort: "high",
+    effort: resolveThinkingEffort(configOptions, options, null),
   };
 }
 
@@ -233,40 +239,6 @@ export function resolveAgentDefaultModel(
     sessionModel.trim() ||
     ""
   );
-}
-
-/**
- * Load persisted thinking effort from localStorage.
- * @returns Valid effort or default `high`.
- */
-export function loadThinkingEffort(): ThinkingEffort {
-  if (typeof localStorage === "undefined") {
-    return "high";
-  }
-  try {
-    const raw = localStorage.getItem(THINKING_STORAGE_KEY);
-    if (raw && THINKING_OPTIONS.some((o) => o.id === raw)) {
-      return raw as ThinkingEffort;
-    }
-  } catch {
-    /* private mode */
-  }
-  return "high";
-}
-
-/**
- * Persist thinking effort for the next session.
- * @param effort Selected intensity id.
- */
-export function saveThinkingEffort(effort: ThinkingEffort): void {
-  if (typeof localStorage === "undefined") {
-    return;
-  }
-  try {
-    localStorage.setItem(THINKING_STORAGE_KEY, effort);
-  } catch {
-    /* ignore */
-  }
 }
 
 /**

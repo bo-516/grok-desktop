@@ -6,6 +6,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  readAllUnoShortcuts,
+  readBaseStyles,
   readDesktopRoot,
   readSrc,
   srcExists,
@@ -13,15 +15,36 @@ import {
 
 describe("UI surface presence", () => {
   it("timeline renders user/agent/thought/tool kinds", () => {
-    const timeline = readSrc("widgets/TimelineView.tsx");
+    const timeline = readSrc("widgets/timeline/TimelineView.tsx");
+    const widget = readSrc("widgets/timeline/TimelineWidget.tsx");
+    const hook = readSrc("widgets/timeline/useTimelineWidget.ts");
     const thought = readSrc("widgets/timeline/ThoughtWidget.tsx");
     const tool = readSrc("widgets/timeline/ToolCardView.tsx");
-    assert.match(timeline, /data-kind="user"/);
-    assert.match(timeline, /data-kind="agent"/);
-    assert.match(timeline, /StreamingMarkdownView/);
-    assert.match(thought, /data-kind="thought"/);
+    // Stateful entry is TimelineWidget + useTimelineWidget; View is pure.
+    assert.match(widget, /useTimelineWidget|TimelineView/);
+    assert.match(hook, /useSessionStore|buildTimelineRenderUnits/);
+    assert.doesNotMatch(timeline, /useSessionStore/);
+    assert.match(thought, /data-kind="thought"|dataKind="thought"/);
     assert.match(tool, /data-kind="tool"/);
     assert.match(timeline, /toolCalls/);
+    // User bubble: text + image thumbs via UserMessageView; never paint
+    // ContentBlock.type names (resource embeds used to leak "resource").
+    assert.match(timeline, /UserMessageView/);
+    // Residual work units share TurnStepView (no parallel agent/thought/tool tree).
+    assert.match(timeline, /TurnStepView/);
+    assert.doesNotMatch(timeline, /ThoughtGroupView|ToolGroupView|ThoughtWidget|ToolCardView/);
+    const userMsg = readSrc("widgets/timeline/UserMessageView.tsx");
+    assert.match(userMsg, /userTextFromBlocks|userImagesFromBlocks/);
+    assert.match(userMsg, /data-kind="user"/);
+    assert.match(userMsg, /msg-user-attachment-thumb/);
+    // Click-to-preview uses the shared ImageLightboxView (composer + history).
+    assert.match(userMsg, /ImageLightboxView|handleOpenImage|lightboxIndex/);
+    const lightbox = readSrc("widgets/shared/stateless/ImageLightboxView.tsx");
+    assert.match(lightbox, /image-lightbox/);
+    assert.doesNotMatch(
+      userMsg,
+      /b\.type === ["']text["'] \? b\.text : b\.type/,
+    );
   });
 
   it("App surfaces auth environment banner hooks", () => {
@@ -98,6 +121,15 @@ describe("UI surface presence", () => {
     // Mic chip must not swap its visible label to "Listening" (bar width flash).
     assert.doesNotMatch(view, /dictating\s*\?\s*["']Listening["']/);
     assert.match(view, /composer-mic-chip/);
+    // Codex-style + attach control opens the image file picker.
+    assert.match(view, /openFilePicker/);
+    assert.match(view, /composer-attach-btn/);
+    assert.match(view, /type="file"/);
+    assert.match(view, /accept="image\/\*"/);
+    assert.match(view, /composer-attach-input/);
+    // File input stays outside .composer flex so open/focus cannot jitter height.
+    assert.match(view, /composer-dock-inner[\s\S]*composer-attach-input[\s\S]*className="composer"/);
+    assert.match(hook, /openFilePicker|handleFileInputChange|fileInputRef/);
   });
 
   it("permission UI offers selectable outcomes", () => {
@@ -109,12 +141,12 @@ describe("UI surface presence", () => {
 
   it("App shell matches prototype regions", () => {
     const src = readSrc("App.tsx");
-    assert.match(src, /SessionRailView/);
-    assert.match(src, /TimelineView/);
+    assert.match(src, /SessionRailWidget/);
+    assert.match(src, /TimelineWidget/);
     assert.match(src, /ComposerWidget/);
     assert.match(src, /TopNavWidget/);
     assert.match(src, /main-column/);
-    assert.match(src, /ContextRailWidget/);
+    assert.match(src, /ContextDrawerWidget/);
     assert.match(src, /ShellBannersView/);
     assert.match(src, /useAppShellWidget/);
     assert.doesNotMatch(src, /Viewing saved history|read-only/);
@@ -122,7 +154,7 @@ describe("UI surface presence", () => {
     assert.match(top, /top-nav/);
   });
 
-  it("surfaces command palette, extensions, settings, plan approval, confirm", () => {
+  it("surfaces command palette, extensions, settings, plan display-only, confirm", () => {
     const app = readSrc("App.tsx");
     assert.match(app, /CommandPaletteWidget/);
     assert.match(app, /ExtensionsPanelWidget/);
@@ -135,16 +167,128 @@ describe("UI surface presence", () => {
     assert.match(shell, /side-panel-backdrop/);
     assert.match(shell, /side-panel-close/);
     assert.match(shell, /Escape/);
+    // Modal focus: enter trap + restore; skip Escape under stacked alertdialog.
+    assert.match(shell, /focusInitialIn|trapFocusTab|restoreFocus/);
+    assert.match(shell, /alertdialog/);
+    const confirm = readSrc("widgets/ConfirmDialogView.tsx");
+    assert.match(confirm, /onCancel/);
+    assert.match(confirm, /Escape/);
+    assert.match(confirm, /stopImmediatePropagation/);
+    assert.match(confirm, /onBackdropClick|onClick/);
+    assert.match(confirm, /trapFocusTab/);
     const plan = readSrc("widgets/PlanPanelView.tsx");
-    assert.match(plan, /Approve|plan-approval/);
+    assert.doesNotMatch(plan, /Approve|plan-approval|sendPrompt|useSessionStore/);
+    assert.doesNotMatch(plan, /showApproval|PlanApprovalDock/);
     const tool = readSrc("widgets/timeline/ToolCardView.tsx");
-    assert.match(tool, /DiffReviewView|SpotlightCard/);
-    const diff = readSrc("widgets/timeline/DiffReviewView.tsx");
-    assert.match(diff, /buildLineDiff|mini-diff|applyHunkDecisions/);
+    // Tool cards are flat surfaces: no pointer-following spotlight under them.
+    assert.doesNotMatch(tool, /SpotlightCard/);
+    assert.match(tool, /EditSummaryRowView/);
+    assert.match(tool, /openPreview/);
+    assert.doesNotMatch(tool, /DiffReviewView/);
+    const diff = readSrc("widgets/preview/DiffReviewView.tsx");
+    assert.match(diff, /applyHunkDecisions/);
+  });
+
+  it("context drawer is always-mounted full-height with prefs and open prop", () => {
+    const app = readSrc("App.tsx");
+    assert.match(app, /ContextDrawerWidget/);
+    assert.match(app, /PreviewDrawerWidget/);
+    assert.match(app, /open=\{shell\.planRailOpen\}/);
+    assert.match(app, /open=\{shell\.previewRailOpen\}/);
+    assert.doesNotMatch(app, /contextRail === "plan" \? </);
+    assert.match(app, /main-body-railed/);
+    assert.match(app, /from "@\/widgets\/contextRail"/);
+    assert.match(app, /from "@\/widgets\/preview"/);
+
+    const drawer = readSrc("widgets/contextRail/ContextDrawerWidget.tsx");
+    assert.match(drawer, /id="context-rail"/);
+    assert.match(drawer, /context-drawer/);
+    assert.match(drawer, /context-drawer-open|context-drawer-closed/);
+    assert.match(drawer, /inert/);
+    assert.match(drawer, /context-drawer-head/);
+    assert.match(drawer, /Escape/);
+    assert.match(drawer, /from "@\/components\/ui\/Checkbox"/);
+    assert.match(drawer, /Checkbox/);
+    assert.doesNotMatch(drawer, /type="checkbox"/);
+    assert.doesNotMatch(drawer, /showApproval|PlanApprovalDock|sendPrompt/);
+
+    const top = readSrc("widgets/TopNavWidget.tsx");
+    assert.match(top, /aria-expanded=\{props\.contextRailOpen\}/);
+    assert.match(top, /aria-controls="context-rail"/);
+    assert.match(top, /top-nav-railed/);
+    assert.doesNotMatch(top, /aria-pressed=\{props\.contextRailOpen\}/);
+
+    const shellHook = readSrc("widgets/shell/useAppShellWidget.ts");
+    assert.match(shellHook, /loadContextDrawerPrefs|saveContextDrawerPrefs/);
+    assert.match(shellHook, /effectiveDrawerLayout|DRAWER_PUSH_MIN_WIDTH/);
+    assert.match(shellHook, /matchMedia/);
+
+    const prefs = readSrc("lib/contextDrawerPrefs.ts");
+    assert.match(prefs, /export function normalizeContextDrawerPrefs/);
+    assert.match(prefs, /export function effectiveDrawerLayout/);
+    assert.match(prefs, /export function loadContextDrawerPrefs/);
+    assert.match(prefs, /export function saveContextDrawerPrefs/);
+
+    const chrome = readDesktopRoot("uno.shortcuts.chrome.ts");
+    assert.match(chrome, /"context-drawer":/);
+    assert.match(chrome, /"context-drawer-open":/);
+    assert.match(chrome, /"context-drawer-closed":/);
+    // Closed slide must use own-width 100% (preview is wider than plan rail token).
+    assert.match(chrome, /context-drawer-closed[\s\S]*?translate-x-full/);
+    assert.doesNotMatch(chrome, /plan-approval/);
+
+    const shellShortcuts = readDesktopRoot("uno.shortcuts.shell.ts");
+    assert.match(shellShortcuts, /"top-nav-railed":/);
+    assert.match(shellShortcuts, /"main-body-railed":/);
+    // Close-frame sync: transition must live on the base class so removing
+    // *-railed still eases padding/right while the drawer translates out.
+    assert.match(
+      shellShortcuts,
+      /"main-body":\s*[\s\S]*?transition-\[padding-right\][\s\S]*?duration-slow/,
+    );
+    assert.match(
+      shellShortcuts,
+      /"top-nav":\s*[\s\S]*?transition-\[right\][\s\S]*?duration-slow/,
+    );
+    assert.doesNotMatch(
+      shellShortcuts,
+      /"main-body-railed":\s*"[^"]*transition/,
+    );
+
+    const uno = readDesktopRoot("uno.config.ts");
+    assert.match(uno, /translate-x-rail/);
+    assert.match(uno, /translate-x-full/);
+    assert.match(uno, /translate-x-none/);
+    assert.match(uno, /"right-rail"/);
+    assert.match(uno, /"pr-rail"/);
+
+    const colors = readSrc("styles/defineColor.css");
+    assert.match(colors, /--rail-right-width:\s*280px/);
+    assert.match(colors, /--preview-width-default:\s*560px/);
+    assert.match(colors, /--preview-width-min:\s*420px/);
+    assert.match(colors, /--preview-width-max:\s*900px/);
+
+    const panels = readSrc("widgets/shell/shellPanels.ts");
+    assert.match(panels, /ContextRailId\s*=\s*"plan"\s*\|\s*"preview"/);
+    assert.match(panels, /contextRailWidthPx/);
+
+    const previewDrawer = readSrc("widgets/preview/PreviewDrawerWidget.tsx");
+    assert.match(previewDrawer, /id="preview-rail"/);
+    assert.match(previewDrawer, /preview-resize-handle|setWidth|clampPreviewWidth/);
+    assert.match(previewDrawer, /usePreviewSource/);
+    // Remount DiffReviewView when switching targets (avoids stale hunk state).
+    assert.match(previewDrawer, /key=\{`\$\{source\.toolCallId\}:\$\{source\.path\}`\}/);
+
+    const previewSource = readSrc("widgets/preview/usePreviewSource.ts");
+    assert.match(previewSource, /buildTurnChangeSetById/);
+
+    const shellPanelsSrc = readSrc("widgets/shell/shellPanels.ts");
+    // Preview rail must not be auto-stolen by plan open.
+    assert.match(shellPanelsSrc, /contextRail !== null/);
   });
 
   it("Uno shortcuts define side-panel and btn-ghost (no white-out drawers)", () => {
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
+    const shortcuts = readAllUnoShortcuts();
     assert.match(shortcuts, /"side-panel":/);
     assert.match(shortcuts, /bg-elevated/);
     assert.match(shortcuts, /"btn-ghost":/);
@@ -153,7 +297,7 @@ describe("UI surface presence", () => {
   });
 
   it("top-nav shortcuts cover slim chrome only (no mode tabs)", () => {
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
+    const shortcuts = readAllUnoShortcuts();
     const top = readSrc("widgets/TopNavWidget.tsx");
     const menuView = readSrc("widgets/SessionActionsMenuView.tsx");
     const shortcutNames = [
@@ -204,17 +348,18 @@ describe("UI surface presence", () => {
 
   it("settings sticky apply, dirty helpers, no ticket ids, tokenized controls", () => {
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
+    const security = readSrc("widgets/settings/SettingsSecuritySectionView.tsx");
     const shell = readSrc("widgets/SidePanelShell.tsx");
     const draft = readSrc("lib/settingsDraft.ts");
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
+    const shortcuts = readAllUnoShortcuts();
     assert.match(shell, /footer/);
     assert.match(shortcuts, /"side-panel-footer":/);
     assert.match(settings, /isSettingsDraftDirty|dirty/);
     assert.match(settings, /Discard unsaved|requestClose/);
     assert.doesNotMatch(settings, /J-06/);
-    assert.match(settings, /Security|security-sensitive|No sandbox/);
-    assert.match(settings, /from "@\/components\/ui\/Checkbox"/);
-    assert.match(settings, /from "@\/components\/ui\/Select"/);
+    assert.match(security, /Security|security-sensitive|No sandbox/);
+    assert.match(security, /from "@\/components\/ui\/Checkbox"/);
+    assert.match(security, /from "@\/components\/ui\/Select"/);
     assert.match(draft, /isSettingsDraftDirty|settingsDraftEqual/);
     const checkbox = readSrc("components/ui/Checkbox.tsx");
     assert.match(checkbox, /type="checkbox"/);
@@ -222,7 +367,7 @@ describe("UI surface presence", () => {
   });
 
   it("focus-visible tokens and FadeContent reduced-motion / default readable", () => {
-    const base = readSrc("styles/base.css");
+    const base = readBaseStyles();
     const colors = readSrc("styles/defineColor.css");
     const fade = readSrc("components/react-bits/FadeContent.tsx");
     assert.match(colors, /--color-focus-ring/);
@@ -233,10 +378,11 @@ describe("UI surface presence", () => {
     assert.match(fade, /rb-fade-pending/);
   });
 
-  it("top-nav exposes context-rail aria and session menu danger", () => {
+  it("top-nav exposes context-drawer aria-expanded and session menu danger", () => {
     const top = readSrc("widgets/TopNavWidget.tsx");
-    assert.match(top, /aria-pressed/);
+    assert.match(top, /aria-expanded=\{props\.contextRailOpen\}/);
     assert.match(top, /aria-controls="context-rail"/);
+    assert.doesNotMatch(top, /aria-pressed=\{props\.contextRailOpen\}/);
     assert.doesNotMatch(top, /role="tab"/);
     assert.doesNotMatch(top, /aria-selected/);
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
@@ -245,20 +391,22 @@ describe("UI surface presence", () => {
   });
 
   it("narrow shell collapses rail off-canvas and keeps top-nav full-bleed", () => {
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
+    const shortcuts = readAllUnoShortcuts();
+    const sideNav = readDesktopRoot("uno.shortcuts.sidenav.ts");
     const base = readSrc("styles/base.css");
     assert.match(shortcuts, /"main-column":[\s\S]*?max-sm:ml-0/);
     assert.match(shortcuts, /"top-nav":[\s\S]*?max-sm:left-0/);
     assert.match(shortcuts, /"top-nav-rail-btn":/);
-    assert.match(base, /@media \(max-width:\s*639px\)/);
-    assert.match(base, /\.side-nav[\s\S]*?translateX\(-100%\)/);
-    assert.match(base, /\.side-nav\[data-open="true"\]/);
+    // Narrow shell lives only in Uno max-sm (no duplicate base.css media query).
+    assert.doesNotMatch(base, /@media \(max-width:\s*639px\)/);
+    assert.match(sideNav, /"side-nav":[\s\S]*?max-sm:translate-x-\[-100%\]/);
+    assert.match(sideNav, /max-sm:data-\[open=true\]:translate-x-0/);
     const top = readSrc("widgets/TopNavWidget.tsx");
     assert.match(top, /onToggleRail|top-nav-rail-btn/);
-    const rail = readSrc("widgets/SessionRailView.tsx");
-    assert.match(rail, /data-open|onClose/);
+    const rail = readSrc("widgets/sessionRail/SessionRailView.tsx");
+    assert.match(rail, /data-open|onClose|railOpen/);
     assert.match(
-      shortcuts,
+      sideNav,
       /"side-nav-search":[\s\S]*?focus-visible:\(outline-none ring-2/,
     );
     // Field focus chrome is on the wrap (border color), not a second ring on the textarea.
@@ -284,26 +432,80 @@ describe("UI surface presence", () => {
   });
 
   it("tool path chips and groups have dark-theme shortcuts (no native white buttons)", () => {
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
+    const shortcuts = readAllUnoShortcuts();
     assert.match(shortcuts, /"tool-loc-link":/);
     assert.match(shortcuts, /"tool-locations":/);
-    assert.match(shortcuts, /"tool-group-toggle":/);
+    assert.match(shortcuts, /"turn-step":/);
+    assert.match(shortcuts, /"turn-rail":/);
+    assert.match(shortcuts, /"turn-block":/);
+    assert.doesNotMatch(shortcuts, /msg-status-bar/);
+    assert.doesNotMatch(shortcuts, /"item-process":/);
     assert.match(shortcuts, /"badge-ok":/);
     const base = readSrc("styles/base.css");
     assert.match(base, /button\s*\{[^}]*background-color:\s*transparent/s);
   });
 
+  it("tool paths render workspace-relative and copy the absolute path", () => {
+    const tool = readSrc("widgets/timeline/ToolCardView.tsx");
+    // Shortening needs the workspace root; the title carries a path too.
+    assert.match(tool, /session\.workspace/);
+    assert.match(tool, /toPathDisplay/);
+    const head = readSrc("widgets/timeline/ToolCardHeadView.tsx");
+    assert.match(head, /splitTitlePath/);
+    assert.match(head, /PathLabelView/);
+    const locations = readSrc("widgets/timeline/ToolLocationListView.tsx");
+    assert.match(locations, /toPathDisplay/);
+    assert.match(locations, /onDoubleClick/);
+    // Copy must hand over the real path, never the shortened label.
+    assert.match(locations, /onCopy\(display\.full\)/);
+    assert.match(locations, /event\.detail > 1/);
+    const editRow = readSrc("widgets/timeline/EditSummaryRowView.tsx");
+    assert.match(editRow, /onDoubleClick=\{onCopy\}/);
+    assert.match(editRow, /data-path=\{display\.full\}/);
+    const label = readSrc("widgets/shared/stateless/PathLabelView.tsx");
+    assert.match(label, /path-label-dir/);
+    assert.match(label, /path-label-base/);
+    const shortcuts = readAllUnoShortcuts();
+    // Only the directory half may be ellipsized — the file name stays whole.
+    assert.match(shortcuts, /"path-label-dir":[^"]*"[^"]*text-ellipsis/);
+    assert.match(shortcuts, /"path-label-base":[^"]*"[^"]*shrink-0/);
+    // Preview drawer head speaks the same path language as the timeline.
+    const previewHead = readSrc("widgets/preview/PreviewHeadView.tsx");
+    assert.match(previewHead, /PathLabelView/);
+    assert.match(previewHead, /data-path=\{display\.full\}/);
+    assert.match(previewHead, /onDoubleClick=\{onCopyPath\}/);
+    // Dead copy-class helper is gone now that the head owns a real copy path.
+    assert.doesNotMatch(previewHead, /previewCopyClass/);
+    const previewDrawer = readSrc("widgets/preview/PreviewDrawerWidget.tsx");
+    assert.match(previewDrawer, /session\.workspace/);
+    assert.match(previewDrawer, /toPathDisplay/);
+  });
+
+  it("turn orchestration: answer owns Copy/Markdown; narration steps do not", () => {
+    const turnAnswer = readSrc("widgets/timeline/TurnAnswerView.tsx");
+    assert.match(turnAnswer, /StreamingMarkdownView/);
+    assert.match(turnAnswer, /title="Copy"/);
+    assert.match(turnAnswer, /msg-action-btn/);
+    const turnStep = readSrc("widgets/timeline/TurnStepView.tsx");
+    assert.doesNotMatch(turnStep, /StreamingMarkdownView/);
+    // No Copy button / action row on mid-turn narration steps.
+    assert.doesNotMatch(turnStep, /msg-action|clipboard|title="Copy"/);
+    const turnIndex = readSrc("widgets/timeline/index.ts");
+    assert.match(turnIndex, /TurnBlockWidget/);
+    assert.doesNotMatch(turnIndex, /ProcessGroupView/);
+    const grouping = readSrc("lib/turnGrouping.ts");
+    assert.match(grouping, /groupTimelineTurns|isTurnLive/);
+  });
+
   it("React Bits adaptations ship and wire into shell surfaces", () => {
     const index = readSrc("components/react-bits/index.ts");
     assert.match(index, /FadeContent|BlurText|ShinyText|StarBorder|SpotlightCard|ClickSpark|GlareHover/);
-    const timeline = readSrc("widgets/TimelineView.tsx");
+    const timeline = readSrc("widgets/timeline/TimelineView.tsx");
     assert.match(timeline, /BlurText|FadeContent|ShinyText/);
-    const tool = readSrc("widgets/timeline/ToolCardView.tsx");
-    assert.match(tool, /SpotlightCard/);
     const composer = readSrc("widgets/composer/ComposerWidget.tsx");
     assert.match(composer, /ClickSpark|StarBorder/);
-    const base = readSrc("styles/base.css");
-    assert.match(base, /\.rb-shiny-text|\.rb-star-border|\.rb-spotlight-card/);
+    const rb = readSrc("styles/base.react-bits.css");
+    assert.match(rb, /\.rb-shiny-text|\.rb-star-border|\.rb-spotlight-card/);
   });
 
   it("setModel/setMode call live bridge (not local-only) with pendingMode", () => {
@@ -328,11 +530,19 @@ describe("UI surface presence", () => {
     assert.match(app, /buildRewindCommand/);
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
     assert.match(menu, /buildForkCommand|runSessionMenuAction/);
-    const timeline = readSrc("widgets/TimelineView.tsx");
-    assert.match(timeline, /groupTimelineTools|ToolGroupView/);
-    assert.match(timeline, /groupTimelineThoughts|ThoughtGroupView/);
+    const timeline = readSrc("widgets/timeline/TimelineView.tsx");
+    const hook = readSrc("widgets/timeline/useTimelineWidget.ts");
+    const pipeline = readSrc("lib/timelinePipeline.ts");
+    assert.match(pipeline, /buildTimelineRenderUnits/);
+    assert.match(hook, /buildTimelineRenderUnits/);
+    assert.match(timeline, /TurnBlockWidget|TurnStepView/);
+    // Residual tool/thought groups must not keep a parallel JSX tree.
+    assert.doesNotMatch(timeline, /ToolGroupView|ThoughtGroupView/);
+    assert.doesNotMatch(timeline, /groupTimelineProcess|ProcessGroupView/);
+    assert.doesNotMatch(timeline, /msg-status-bar/);
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
     assert.match(settings, /denyRules|allowRules|effort/);
+    assert.match(settings, /SettingsSpawnSectionView|SettingsSecuritySectionView/);
   });
 
   it("native theme, badge, diff hunk apply, media/ops commands ship", () => {
@@ -347,7 +557,7 @@ describe("UI surface presence", () => {
     assert.match(paletteLib, /imagine-video|prefillComposer/);
     const composer = readSrc("widgets/composer/useComposerWidget.ts");
     assert.match(composer, /grok-desktop:prefill-composer/);
-    const diff = readSrc("widgets/timeline/DiffReviewView.tsx");
+    const diff = readSrc("widgets/preview/DiffReviewView.tsx");
     assert.match(diff, /applyHunkDecisions/);
     assert.match(diff, /writeWorkspaceFile|Accept|Reject/);
     const themeCss = readSrc("styles/defineColor.css");
@@ -365,7 +575,9 @@ describe("UI surface presence", () => {
     assert.match(themeCss, /#8c8c8b|#8C8C8B/i);
     assert.match(themeCss, /--scheme-brand-in-surface/);
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
-    assert.match(settings, /COLOR_PALETTE_OPTIONS|pickPalette|UI color/);
+    const appearance = readSrc("widgets/settings/SettingsAppearanceSectionView.tsx");
+    assert.match(settings, /pickPalette/);
+    assert.match(appearance, /COLOR_PALETTE_OPTIONS|UI color/);
     const palette = readSrc("lib/colorPalette.ts");
     assert.match(palette, /applyPalette|loadPalette/);
     const compat = readSrc("lib/compatToggles.ts");
@@ -377,19 +589,33 @@ describe("UI surface presence", () => {
     const input = readSrc("widgets/composer/ComposerInputView.tsx");
     assert.match(input, /onDrop|onDragOver/);
     assert.match(input, /data-drag-over|data-state/);
+    assert.match(input, /composer-attachment-thumb|attachmentPreviewSrc/);
+    assert.match(input, /canInlinePreviewAttachment|openAttachmentExternally/);
+    assert.match(input, /ImageLightboxView|handleOpenAttachment/);
+    assert.match(input, /onRemoveAttachment/);
     const hook = readSrc("widgets/composer/useComposerWidget.ts");
     const attachments = readSrc("widgets/composer/useComposerAttachments.ts");
     assert.match(attachments, /processDataTransfer|handleDrop/);
     assert.match(attachments, /buildPromptBlocks|acceptImageAttachment/);
     assert.match(attachments, /showNotice/);
+    assert.match(attachments, /openFilePicker|handleFileInputChange|fileInputRef/);
+    // Prefer showPicker so focusing a clipped input does not scroll/jitter the dock.
+    assert.match(attachments, /showPicker/);
+    const composerShortcuts = readSrc("../uno.shortcuts.composer.ts");
+    assert.match(
+      composerShortcuts,
+      /"composer-attach-input":\s*"[^"]*fixed[^"]*h-0[^"]*w-0/,
+    );
+    assert.doesNotMatch(composerShortcuts, /composer-attach-input[\s\S]{0,200}clip:rect/);
     assert.match(hook, /useComposerAttachments|agentCapabilities/);
     assert.doesNotMatch(
       attachments,
       /agentSupportsImageInput\(\{\s*promptCapabilities:\s*\{\s*image:\s*false/,
     );
     const store = readSrc("store/sessionStore.ts");
-    assert.match(store, /blocks\?/);
-    assert.match(store, /handle\.prompt\(text,\s*sid/);
+    const prompt = readSrc("store/sessionStorePrompt.ts");
+    assert.match(store, /sendPromptAction|blocks/);
+    assert.match(prompt, /handle\.prompt\(text,\s*sid/);
   });
 
   it("env whitelist and permission deny-wins modules ship in bridge", () => {
@@ -415,56 +641,163 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(live, /alwaysApprove:\s*true/);
   });
 
+  it("New chat is a local draft; real session is forceNew on first send", () => {
+    const nav = readSrc("store/sessionStoreNavigation.ts");
+    // newSessionAction must not call startLiveBridgeSession / forceNew.
+    const newSessionFn = nav.slice(
+      nav.indexOf("export async function newSessionAction"),
+      nav.indexOf("export async function setWorkspaceAction"),
+    );
+    assert.match(newSessionFn, /send a message to start|local New chat draft/i);
+    assert.doesNotMatch(newSessionFn, /startLiveBridgeSession/);
+    assert.doesNotMatch(newSessionFn, /forceNew/);
+    const prompt = readSrc("store/sessionStorePrompt.ts");
+    assert.match(prompt, /ensureSessionForSend|forceNew:\s*true/);
+    assert.match(prompt, /waitForCanvasSessionId|creatingSession/);
+    const live = readSrc("store/sessionStoreLive.ts");
+    assert.match(live, /resolveCanvasFollow/);
+  });
+
   it("session rail is side-nav with workspace groups and workspace footer nav", () => {
-    const rail = readSrc("widgets/SessionRailView.tsx");
+    const rail = readSrc("widgets/sessionRail/SessionRailView.tsx");
+    const railHook = readSrc("widgets/sessionRail/useSessionRailWidget.ts");
+    const railWidget = readSrc("widgets/sessionRail/SessionRailWidget.tsx");
+    assert.match(railWidget, /useSessionRailWidget|SessionRailView/);
     assert.match(rail, /side-nav/);
-    assert.match(rail, /groupSessionsByProject/);
-    assert.doesNotMatch(rail, /groupSessionsByTime/);
+    assert.doesNotMatch(rail, /useSessionStore/);
+    assert.match(railHook, /groupSessionsByProject/);
+    assert.doesNotMatch(railHook, /groupSessionsByTime/);
     assert.match(rail, /SessionRailProjectGroupView/);
-    assert.match(rail, /orderGroupsByPin/);
-    assert.match(rail, /toggleCollapsedWorkspace|onToggleCollapse/);
-    assert.match(rail, /togglePinnedWorkspace|onTogglePin/);
+    assert.match(rail, /SessionRailFooterView/);
+    // Pin is per-session, not per folder.
+    assert.match(railHook, /orderGroupsBySessionPin/);
+    assert.match(railHook, /toggleCollapsedWorkspace|onToggleCollapse/);
+    assert.match(railHook, /togglePinnedSession|onTogglePin/);
+    assert.doesNotMatch(railHook, /togglePinnedWorkspace|pinnedWorkspaces/);
     assert.match(rail, /New chat/);
-    assert.match(rail, /selectSession/);
-    assert.match(rail, /aria-label="Workspace"/);
-    assert.match(rail, /side-nav-nav/);
-    assert.match(rail, /detail:\s*"settings"/);
-    assert.match(rail, /detail:\s*"tasks"/);
-    assert.match(rail, /detail:\s*"overview"/);
-    assert.match(rail, /detail:\s*"extensions"/);
+    assert.match(railHook, /selectSession/);
+    // Project switcher is session context on the composer, not the rail.
+    assert.doesNotMatch(rail, /ProjectSwitcherWidget/);
     assert.doesNotMatch(rail, /backgroundColor|color:\s*['"`]#|rgb\(/);
     assert.match(rail, /project-section-label/);
+    assert.match(rail, /project-section-head/);
+    const composer = readSrc("widgets/composer/ComposerWidget.tsx");
+    assert.match(composer, /ProjectSwitcherWidget/);
+    // Project switcher + create dialog (Codex-style); lock when session has content.
+    const switcher = readSrc("widgets/project/ProjectSwitcherWidget.tsx");
+    assert.match(switcher, /sessionHasConversationContent/);
+    assert.match(switcher, /setWorkspace/);
+    assert.match(switcher, /noProject|resolvePreferredWorkspace/);
+    assert.match(switcher, /CreateProjectDialogView/);
+    const createDlg = readSrc("widgets/project/CreateProjectDialogView.tsx");
+    assert.match(createDlg, /Create project/);
+    assert.match(createDlg, /Source folder/);
+    const menu = readSrc("widgets/project/ProjectSwitcherMenuView.tsx");
+    assert.match(menu, /Work without a project/);
+    assert.match(menu, /Search projects/);
+    const composerShortcuts = readDesktopRoot("uno.shortcuts.composer.ts");
+    assert.match(
+      composerShortcuts,
+      /"project-switcher-menu":[\s\S]*?bottom-\[calc\(100%/,
+    );
+    // Footer: session density + workspace menu (Settings / Tasks / …).
+    const footer = readSrc("widgets/SessionRailFooterView.tsx");
+    assert.match(footer, /SessionRailWorkspaceMenuWidget/);
+    assert.match(footer, /side-nav-quota/);
+    const workspaceMenu = readSrc("widgets/SessionRailWorkspaceMenuView.tsx");
+    assert.match(workspaceMenu, /aria-label="Workspace"/);
+    assert.match(workspaceMenu, /side-nav-workspace-menu/);
+    const workspaceWidget = readSrc(
+      "widgets/SessionRailWorkspaceMenuWidget.tsx",
+    );
+    assert.match(workspaceWidget, /detail:\s*panel|open-panel/);
+    assert.match(workspaceWidget, /settings|tasks|overview|extensions/);
+    assert.match(workspaceWidget, /reconnect/);
     const groupView = readSrc("widgets/SessionRailProjectGroupView.tsx");
     assert.match(groupView, /project-group-name/);
-    assert.match(groupView, /Show more/);
+    assert.match(groupView, /project-group-count/);
+    // Folder header is collapse-only; pin must not live on the project row.
+    assert.doesNotMatch(groupView, /onTogglePin|project-group-pin/);
+    assert.match(groupView, /project-group-chevron|ChevronDown/);
+    assert.match(groupView, /FolderOpen|Folder/);
+    assert.match(groupView, /Show .+ more|Show more/);
     assert.match(groupView, /PROJECT_SESSION_PREVIEW/);
     assert.match(groupView, /onToggleCollapse/);
-    assert.match(groupView, /onTogglePin/);
-    // Title + meta stay on separate grid tracks (long titles vs remove).
+    // Title + pin + meta stay on separate grid tracks.
     const sessionRow = readSrc("widgets/SessionRailSessionRowView.tsx");
     assert.match(sessionRow, /sess-meta/);
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
+    assert.match(sessionRow, /sess-status/);
+    assert.match(sessionRow, /sess-pin/);
+    assert.match(sessionRow, /onTogglePin/);
+    // Drag reorder within a project (user order > title auto-sort).
+    assert.match(sessionRow, /draggable/);
+    assert.match(sessionRow, /onReorder/);
+    assert.match(railHook, /applyWorkspaceSessionOrder|moveSessionIdInOrder/);
+    assert.match(railHook, /sessionOrderByWorkspace/);
+    const shortcuts = readDesktopRoot("uno.shortcuts.sidenav.ts");
+    const appShortcuts = readDesktopRoot("uno.shortcuts.ts");
+    assert.match(appShortcuts, /sideNavShortcuts|uno\.shortcuts\.sidenav/);
+    assert.match(appShortcuts, /shellShortcuts|timelineShortcuts|composerShortcuts|chromeShortcuts/);
     assert.match(
       shortcuts,
-      /"sess-row":[\s\S]*?grid-cols-\[minmax\(0,1fr\)_auto\]/,
+      /"sess-row":[\s\S]*?grid-cols-\[auto_minmax\(0,1fr\)_auto_auto\]/,
     );
     assert.match(
       shortcuts,
-      /"project-group-name":\s*"min-w-0 flex-1 text-nav font-normal/,
+      /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-medium[\s\S]*?leading-snug/,
     );
     assert.match(shortcuts, /"project-section-label":/);
+    assert.match(shortcuts, /"project-group-sessions":/);
+    assert.match(shortcuts, /"sess-row-active":[\s\S]*?inset_2px/);
+    // Folder count stays visible (no hover-hide); session pin + time/remove own their slots.
+    const countShortcut = shortcuts.match(
+      /"project-group-count":\s*"([^"]+)"/,
+    );
+    assert.ok(countShortcut?.[1], "project-group-count shortcut present");
+    assert.doesNotMatch(countShortcut[1], /group-hover:opacity-0/);
+    assert.match(shortcuts, /"sess-pin":/);
+    assert.match(shortcuts, /"sess-pin-active":/);
+    // Pinned visibility must win over base `.sess-pin { opacity:0 }` via parent
+    // selector — same-element active class alone loses on Uno cascade order.
+    assert.match(
+      shortcuts,
+      /"sess-row-pinned":[\s\S]*?\[&_\.sess-pin\]:\(opacity-100/,
+    );
+    assert.match(shortcuts, /"sess-time":[\s\S]*?group-hover:opacity-0/);
+    assert.match(shortcuts, /"sess-meta":[\s\S]*?w-\[26px\]/);
+    // Close control must zero native button padding or it drifts left of the time column.
+    assert.match(shortcuts, /"sess-remove":[\s\S]*?p-0/);
+    assert.match(shortcuts, /"sess-remove":[\s\S]*?justify-end/);
   });
 
   it("tool card normalizes array content and plan empty is en-US", () => {
     const tool = readSrc("widgets/timeline/ToolCardView.tsx");
-    assert.match(tool, /normalizeToolContentParts/);
-    // Diff chrome lives in DiffReviewView (mini-diff shortcuts); tool card only composes it
-    assert.match(tool, /DiffReviewView/);
-    assert.doesNotMatch(tool, /mini-diff/);
-    const diff = readSrc("widgets/timeline/DiffReviewView.tsx");
-    assert.match(diff, /mini-diff/);
+    assert.match(tool, /normalizeToolContentParts|summarizeEditContent/);
+    // Timeline no longer embeds full interactive review; summary + openPreview only
+    assert.match(tool, /EditSummaryRowView/);
+    assert.match(tool, /openPreview/);
+    assert.doesNotMatch(tool, /DiffReviewView/);
+    assert.doesNotMatch(tool, /window\.open\(`file:\/\//);
+    const diff = readSrc("widgets/preview/DiffReviewView.tsx");
+    assert.match(diff, /mini-diff|applyHunkDecisions/);
     const plan = readSrc("widgets/PlanPanelView.tsx");
     assert.match(plan, /No plan yet/);
+  });
+
+  it("preview entry points: mention file tokens and tool locations open preview", () => {
+    const mention = readSrc("widgets/shared/stateless/MentionTextView.tsx");
+    assert.match(mention, /openPreview/);
+    assert.match(mention, /kind:\s*"file"/);
+    assert.match(mention, /composer-mention-file-btn|type="button"/);
+    const tool = readSrc("widgets/timeline/ToolCardView.tsx");
+    assert.match(tool, /openPreview\(\{\s*kind:\s*"file"/);
+    assert.doesNotMatch(tool, /window\.open/);
+    const turn = readSrc("widgets/timeline/TurnBlockWidget.tsx");
+    assert.match(turn, /TurnChangeSummaryView/);
+    assert.match(turn, /kind:\s*"changeset"/);
+    assert.match(turn, /toolCallIds:\s*collectToolCallIdsFromTurn/);
+    const store = readSrc("store/previewStore.ts");
+    assert.match(store, /openPreview|closePreview|PreviewTarget/);
   });
 
   it("styles use defineColor tokens + UnoCSS (no layout css modules)", () => {
@@ -482,6 +815,7 @@ describe("UI surface presence", () => {
     assert.match(main, /virtual:uno\.css/);
     assert.match(main, /defineColor\.css/);
     assert.match(main, /base\.css/);
+    assert.match(main, /base\.react-bits\.css/);
 
     const uno = readDesktopRoot("uno.config.ts");
     assert.match(uno, /presetUno/);
@@ -490,10 +824,14 @@ describe("UI surface presence", () => {
     assert.match(uno, /var\(--color-bg-app\)/);
     assert.doesNotMatch(uno, /text-white|bg-black|border-red-500/);
 
-    const shortcuts = readDesktopRoot("uno.shortcuts.ts");
-    assert.match(shortcuts, /side-nav/);
+    const shortcuts = readAllUnoShortcuts();
+    const entry = readDesktopRoot("uno.shortcuts.ts");
+    const sideNav = readDesktopRoot("uno.shortcuts.sidenav.ts");
+    assert.match(sideNav, /side-nav/);
+    assert.match(entry, /sideNavShortcuts|uno\.shortcuts\.sidenav/);
+    assert.match(entry, /composerShortcuts|uno\.shortcuts\.composer/);
     assert.match(shortcuts, /composer-dock/);
-    assert.match(shortcuts, /context-rail/);
+    assert.match(shortcuts, /context-drawer/);
 
     const base = readSrc("styles/base.css");
     assert.equal(
@@ -505,11 +843,14 @@ describe("UI surface presence", () => {
 
   it("mention chips are one shared model across composer, history, and menu", () => {
     const composerInput = readSrc("widgets/composer/ComposerInputView.tsx");
-    const timeline = readSrc("widgets/TimelineView.tsx");
+    const timeline = readSrc("widgets/timeline/TimelineView.tsx");
+    const userMsg = readSrc("widgets/timeline/UserMessageView.tsx");
     assert.match(composerInput, /from "@\/lib\/mentionTokens"/);
     assert.match(composerInput, /splitMentionTokens/);
-    assert.match(timeline, /MentionTextView/);
-    assert.match(timeline, /from "@\/widgets\/shared"/);
+    // History mention chips live on UserMessageView (text half of user turns).
+    assert.match(timeline, /UserMessageView/);
+    assert.match(userMsg, /MentionTextView/);
+    assert.match(userMsg, /from "@\/widgets\/shared"/);
     assert.equal(
       srcExists("widgets/composer/composerMentions.ts"),
       false,
@@ -524,27 +865,43 @@ describe("UI surface presence", () => {
     assert.match(menu, /MentionIconView/);
     assert.doesNotMatch(chip, /<svg/);
     assert.doesNotMatch(timeline, /<svg/);
+    assert.doesNotMatch(userMsg, /<svg/);
 
     const base = readSrc("styles/base.css");
     assert.match(base, /\.mention-chip\b/);
-    assert.match(base, /\.composer-input-highlight \.composer-mention\b/);
-    const mirrorStart = base.indexOf(".composer-input-highlight");
-    const mirrorEnd = base.indexOf("React Bits adaptations");
-    const mirrorBlock = base.slice(mirrorStart, mirrorEnd);
+    // Draft + history share unscoped .composer-mention (textarea accent style).
+    assert.match(base, /^\.composer-mention\s*\{/m);
+    const mentionText = readSrc("widgets/shared/stateless/MentionTextView.tsx");
+    assert.match(
+      mentionText,
+      /composer-mention/,
+      "history mentions must use the same accent class as the composer mirror",
+    );
     assert.doesNotMatch(
-      mirrorBlock,
+      mentionText,
+      /MentionChipView/,
+      "history must not use icon-pill chips (keep draft and bubble consistent)",
+    );
+    // Slice from the real rule (line-start `.composer-mention {`), not a comment.
+    const mentionStart = base.search(/^\.composer-mention\s*\{/m);
+    const mentionEnd = base.search(/^\.mention-chip\s*\{/m);
+    assert.ok(mentionStart >= 0, "composer-mention accent rule must exist");
+    assert.ok(mentionEnd > mentionStart, "mention-chip rule must follow accent rules");
+    const mentionBlock = base.slice(mentionStart, mentionEnd);
+    assert.doesNotMatch(
+      mentionBlock,
       /^\s*(padding|margin|font-weight|letter-spacing|font-family)\s*:/m,
-      "mirror-layer tokens must not change glyph metrics (caret alignment)",
+      "accent mention tokens must not change glyph metrics (caret alignment)",
     );
     assert.match(
-      mirrorBlock,
+      mentionBlock,
       /--color-composer-mention/,
-      "composer draft mentions use the dedicated accent token",
+      "composer + history mentions use the dedicated accent token",
     );
     assert.doesNotMatch(
-      mirrorBlock,
+      mentionBlock,
       /background-color:\s*var\(--color-mention-/,
-      "composer draft mentions must not keep chip fill backgrounds",
+      "accent mentions must not keep chip fill backgrounds",
     );
 
     const colors = readSrc("styles/defineColor.css");
@@ -609,8 +966,15 @@ describe("UI surface presence", () => {
     assert.match(events, /key\.toLowerCase\(\) === "n"/);
     assert.match(events, /key === ",/);
     assert.match(events, /Backslash|\\\\/);
-    const rail = readSrc("widgets/SessionRailView.tsx");
-    assert.match(rail, /open-panel/);
+    // Workspace menu dispatches open-panel (Settings / Tasks / Overview / Extensions).
+    const workspaceMenuWidget = readSrc(
+      "widgets/SessionRailWorkspaceMenuWidget.tsx",
+    );
+    assert.match(workspaceMenuWidget, /open-panel/);
+    assert.match(workspaceMenuWidget, /settings/);
+    assert.match(workspaceMenuWidget, /tasks/);
+    assert.match(workspaceMenuWidget, /overview/);
+    assert.match(workspaceMenuWidget, /extensions/);
     const palette = readSrc("lib/commandPalette.ts");
     assert.match(palette, /open_settings|open_extensions|open_overview|open_tasks/);
   });

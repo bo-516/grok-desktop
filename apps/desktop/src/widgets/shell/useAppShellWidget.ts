@@ -1,12 +1,22 @@
 /**
  * Shell chrome state: exclusive drawers, context rail, palette, rail overlay,
- * theme, confirm dialogs. Lifecycle + keyboard live in sibling hooks.
+ * theme, confirm dialogs, and context-drawer layout prefs.
+ * Lifecycle + keyboard live in sibling hooks.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSessionStore } from "../../store/sessionStore";
-import { loadTheme, type ThemeId } from "../../lib/theme";
 import {
+  DRAWER_PUSH_MIN_WIDTH,
+  effectiveDrawerLayout,
+  loadContextDrawerPrefs,
+  saveContextDrawerPrefs,
+  type DrawerLayout,
+} from "../../lib/contextDrawerPrefs";
+import { loadTheme, type ThemeId } from "../../lib/theme";
+import { usePreviewStore } from "../../store/previewStore";
+import { useSessionStore } from "../../store/sessionStore";
+import {
+  contextRailWidthPx,
   shouldAutoOpenPlanRail,
   toggleContextRail,
   toggleExclusivePanel,
@@ -28,9 +38,26 @@ export type ShellConfirm =
 export function useAppShellWidget() {
   const session = useSessionStore((s) => s.session);
   const connectionMode = useSessionStore((s) => s.connectionMode);
-  const catalog = useSessionStore((s) => s.catalog);
+  /**
+   * Current header title only; background catalog text growth must stay below
+   * the App render boundary. A missing match falls back after subscriptions.
+   */
+  const selectedCatalogTitle = useSessionStore(
+    (s) => s.catalog.find((entry) => entry.id === s.session.id)?.title,
+  );
   const environment = useSessionStore((s) => s.environment);
-  const poolEntries = useSessionStore((s) => s.poolEntries);
+  /**
+   * Streaming count is the shell's only pool dependency. Returning a primitive
+   * keeps background pool broadcasts with the same count from re-rendering App
+   * and its timeline; subscribing to the full array would repaint on every
+   * concurrent session chunk even though the shell output was unchanged.
+   */
+  const liveCount = useSessionStore(
+    (s) =>
+      s.poolEntries.filter(
+        (entry) => entry.live && entry.status === "streaming",
+      ).length,
+  );
   const restartNotice = useSessionStore((s) => s.restartNotice);
   const clearRestartNotice = useSessionStore((s) => s.clearRestartNotice);
   const removeSession = useSessionStore((s) => s.removeSession);
@@ -38,6 +65,9 @@ export function useAppShellWidget() {
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
   const newSession = useSessionStore((s) => s.newSession);
   const promptQueue = useSessionStore((s) => s.promptQueue);
+  const previewTarget = usePreviewStore((s) => s.target);
+  const previewWidth = usePreviewStore((s) => s.width);
+  const closePreview = usePreviewStore((s) => s.closePreview);
 
   /** User closed context rail this session — blocks plan auto-open. */
   const userClosedRail = useRef(false);
@@ -49,6 +79,20 @@ export function useAppShellWidget() {
   const [railOpen, setRailOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeId>(() => loadTheme());
   const [confirm, setConfirm] = useState<ShellConfirm | null>(null);
+  /** Stored layout preference (not the clamped effective layout). */
+  const [drawerLayoutPref, setDrawerLayoutPref] = useState<DrawerLayout>(
+    () => loadContextDrawerPrefs().layout,
+  );
+  /**
+   * True when viewport width is at or above the push min-width.
+   * Seeds from window when available; matchMedia keeps it live.
+   */
+  const [viewportAllowsPush, setViewportAllowsPush] = useState(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    return window.innerWidth >= DRAWER_PUSH_MIN_WIDTH;
+  });
 
   const markUserClosedRail = useCallback(() => {
     userClosedRail.current = true;
@@ -104,21 +148,47 @@ export function useAppShellWidget() {
     }
   }, [session.plan, contextRail]);
 
+  // When a preview target is set, open the preview rail (mutual with plan).
+  useEffect(() => {
+    if (previewTarget) {
+      setContextRail("preview");
+    }
+  }, [previewTarget]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mq = window.matchMedia(`(min-width: ${DRAWER_PUSH_MIN_WIDTH}px)`);
+    const apply = () => setViewportAllowsPush(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
   const live = connectionMode === "live-bridge";
   const title =
-    catalog.find((c) => c.id === session.id)?.title ||
+    selectedCatalogTitle ||
     (session.timeline.length > 0 ? "Current chat" : "New chat");
-  /**
-   * Footer "N running": only sessions whose pool process is streaming
-   * (AI currently outputting). Idle pool residents are excluded.
-   */
-  const liveCount = poolEntries.filter(
-    (e) => e.live && e.status === "streaming",
-  ).length;
   const authOk = environment?.ok !== false;
   const envKnown = environment !== null;
   const planCount = session.plan?.length ?? 0;
   const syncLabel = syncChipLabel({ live, status: session.status });
+  const viewportWidth = viewportAllowsPush
+    ? DRAWER_PUSH_MIN_WIDTH
+    : DRAWER_PUSH_MIN_WIDTH - 1;
+  const drawerEffectiveLayout = effectiveDrawerLayout(
+    drawerLayoutPref,
+    viewportWidth,
+  );
+  const layoutClamped =
+    drawerLayoutPref === "push" && drawerEffectiveLayout === "overlay";
+  const contextRailOpen = contextRail === "plan" || contextRail === "preview";
+  const planRailOpen = contextRail === "plan";
+  const previewRailOpen = contextRail === "preview";
+  const pushMode =
+    contextRailOpen && drawerEffectiveLayout === "push";
+  const railWidthPx = contextRailWidthPx(contextRail, previewWidth);
 
   const togglePanel = useCallback((which: PanelId) => {
     setActivePanel((p) => toggleExclusivePanel(p, which));
@@ -130,23 +200,29 @@ export function useAppShellWidget() {
       if (next === null) {
         userClosedRail.current = true;
       }
+      if (next === "plan") {
+        closePreview();
+      }
       return next;
     });
-  }, []);
+  }, [closePreview]);
   const closeContextRail = useCallback(() => {
     userClosedRail.current = true;
+    closePreview();
     setContextRail(null);
-  }, []);
+  }, [closePreview]);
   const requestDelete = useCallback((id: string, sessionTitle: string) => {
     setConfirm({ kind: "session_delete", id, title: sessionTitle });
   }, []);
   const clearConfirm = useCallback(() => setConfirm(null), []);
+  const setDrawerLayout = useCallback((layout: DrawerLayout) => {
+    setDrawerLayoutPref(layout);
+    saveContextDrawerPrefs({ layout });
+  }, []);
 
   return {
     session,
-    catalog,
     environment,
-    poolEntries,
     restartNotice,
     clearRestartNotice,
     removeSession,
@@ -162,6 +238,10 @@ export function useAppShellWidget() {
     planCount,
     activePanel,
     contextRail,
+    contextRailOpen,
+    planRailOpen,
+    previewRailOpen,
+    railWidthPx,
     paletteOpen,
     setPaletteOpen,
     railOpen,
@@ -176,6 +256,11 @@ export function useAppShellWidget() {
     requestDelete,
     requestRewind,
     clearConfirm,
+    drawerLayoutPref,
+    drawerEffectiveLayout,
+    layoutClamped,
+    pushMode,
+    setDrawerLayout,
   };
 }
 

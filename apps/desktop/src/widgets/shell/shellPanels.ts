@@ -7,8 +7,27 @@
 /** Side-drawer panels opened from footer / ⌘K / events. */
 export type PanelId = "settings" | "extensions" | "overview" | "tasks";
 
-/** Right context rail content; M1 only mounts plan. */
-export type ContextRailId = "plan";
+/** Right context rail content: plan checklist or code/diff preview. */
+export type ContextRailId = "plan" | "preview";
+
+/** Plan rail default width in px (matches --rail-right-width). */
+export const PLAN_RAIL_WIDTH = 280;
+
+/**
+ * Resolve the CSS pixel width for the active context rail.
+ * @param rail Current rail id or null when closed.
+ * @param previewWidth Committed preview width from previewStore.
+ * @returns Width in px; plan uses fixed 280, preview uses stored width.
+ */
+export function contextRailWidthPx(
+  rail: ContextRailId | null,
+  previewWidth: number,
+): number {
+  if (rail === "preview") {
+    return previewWidth;
+  }
+  return PLAN_RAIL_WIDTH;
+}
 
 /**
  * Toggle a panel: same id closes; any other id replaces (exclusive).
@@ -52,10 +71,11 @@ export function toggleContextRail(
 
 /**
  * Whether plan auto-open should run for this session.
+ * Must not steal an already-open preview rail (or plan rail).
  * @param planLength Number of plan steps on the session.
- * @param contextRail Current rail visibility.
+ * @param contextRail Current rail visibility (`null` when closed).
  * @param userClosedRail True when the user closed the rail this session.
- * @returns True only when plan first arrives and user has not dismissed it.
+ * @returns True only when plan first arrives, rail is closed, and user has not dismissed it.
  */
 export function shouldAutoOpenPlanRail(
   planLength: number,
@@ -65,7 +85,8 @@ export function shouldAutoOpenPlanRail(
   if (userClosedRail) {
     return false;
   }
-  if (contextRail === "plan") {
+  // Any open rail (plan or preview) must stay put — openPreview owns "preview".
+  if (contextRail !== null) {
     return false;
   }
   return planLength > 0;

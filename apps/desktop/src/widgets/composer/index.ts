@@ -10,9 +10,12 @@ export {
   normalizeAgentMode,
 } from "./composerModes";
 export {
+  DEFAULT_THINKING_OPTIONS,
   formatModelLabel,
   modelsFromAvailableModels,
   resolveAgentDefaultModel,
   resolveModelOptions,
+  resolveThinkingEffort,
+  resolveThinkingOptions,
   THINKING_OPTIONS,
 } from "./composerModels";

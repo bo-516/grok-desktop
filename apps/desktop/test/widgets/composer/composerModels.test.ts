@@ -1,15 +1,21 @@
 /**
- * Composer model catalog resolution — agent sources only, no product fallback list.
+ * Composer model catalog + thinking effort resolution — agent sources when present.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_THINKING_OPTIONS,
   defaultComposerControls,
+  formatEffortIdLabel,
   formatModelLabel,
+  formatThinkingLabel,
   modelsFromAvailableModels,
   resolveAgentDefaultModel,
   resolveModelOptions,
+  resolveThinkingEffort,
+  resolveThinkingOptions,
+  thinkingFromConfigOptions,
 } from "@/widgets/composer/composerModels";
 
 describe("formatModelLabel", () => {
@@ -80,6 +86,104 @@ describe("modelsFromAvailableModels", () => {
   });
 });
 
+describe("resolveThinkingOptions / thinkingFromConfigOptions", () => {
+  it("defaults to official Grok 4.5 low/medium/high without Max", () => {
+    assert.deepEqual(resolveThinkingOptions(undefined), DEFAULT_THINKING_OPTIONS);
+    assert.deepEqual(resolveThinkingOptions([]), DEFAULT_THINKING_OPTIONS);
+    assert.equal(
+      DEFAULT_THINKING_OPTIONS.some((o) => o.id === "xhigh" || o.id === "max"),
+      false,
+    );
+  });
+
+  it("prefers effort options from config_option_update when the agent advertises them", () => {
+    const options = resolveThinkingOptions([
+      {
+        id: "reasoning_effort",
+        currentValue: "medium",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "medium", name: "Medium" },
+          { value: "high", name: "High" },
+          { value: "xhigh", name: "Extra high" },
+        ],
+      },
+    ]);
+    assert.deepEqual(options.map((o) => o.id), [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    assert.equal(options.find((o) => o.id === "xhigh")?.label, "Extra high");
+  });
+
+  it("ignores model config rows when extracting effort", () => {
+    assert.deepEqual(
+      thinkingFromConfigOptions([
+        {
+          id: "model",
+          options: [{ value: "grok-4.5", name: "Grok 4.5" }],
+        },
+      ]),
+      [],
+    );
+  });
+
+  it("maps bare string effort options with friendly labels", () => {
+    assert.deepEqual(
+      thinkingFromConfigOptions([
+        { id: "effort", options: ["low", "high", "xhigh"] },
+      ]),
+      [
+        { id: "low", label: "Low" },
+        { id: "high", label: "High" },
+        { id: "xhigh", label: "Max" },
+      ],
+    );
+  });
+});
+
+describe("resolveThinkingEffort", () => {
+  const official = DEFAULT_THINKING_OPTIONS;
+
+  it("keeps a valid local preference", () => {
+    assert.equal(resolveThinkingEffort(undefined, official, "low"), "low");
+  });
+
+  it("drops unsupported legacy Max/xhigh when the agent only lists official tiers", () => {
+    assert.equal(
+      resolveThinkingEffort(undefined, official, "xhigh"),
+      "high",
+    );
+    assert.equal(resolveThinkingEffort(undefined, official, "max"), "high");
+  });
+
+  it("uses agent currentValue when preference is missing or invalid", () => {
+    const config = [
+      {
+        id: "effort",
+        currentValue: "medium",
+        options: ["low", "medium", "high"],
+      },
+    ];
+    const opts = resolveThinkingOptions(config);
+    assert.equal(resolveThinkingEffort(config, opts, null), "medium");
+    assert.equal(resolveThinkingEffort(config, opts, "xhigh"), "medium");
+  });
+});
+
+describe("formatThinkingLabel / formatEffortIdLabel", () => {
+  it("uses option labels and falls back to friendly wire ids", () => {
+    assert.equal(formatThinkingLabel("high"), "High");
+    assert.equal(formatEffortIdLabel("xhigh"), "Max");
+    assert.equal(
+      formatThinkingLabel("xhigh", [{ id: "xhigh", label: "Extra high" }]),
+      "Extra high",
+    );
+  });
+});
+
 describe("resolveAgentDefaultModel / defaultComposerControls", () => {
   it("prefers config current, then first catalog entry", () => {
     assert.equal(
@@ -102,5 +206,18 @@ describe("resolveAgentDefaultModel / defaultComposerControls", () => {
       modelId: "grok-4.5",
       effort: "high",
     });
+  });
+
+  it("reset effort follows agent currentValue when advertised", () => {
+    assert.deepEqual(
+      defaultComposerControls("grok-4.5", [
+        {
+          id: "effort",
+          currentValue: "low",
+          options: ["low", "medium", "high"],
+        },
+      ]),
+      { modelId: "grok-4.5", effort: "low" },
+    );
   });
 });

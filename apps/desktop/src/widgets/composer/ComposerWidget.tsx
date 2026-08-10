@@ -2,10 +2,14 @@
  * Composer state container.
  * State is computed in useComposerWidget; this component only assembles the result into UI.
  * Status footer is always mounted (one row) and driven by resolveComposerStatus.
+ * Left bar includes a Codex-style + attach control that opens the image file picker.
+ * The hidden file input lives outside the card flex so open/focus never jitters height.
  */
 
 import cs from "classnames";
+import { Plus } from "lucide-react";
 import { ClickSpark, StarBorder } from "@/components/react-bits";
+import { ProjectSwitcherWidget } from "@/widgets/project";
 import { ComposerInputView } from "./ComposerInputView";
 import { ComposerModelMenuView } from "./ComposerModelMenuView";
 import { ComposerModeControlView } from "./ComposerModeControlView";
@@ -14,7 +18,9 @@ import { resolveComposerStatus } from "./composerStatus";
 import { useComposerWidget } from "./useComposerWidget";
 
 /**
- * Renders the sendable textarea, mode controls, model/thinking menu, and `@`/`/` completion.
+ * Renders the sendable textarea, project switcher, mode controls, model menu,
+ * and `@`/`/` completion. Project is session context (next to the input), not
+ * the left rail.
  * @returns Composer bound to the real live bridge; when the bridge is unavailable send fails and the draft is kept.
  */
 export function ComposerWidget() {
@@ -35,6 +41,20 @@ export function ComposerWidget() {
   return (
     <div className="composer-dock">
       <div className="composer-dock-inner">
+        {/*
+          Layout-inert multi-image picker — kept outside .composer flex so it
+          never participates in gap / card height (opened by the + control).
+        */}
+        <input
+          ref={widget.fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="composer-attach-input"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={widget.handleFileInputChange}
+        />
         <div className="composer">
           {widget.isMenuOpen ? (
             <ComposerSuggestionListView
@@ -64,6 +84,8 @@ export function ComposerWidget() {
             onChange={widget.handleDraftChange}
             onSelect={widget.handleSelection}
             onKeyDown={widget.handleKeyDown}
+            onCompositionStart={widget.handleCompositionStart}
+            onCompositionEnd={widget.handleCompositionEnd}
             onScroll={widget.handleInputScroll}
             onPaste={widget.handlePaste}
             onDragOver={widget.handleDragOver}
@@ -73,6 +95,19 @@ export function ComposerWidget() {
           />
           <div className="composer-bar">
             <div className="composer-bar-left">
+              <button
+                type="button"
+                className="composer-icon-btn composer-attach-btn"
+                title="Attach images (or drag & drop / paste)"
+                aria-label="Attach images"
+                disabled={
+                  !widget.canType || widget.status === "waiting_permission"
+                }
+                onClick={widget.openFilePicker}
+              >
+                <Plus className="composer-attach-icon" aria-hidden="true" />
+              </button>
+              <ProjectSwitcherWidget />
               <ComposerModeControlView
                 mode={widget.mode}
                 pendingMode={widget.pendingMode}

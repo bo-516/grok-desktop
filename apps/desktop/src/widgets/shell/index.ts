@@ -3,7 +3,9 @@
 export { ShellBannersView } from "./ShellBannersView";
 export type { ShellBannersViewProps } from "./ShellBannersView";
 export {
+  contextRailWidthPx,
   openExclusivePanel,
+  PLAN_RAIL_WIDTH,
   shouldAutoOpenPlanRail,
   toggleContextRail,
   toggleExclusivePanel,

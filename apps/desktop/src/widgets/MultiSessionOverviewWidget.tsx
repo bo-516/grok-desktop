@@ -72,12 +72,15 @@ export function MultiSessionOverviewWidget(props: {
       title="Overview"
       onClose={props.onClose}
     >
-      <input
-        className="text-input"
-        placeholder="Search · s:working · a:name"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+      {/* Sections own the drawer's vertical rhythm — side-panel-body adds no gap. */}
+      <section className="side-panel-section">
+        <input
+          className="text-input"
+          placeholder="Search · s:working · a:name"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </section>
       {BUCKETS.map((bucket) => {
         const list = groups[bucket];
         if (!list.length) {

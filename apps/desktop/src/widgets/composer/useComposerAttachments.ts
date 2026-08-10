@@ -1,12 +1,14 @@
 /**
- * Local image attachments + drag/drop/paste handlers for Composer.
+ * Local image attachments + drag/drop/paste + file-picker handlers for Composer.
  * Also assembles committed @mention embedded resource blocks via bridge read.
  * Keeps high-frequency attachment state out of the global session store.
  */
 
 import {
   useCallback,
+  useRef,
   useState,
+  type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
   type RefObject,
@@ -59,32 +61,101 @@ export type UseComposerAttachmentsArgs = {
 };
 
 /**
- * Attachment list + paste/drag/drop handlers bound to agent image capability.
+ * Attachment list + paste/drag/drop/file-picker handlers bound to agent image capability.
  * @param args Draft, capability, bridge read, and notice writers from the parent composer hook.
- * @returns Attachment state and event handlers for ComposerInputView.
+ * @returns Attachment state and event handlers for ComposerInputView / attach button.
  */
 export function useComposerAttachments(args: UseComposerAttachmentsArgs) {
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  /** Hidden `<input type="file">` driven by the composer + attach chip. */
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageCapable = agentSupportsImageInput(args.agentCapabilities);
 
   /**
-   * Accept an image attachment when capability allows; otherwise explicit degrade.
-   * @param att Parsed image attachment.
+   * Stage an image for the composer strip (always show preview).
+   * When the agent lacks image input, keep the thumb + warn; send path still
+   * omits image ContentBlocks so we never pretend the wire accepted them.
+   * @param att Parsed image attachment (mime + base64).
    */
   const acceptImageAttachment = useCallback(
     (att: ImageAttachment) => {
+      setAttachments((prev) => [...prev, att]);
       if (!imageCapable) {
+        // Preview is local UI only — capability gate remains on buildOutgoingBlocks.
         args.showNotice(imageUnsupportedMessage(), "warn");
         return;
       }
-      setAttachments((prev) => [...prev, att]);
       args.showNotice(
         `Attached image (${att.mimeType}) — will send with next message`,
         "info",
       );
     },
     [args, imageCapable],
+  );
+
+  /**
+   * Open the native multi-image file picker (Codex-style + control).
+   * Prefer showPicker() so the browser does not focus a clipped input (that
+   * scroll-into-view path was jittering the composer dock height). Falls back
+   * to input.click() when showPicker is missing or rejects.
+   * No-op when the hidden input is unmounted.
+   */
+  const openFilePicker = useCallback(() => {
+    const input = fileInputRef.current;
+    if (!input) {
+      return;
+    }
+    // Clear so re-picking the same path still fires change.
+    input.value = "";
+    // showPicker avoids focusing the layout-inert input; keeps dock height stable.
+    if (typeof input.showPicker === "function") {
+      try {
+        void input.showPicker();
+        return;
+      } catch {
+        // Not allowed outside a user gesture or unsupported — use click().
+      }
+    }
+    input.click();
+  }, []);
+
+  /**
+   * Handle files chosen via the attach picker.
+   * Images become ContentBlock attachments; non-images are skipped with a notice
+   * (workspace paths still use @mention / drag-drop, not the file picker).
+   * @param event Change event from the hidden file input.
+   */
+  const handleFileInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files ?? []);
+      // Always reset so the next open is not stuck on the previous selection.
+      event.target.value = "";
+      if (files.length === 0) {
+        return;
+      }
+      const skipped: string[] = [];
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) {
+          skipped.push(file.name || "file");
+          continue;
+        }
+        void fileToImageAttachment(file).then((att) => {
+          if (att) {
+            acceptImageAttachment(att);
+          } else {
+            args.showNotice(`Could not read image: ${file.name}`, "warn");
+          }
+        });
+      }
+      if (skipped.length > 0) {
+        args.showNotice(
+          `Only images can be attached here (skipped: ${skipped.join(", ")}). Use @ to mention workspace files.`,
+          "warn",
+        );
+      }
+    },
+    [acceptImageAttachment, args],
   );
 
   /**
@@ -247,13 +318,16 @@ export function useComposerAttachments(args: UseComposerAttachmentsArgs) {
   return {
     attachments,
     dragOver,
+    fileInputRef,
     imageCapable,
     acceptImageAttachment,
     buildOutgoingBlocks,
+    handleFileInputChange,
     handlePaste,
     handleDragOver,
     handleDragLeave,
     handleDrop,
+    openFilePicker,
     removeAttachment,
     clearAttachments,
   };

@@ -52,21 +52,29 @@ export function ExtensionsPanelWidget(props: {
       title="Extensions & config"
       onClose={props.onClose}
     >
-      <p className="side-panel-hint">
-        Source of truth: <code>grok inspect --json</code> (F-EXT-16). Results must
-        match the CLI.
-      </p>
-      <div className="side-panel-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={loading}
-          onClick={() => void refresh()}
-        >
-          {loading ? "Loading…" : "Refresh inspect"}
-        </button>
-      </div>
-      {error ? <div className="banner banner-danger">{error}</div> : null}
+      {/* Sections own the drawer's vertical rhythm — side-panel-body adds no gap. */}
+      <section className="side-panel-section">
+        <p className="side-panel-hint">
+          Source of truth: <code>grok inspect --json</code> (F-EXT-16). Results
+          must match the CLI.
+        </p>
+        <div className="side-panel-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={loading}
+            onClick={() => void refresh()}
+          >
+            {loading ? "Loading…" : "Refresh inspect"}
+          </button>
+        </div>
+        {/* panel-note, not `banner`: banner's main-column margins paint inset here. */}
+        {error ? (
+          <p className="panel-note panel-note-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </section>
       <section className="side-panel-section">
         <h3 className="side-panel-section-title">Inspect</h3>
         <pre className="code-block">
