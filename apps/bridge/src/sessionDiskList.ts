@@ -19,7 +19,28 @@ export type DiskSessionRow = {
   updatedAt?: string;
   /** ISO created time when known. */
   createdAt?: string;
+  /**
+   * Upstream role from `summary.json.session_kind`; absent for ordinary chats.
+   * Known values: `subagent`, `subagent_resume`, `subagent_fork`.
+   */
+  sessionKind?: string;
+  /** Parent chat id when this row is a harness-spawned subagent session. */
+  parentSessionId?: string;
 };
+
+/**
+ * Whether a session_kind marks a harness-spawned subagent chat.
+ *
+ * Upstream emits three variants today (`subagent`, `subagent_resume`,
+ * `subagent_fork`), so an equality check would leak the other two into the
+ * rail. Unknown / absent kinds are deliberately treated as user chats:
+ * showing one row too many is recoverable, hiding a real conversation is not.
+ * @param kind Raw session_kind value, possibly undefined.
+ * @returns True when the row should be hidden from the session rail.
+ */
+export function isSubagentSessionKind(kind: string | undefined): boolean {
+  return typeof kind === "string" && kind.startsWith("subagent");
+}
 
 /**
  * Resolve the grok home directory (`GROK_HOME` or `~/.grok`).
@@ -48,6 +69,53 @@ export function decodeWorkspaceDirName(encodedDirName: string): string {
 }
 
 /**
+ * Build a child→parent index from `<session>/subagents/<childId>/meta.json`.
+ *
+ * The child session's own summary.json has no parent pointer, so this is the
+ * only on-disk source for the relation. Directory names have matched
+ * child_session_id in every recorded case, but that is an observed invariant,
+ * not a documented contract — read the field instead of trusting the name.
+ * Unreadable entries are skipped: a missing parent link only costs a drill-down
+ * breadcrumb, while throwing here would empty the whole session rail.
+ * @param sessionDir Absolute path to one `…/sessions/<ws>/<id>` folder.
+ * @param parentId This session's id (the parent).
+ * @returns Map of child session id → this session's id; empty when no subagents.
+ */
+async function readSubagentChildIndex(
+  sessionDir: string,
+  parentId: string,
+): Promise<Map<string, string>> {
+  const index = new Map<string, string>();
+  let names: string[] = [];
+  try {
+    const entries = await readdir(path.join(sessionDir, "subagents"), {
+      withFileTypes: true,
+    });
+    names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return index;
+  }
+  for (const name of names) {
+    try {
+      const raw = await readFile(
+        path.join(sessionDir, "subagents", name, "meta.json"),
+        "utf8",
+      );
+      const meta = JSON.parse(raw) as Record<string, unknown>;
+      const childId =
+        typeof meta.child_session_id === "string" && meta.child_session_id.trim()
+          ? meta.child_session_id.trim()
+          : name;
+      index.set(childId, parentId);
+    } catch {
+      // Corrupt meta still links by directory name so drill-down can resolve.
+      index.set(name, parentId);
+    }
+  }
+  return index;
+}
+
+/**
  * Read one session's summary.json into a catalog-friendly row.
  * Missing / corrupt summary still yields a row when the session dir exists.
  * @param sessionDir Absolute path to `…/sessions/<ws>/<id>`.
@@ -67,6 +135,7 @@ export async function readDiskSessionRow(
   let cwd = fallbackCwd;
   let updatedAt: string | undefined;
   let createdAt: string | undefined;
+  let sessionKind: string | undefined;
   try {
     const raw = await readFile(path.join(sessionDir, "summary.json"), "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -99,6 +168,11 @@ export async function readDiskSessionRow(
     if (typeof parsed.created_at === "string" && parsed.created_at) {
       createdAt = parsed.created_at;
     }
+    const kindRaw =
+      typeof parsed.session_kind === "string" ? parsed.session_kind.trim() : "";
+    if (kindRaw) {
+      sessionKind = kindRaw;
+    }
   } catch {
     // summary optional — still list the folder when mtime is available
   }
@@ -119,12 +193,14 @@ export async function readDiskSessionRow(
     title,
     updatedAt,
     createdAt,
+    sessionKind,
   };
 }
 
 /**
  * Walk `~/.grok/sessions/<encoded-cwd>/<sessionId>/` and collect rows for every
  * workspace. Optional `cwdFilter` keeps only one workspace (exact path match).
+ * Subagent rows stay in the list (filter at rail render, not data layer).
  * @param opts limit caps the newest rows; cwdFilter scopes to one workspace.
  * @returns Sessions sorted by updatedAt desc (newest first).
  */
@@ -153,6 +229,8 @@ export async function listSessionsFromDisk(opts: {
 
   const filterCwd = opts.cwdFilter?.replace(/[/\\]+$/, "") ?? "";
   const rows: DiskSessionRow[] = [];
+  /** child session id → parent session id across all workspaces in this walk. */
+  const parentByChild = new Map<string, string>();
 
   for (const encoded of workspaceDirs) {
     const workspace = decodeWorkspaceDirName(encoded);
@@ -171,14 +249,22 @@ export async function listSessionsFromDisk(opts: {
       continue;
     }
     for (const sessionId of sessionNames) {
-      const row = await readDiskSessionRow(
-        path.join(wsDir, sessionId),
-        sessionId,
-        workspace,
-      );
+      const sessionDir = path.join(wsDir, sessionId);
+      const row = await readDiskSessionRow(sessionDir, sessionId, workspace);
       if (row) {
         rows.push(row);
       }
+      const childIndex = await readSubagentChildIndex(sessionDir, sessionId);
+      for (const [childId, parentId] of childIndex) {
+        parentByChild.set(childId, parentId);
+      }
+    }
+  }
+
+  for (const row of rows) {
+    const parentId = parentByChild.get(row.id);
+    if (parentId) {
+      row.parentSessionId = parentId;
     }
   }
 

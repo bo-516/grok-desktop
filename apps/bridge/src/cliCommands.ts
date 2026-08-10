@@ -30,6 +30,8 @@ export async function sessionsList(cwd?: string): Promise<unknown> {
           workspace: row.cwd,
           updatedAt: row.updatedAt,
           createdAt: row.createdAt,
+          sessionKind: row.sessionKind,
+          parentSessionId: row.parentSessionId,
         })),
       };
     }
