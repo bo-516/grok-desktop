@@ -17,6 +17,7 @@ import {
   togglePinnedSession,
   type SessionRailPrefs,
 } from "@/lib/sessionRailPrefs";
+import { filterCatalogForSessionRail } from "@/lib/sessionActions";
 import {
   groupSessionsByProject,
   type SessionRecord,
@@ -86,17 +87,12 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
    * auto; pin beats both). Pin never reorders the folder list itself.
    */
   const groups = useMemo(() => {
-    const filtered = (() => {
-      const q = query.trim().toLowerCase();
-      if (!q) {
-        return catalog;
-      }
-      return catalog.filter(
-        (s) =>
-          s.title.toLowerCase().includes(q) ||
-          s.workspace.toLowerCase().includes(q),
-      );
-    })();
+    /**
+     * Harness-spawned subagent chats stay in `catalog` (selectSessionAction
+     * resolves drill-down targets through it) but must not appear as
+     * user-owned conversations in the rail.
+     */
+    const filtered = filterCatalogForSessionRail(catalog, query);
     const byAscii = groupSessionsByProject(filtered);
     return orderGroupsBySessionPin(
       byAscii,

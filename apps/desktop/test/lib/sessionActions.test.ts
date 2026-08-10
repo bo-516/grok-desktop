@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 import {
   buildForkCommand,
   buildRewindCommand,
+  canSelectCatalogSession,
+  filterCatalogForSessionRail,
+  isSubagentSessionKind,
   mergeRemoteSessionsIntoCatalog,
+  normalizeOneSession,
   normalizeSessionsList,
   rewindConfirm,
   shareConfirm,
@@ -29,6 +33,8 @@ function localRec(
     timeline: partial.timeline ?? [],
     toolCalls: partial.toolCalls ?? {},
     lastAgentText: partial.lastAgentText ?? "",
+    sessionKind: partial.sessionKind,
+    parentSessionId: partial.parentSessionId,
   };
 }
 
@@ -109,5 +115,88 @@ describe("sessionActions", () => {
     const merged = mergeRemoteSessionsIntoCatalog(local, []);
     assert.equal(merged.length, 1);
     assert.equal(merged[0]?.id, "only");
+  });
+
+  it("normalizeOneSession accepts camelCase and snake_case role fields", () => {
+    const camel = normalizeOneSession({
+      id: "c1",
+      title: "Child",
+      sessionKind: "subagent",
+      parentSessionId: "p1",
+    });
+    assert.equal(camel?.sessionKind, "subagent");
+    assert.equal(camel?.parentSessionId, "p1");
+    const snake = normalizeOneSession({
+      id: "c2",
+      title: "Resume",
+      session_kind: "subagent_resume",
+      parent_session_id: "p2",
+    });
+    assert.equal(snake?.sessionKind, "subagent_resume");
+    assert.equal(snake?.parentSessionId, "p2");
+  });
+
+  it("mergeRemoteSessionsIntoCatalog backfills sessionKind on existing rows", () => {
+    const local = [
+      localRec({
+        id: "child-1",
+        title: "Goal plan writer",
+        workspace: "/demo",
+        updatedAt: 10,
+      }),
+    ];
+    const merged = mergeRemoteSessionsIntoCatalog(local, [
+      {
+        id: "child-1",
+        title: "Goal plan writer",
+        workspace: "/demo",
+        sessionKind: "subagent",
+        parentSessionId: "parent-1",
+        updatedAt: "2026-08-09T12:00:00.000Z",
+      },
+    ]);
+    assert.equal(merged[0]?.sessionKind, "subagent");
+    assert.equal(merged[0]?.parentSessionId, "parent-1");
+  });
+
+  it("isSubagentSessionKind uses prefix matching", () => {
+    assert.equal(isSubagentSessionKind("subagent"), true);
+    assert.equal(isSubagentSessionKind("subagent_fork"), true);
+    assert.equal(isSubagentSessionKind(undefined), false);
+    assert.equal(isSubagentSessionKind("main"), false);
+  });
+
+  it("filterCatalogForSessionRail hides subagents but keeps catalog selectable", () => {
+    const catalog: SessionRecord[] = [
+      localRec({ id: "user-1", title: "Normal chat", workspace: "/ws" }),
+      localRec({
+        id: "child-1",
+        title: "Adversarial Verifier",
+        workspace: "/ws",
+        sessionKind: "subagent",
+      }),
+      localRec({
+        id: "child-2",
+        title: "Goal Plan Writer",
+        workspace: "/ws",
+        sessionKind: "subagent_resume",
+      }),
+      localRec({ id: "user-2", title: "Another chat", workspace: "/ws" }),
+    ];
+    const rail = filterCatalogForSessionRail(catalog);
+    assert.equal(rail.length, 2);
+    assert.deepEqual(
+      rail.map((r) => r.id).sort(),
+      ["user-1", "user-2"],
+    );
+    // Search still excludes subagents.
+    const searched = filterCatalogForSessionRail(catalog, "goal");
+    assert.equal(searched.length, 0);
+    const searchedUser = filterCatalogForSessionRail(catalog, "another");
+    assert.equal(searchedUser.length, 1);
+    assert.equal(searchedUser[0]?.id, "user-2");
+    // Drill-down: child id remains in full catalog.
+    assert.equal(canSelectCatalogSession(catalog, "child-1"), true);
+    assert.equal(canSelectCatalogSession(catalog, "missing"), false);
   });
 });

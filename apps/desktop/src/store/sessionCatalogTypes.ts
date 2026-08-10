@@ -34,6 +34,14 @@ export type SessionRecord = {
   toolCalls: Record<string, ToolCallCard>;
   plan?: PlanEntry[];
   lastAgentText: string;
+  /**
+   * Upstream role from summary `session_kind` (e.g. subagent / subagent_resume).
+   * Absent for ordinary user chats. Kept in catalog so drill-down by
+   * childSessionId still resolves; rail render filters these rows.
+   */
+  sessionKind?: string;
+  /** Parent chat id when this row is a harness-spawned subagent session. */
+  parentSessionId?: string;
 };
 
 /** Sessions grouped under one workspace folder. */

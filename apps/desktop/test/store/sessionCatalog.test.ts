@@ -6,6 +6,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createSessionState } from "@grok-desktop/acp-core";
 import {
+  filterCatalogForSessionRail,
+  mergeRemoteSessionsIntoCatalog,
+} from "@/lib/sessionActions";
+import {
   formatRelativeTime,
   groupSessionsByProject,
   groupSessionsByTime,
@@ -83,6 +87,63 @@ describe("sessionCatalog", () => {
     assert.equal(cat[0]?.title, "Hello world prompt");
     // Empty handshake must not advance recency (select/resume reordering).
     assert.equal(cat[0]?.updatedAt, 1000);
+  });
+
+  it("upsertFromLiveState preserves sessionKind and parentSessionId from catalog", () => {
+    // Product path: disk/list merge stamps role fields, then live hydrate
+    // (Tasks drill-down → session/load → applyInbound) rebuilds the row.
+    // Live SessionState has no session_kind — wipe would re-show the child in the rail.
+    const childId = "019feb2e-97ef-0000-0000-000000000001";
+    const parentId = "019feb2e-5fe5-0000-0000-000000000001";
+    const withKind = mergeRemoteSessionsIntoCatalog(
+      [],
+      [
+        {
+          id: childId,
+          title: "goal plan writer",
+          workspace: "/ws",
+          sessionKind: "subagent",
+          parentSessionId: parentId,
+          updatedAt: "2026-08-09T12:00:00.000Z",
+        },
+        {
+          id: parentId,
+          title: "Parent goal chat",
+          workspace: "/ws",
+          updatedAt: "2026-08-09T13:00:00.000Z",
+        },
+      ],
+      1000,
+    );
+    const childBefore = withKind.find((r) => r.id === childId);
+    assert.equal(childBefore?.sessionKind, "subagent");
+    assert.equal(childBefore?.parentSessionId, parentId);
+    assert.equal(filterCatalogForSessionRail(withKind).length, 1);
+
+    // Real shipped upsert: live state after session/load for the child.
+    const live = createSessionState({ id: childId, workspace: "/ws" });
+    live.timeline = [
+      {
+        kind: "agent",
+        id: "a1",
+        text: "child timeline body",
+      },
+    ];
+    live.status = "idle";
+    const afterUpsert = upsertFromLiveState(withKind, live, 5000);
+    const childAfter = afterUpsert.find((r) => r.id === childId);
+    assert.ok(childAfter);
+    assert.equal(childAfter?.sessionKind, "subagent");
+    assert.equal(childAfter?.parentSessionId, parentId);
+    assert.equal(childAfter?.timeline.length, 1);
+    // Rail still hides the subagent after live hydrate (criteria 3–4).
+    const rail = filterCatalogForSessionRail(afterUpsert);
+    assert.equal(rail.length, 1);
+    assert.equal(rail[0]?.id, parentId);
+    assert.equal(
+      rail.some((r) => r.id === childId),
+      false,
+    );
   });
 
   it("resource embed blocks change activity without using type names as text", () => {

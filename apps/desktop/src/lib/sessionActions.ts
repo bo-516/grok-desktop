@@ -9,8 +9,7 @@ import {
   fallbackSessionLabel,
   isWeakSessionTitle,
 } from "@grok-desktop/acp-core";
-import type { SessionRecord } from "@/store/sessionCatalog";
-import { normalizeCatalog } from "@/store/sessionCatalog";
+import { normalizeCatalog, type SessionRecord } from "@/store/sessionCatalog";
 import {
   buildConfirmPrompt,
   type ConfirmPrompt,
@@ -23,7 +22,65 @@ export type RemoteSessionRow = {
   workspace?: string;
   updatedAt?: string;
   createdAt?: string;
+  /**
+   * Upstream session role (subagent / subagent_resume / subagent_fork).
+   * Absent for ordinary chats.
+   */
+  sessionKind?: string;
+  /** Parent session id when this row is a harness-spawned subagent. */
+  parentSessionId?: string;
 };
+
+/**
+ * Whether a session_kind marks a harness-spawned subagent chat.
+ * Prefix match covers subagent / subagent_resume / subagent_fork; unknown
+ * or absent kinds stay visible as user chats (safer than hiding them).
+ * @param kind Raw session_kind value, possibly undefined.
+ * @returns True when the row should be hidden from the session rail.
+ */
+export function isSubagentSessionKind(kind: string | undefined): boolean {
+  return typeof kind === "string" && kind.startsWith("subagent");
+}
+
+/**
+ * Filter catalog rows for the session rail: hide harness subagent kinds,
+ * then optionally apply the search query. Subagent rows remain in the full
+ * catalog so selectSession(childSessionId) still resolves.
+ * @param catalog Full session catalog (including subagent rows).
+ * @param query Free-text search over title and workspace; empty = all user chats.
+ * @returns Rows safe to group/render in the rail.
+ */
+export function filterCatalogForSessionRail(
+  catalog: SessionRecord[],
+  query = "",
+): SessionRecord[] {
+  const userChats = catalog.filter(
+    (s) => !isSubagentSessionKind(s.sessionKind),
+  );
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return userChats;
+  }
+  return userChats.filter(
+    (s) =>
+      s.title.toLowerCase().includes(q) ||
+      s.workspace.toLowerCase().includes(q),
+  );
+}
+
+/**
+ * Whether selectSessionAction can resolve a catalog id (no early-return).
+ * Pure predicate used by navigation tests; production still uses catalog.find.
+ * @param catalog Full catalog including subagent rows.
+ * @param id Session id to open (may be a childSessionId).
+ * @returns True when the id is present and select will not early-return.
+ */
+export function canSelectCatalogSession(
+  catalog: SessionRecord[],
+  id: string,
+): boolean {
+  return catalog.some((s) => s.id === id);
+}
 
 /**
  * Build slash command text for fork at a turn directive.
@@ -115,17 +172,22 @@ export function mergeRemoteSessionsIntoCatalog(
     const remoteUpdated = parseTimeMs(row.updatedAt);
     const remoteCreated = parseTimeMs(row.createdAt);
     if (existing) {
-      const strongTitle = !isWeakSessionTitle(existing.title)
-        ? existing.title
-        : row.title?.trim() && !isWeakSessionTitle(row.title)
-          ? row.title.trim()
-          : existing.title;
+      let strongTitle = existing.title;
+      if (isWeakSessionTitle(existing.title)) {
+        const remoteTitle = row.title?.trim();
+        if (remoteTitle && !isWeakSessionTitle(remoteTitle)) {
+          strongTitle = remoteTitle;
+        }
+      }
       byId.set(row.id, {
         ...existing,
         workspace: existing.workspace || row.workspace || "",
         title: strongTitle,
         updatedAt: Math.max(existing.updatedAt, remoteUpdated ?? 0),
         createdAt: existing.createdAt || remoteCreated || existing.updatedAt,
+        // Backfill role fields on existing rows so historical catalog gains them.
+        sessionKind: row.sessionKind ?? existing.sessionKind,
+        parentSessionId: row.parentSessionId ?? existing.parentSessionId,
       });
       continue;
     }
@@ -146,6 +208,8 @@ export function mergeRemoteSessionsIntoCatalog(
       timeline: [],
       toolCalls: {},
       lastAgentText: "",
+      sessionKind: row.sessionKind,
+      parentSessionId: row.parentSessionId,
     });
   }
   return normalizeCatalog([...byId.values()]);
@@ -181,9 +245,11 @@ function parseSessionsListText(text: string): RemoteSessionRow[] {
 
 /**
  * Normalize one session-shaped object from disk or CLI JSON.
+ * Accepts camelCase and snake_case role fields from bridge / disk.
  * @param row Unknown list element.
+ * @returns Catalog-friendly remote row, or null when id is missing.
  */
-function normalizeOneSession(row: unknown): RemoteSessionRow | null {
+export function normalizeOneSession(row: unknown): RemoteSessionRow | null {
   if (!row || typeof row !== "object") {
     return null;
   }
@@ -200,7 +266,20 @@ function normalizeOneSession(row: unknown): RemoteSessionRow | null {
     "last_active_at",
   ]);
   const createdAt = firstStringField(r, ["createdAt", "created_at"]);
-  return { id, title, workspace, updatedAt, createdAt };
+  const sessionKind = firstStringField(r, ["sessionKind", "session_kind"]);
+  const parentSessionId = firstStringField(r, [
+    "parentSessionId",
+    "parent_session_id",
+  ]);
+  return {
+    id,
+    title,
+    workspace,
+    updatedAt,
+    createdAt,
+    sessionKind,
+    parentSessionId,
+  };
 }
 
 /**

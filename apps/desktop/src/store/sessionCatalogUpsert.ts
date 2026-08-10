@@ -120,6 +120,10 @@ export function resolveCatalogUpdatedAt(
  * Preserves good titles; never replaces them with Session/Chat id labels.
  * `updatedAt` advances only on user/agent message activity (or a newer
  * agent-reported activity time), not on every select/resume upsert.
+ * Role fields (`sessionKind` / `parentSessionId`) come only from disk/list
+ * merge — live SessionState has no equivalent — so they are always kept from
+ * the existing catalog row when present. Wiping them would re-show harness
+ * subagent chats in the rail after drill-down `session/load`.
  * @param catalog Current catalog array (not mutated).
  * @param state Live or seeded SessionState; empty id is a no-op.
  * @param now Wall-clock ms for createdAt / content-change updatedAt.
@@ -189,6 +193,9 @@ export function upsertFromLiveState(
     toolCalls,
     plan,
     lastAgentText,
+    // Live ACP state never carries session_kind; keep disk-merge role fields.
+    sessionKind: existing?.sessionKind,
+    parentSessionId: existing?.parentSessionId,
   };
   const without = catalog.filter((s) => s.id !== state.id);
   return [next, ...without].sort((a, b) => b.updatedAt - a.updatedAt);
