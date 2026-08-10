@@ -17,7 +17,12 @@
     "bridge": "npm run start -w @grok-desktop/bridge",
     "demo:e2e": "npm run demo:e2e -w @grok-desktop/bridge",
     "dev": "npm run dev -w @grok-desktop/desktop",
-    "dev:full": "echo 'Terminal A: npm run bridge  |  Terminal B: npm run dev  |  UI: Live grok (demo/)'",
+    "dev:full": "echo 'Use: npm run run:dev  (menu) or run:go-web | run:node-web | run:go-desktop | run:node-desktop'",
+    "run:dev": "bash scripts/run-dev.sh",
+    "run:go-web": "bash scripts/run-dev.sh go-web",
+    "run:node-web": "bash scripts/run-dev.sh node-web",
+    "run:go-desktop": "bash scripts/run-dev.sh go-desktop",
+    "run:node-desktop": "bash scripts/run-dev.sh node-desktop",
     "typecheck": "npm run typecheck -w @grok-desktop/acp-core && npm run typecheck:test -w @grok-desktop/acp-core && npm run typecheck -w @grok-desktop/bridge --if-present && npm run typecheck -w @grok-desktop/desktop --if-present && npm run typecheck:test -w @grok-desktop/desktop --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"

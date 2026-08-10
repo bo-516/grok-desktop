@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Mimic `grok [flags] agent [flags] stdio` entry — ignore argv after locating stdio.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$DIR/fake-grok-agent.mjs"
