@@ -1,8 +1,9 @@
 /**
- * Soft collapsible Thinking pill (Framer: muted inline control, not a heavy card).
- * Expanded state belongs only to this render instance; the protocol timeline only
- * stores the initial collapsed flag and streaming lifecycle fields.
- * Completed rows auto-collapse unless the user already toggled expand this mount.
+ * Soft collapsible Thinking step inside a turn activity rail.
+ * Uses turn-step geometry (not shell-toggle pills) so only the rail header
+ * carries filled chrome. Expanded state is local to this mount; completed rows
+ * auto-collapse unless the user already toggled expand.
+ * Presentation chrome is {@link CollapsibleStepView}; this widget owns policy.
  */
 
 import cs from "classnames";
@@ -12,6 +13,7 @@ import {
   formatThoughtLabel,
   shouldAutoCollapseThought,
 } from "@/lib/thoughtLabel";
+import { CollapsibleStepView } from "@/widgets/shared";
 
 type ThoughtItem = Extract<TimelineItem, { kind: "thought" }>;
 
@@ -23,7 +25,7 @@ type ThoughtWidgetProps = {
 /**
  * Renders an expandable agent-reasoning segment without mixing reasoning into the final answer body.
  * @param props Thought fragment and session status; missing timestamps safely degrade to a generic Thought label.
- * @returns A Thinking row the user can expand or collapse.
+ * @returns A Thinking step row the user can expand or collapse.
  */
 export function ThoughtWidget(props: ThoughtWidgetProps) {
   const { item, sessionStatus } = props;
@@ -36,9 +38,6 @@ export function ThoughtWidget(props: ThoughtWidgetProps) {
   const label = formatThoughtLabel(item, sessionStatus);
   const isDone = item.completedAt !== undefined;
   const className = cs("item-thought", { "item-thought-open": isOpen });
-  const toggleClassName = cs("thought-toggle", {
-    "thought-toggle-done": isDone,
-  });
 
   useEffect(() => {
     const prevCompletedAt = prevCompletedAtRef.current;
@@ -55,24 +54,20 @@ export function ThoughtWidget(props: ThoughtWidgetProps) {
   }, [item.completedAt]);
 
   return (
-    <div className={className} data-kind="thought">
-      <button
-        type="button"
-        className={toggleClassName}
-        aria-expanded={isOpen}
-        onClick={() => {
-          userToggledRef.current = true;
-          setIsOpen((open) => !open);
-        }}
-      >
-        <span className="thought-chevron" aria-hidden="true">
-          {isOpen ? "⌄" : "›"}
-        </span>
-        {label}
-      </button>
-      {isOpen && item.text ? (
-        <div className="thought-content">{item.text}</div>
-      ) : null}
-    </div>
+    <CollapsibleStepView
+      open={isOpen}
+      onToggle={() => {
+        userToggledRef.current = true;
+        setIsOpen((open) => !open);
+      }}
+      label={label}
+      body={
+        item.text ? <div className="turn-step-body">{item.text}</div> : null
+      }
+      variant="turn-step"
+      active={!isDone}
+      className={className}
+      dataKind="thought"
+    />
   );
 }
