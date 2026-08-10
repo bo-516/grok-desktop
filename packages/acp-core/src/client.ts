@@ -1,20 +1,16 @@
 /**
  * ACP stdio client: handshake, prompt, cancel, permission replies, update dispatch.
  * Transport is injectable so tests/mock/live all share the same production path.
+ * Handshake and inbound dispatch live in clientHandshake / clientDispatch.
  */
 
 import {
-  classifyMessage,
   decodeLine,
   encodeNotification,
   encodeRequest,
   encodeResponse,
 } from "./codec.js";
-import {
-  applySessionUpdate,
-  createSessionState,
-  extractSessionUpdate,
-} from "./timeline.js";
+import { createSessionState } from "./timeline.js";
 import {
   appendUserPrompt,
   buildPermissionOutcome,
@@ -22,18 +18,7 @@ import {
   markDisconnected,
   markPromptSettled,
   markPromptStarted,
-  setPendingPermission,
-  shapePermissionRequest,
-  tagSeedUserMessages,
 } from "./sessionLifecycle.js";
-import {
-  extractAvailableModelsFromSessionResult,
-  extractInitializeSessionMetadata,
-  extractModelFromSessionResult,
-  preferCommands,
-  resolveAvailableModels,
-  resolveReverseErrorCode,
-} from "./sessionMetadata.js";
 import type { AcpTransport } from "./transport.js";
 import type {
   ContentBlock,
@@ -42,6 +27,8 @@ import type {
   PromptResult,
   SessionState,
 } from "./types.js";
+import { runAcpHandshake } from "./clientHandshake.js";
+import { dispatchAcpMessage } from "./clientDispatch.js";
 
 export type { AcpTransport } from "./transport.js";
 
@@ -84,6 +71,13 @@ export class AcpClient {
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private promptInFlight = false;
   private disposed = false;
+  /**
+   * True while a `session/load` replay is in flight. The snapshot still absorbs
+   * every replayed chunk, but listeners are not notified until the window
+   * closes, so restoring history costs one repaint instead of one per chunk
+   * and the UI never mistakes replayed history for a live turn.
+   */
+  private replaying = false;
 
   constructor(opts: AcpClientOptions) {
     this.transport = opts.transport;
@@ -99,6 +93,9 @@ export class AcpClient {
 
     this.transport.onLine((line) => this.handleLine(line));
     this.transport.onClose?.(() => {
+      // A transport death during replay must reach listeners; the pending
+      // session/load can never flush, so drop the gate before the paint.
+      this.replaying = false;
       this.setState(markDisconnected(this.state));
       for (const [, p] of this.pending) {
         p.reject(new Error("ACP transport closed"));
@@ -132,157 +129,56 @@ export class AcpClient {
     /** Local cached state to show while load/replay is in flight. */
     seed?: SessionState;
   }): Promise<{ init: InitializeResult; sessionId: string; resumed: boolean }> {
-    const init = (await this.request("initialize", {
-      protocolVersion: opts.protocolVersion ?? 1,
-      clientCapabilities: opts.clientCapabilities ?? {
-        fs: { readTextFile: true, writeTextFile: false },
-        terminal: false,
+    return runAcpHandshake(
+      {
+        request: (method, params) => this.request(method, params),
+        getSessionState: () => this.getSessionState(),
+        replaceSessionState: (state) => this.replaceSessionState(state),
+        setReplaying: (on) => this.setReplaying(on),
       },
-    })) as InitializeResult;
-    const initialMetadata = extractInitializeSessionMetadata(init);
-    /** Captured for every subsequent setState so image gates stay available (F-STREAM-07). */
-    const agentCapabilities = init.agentCapabilities;
-
-    const methods = new Set(
-      (init.authMethods ?? []).map((m) => m.id).filter(Boolean),
+      opts,
     );
-    let methodId = opts.authMethodId ?? null;
-    if (!methodId) {
-      if (opts.envApiKeyPresent && methods.has("xai.api_key")) {
-        methodId = "xai.api_key";
-      } else if (methods.has("cached_token")) {
-        methodId = "cached_token";
-      } else if (methods.size > 0) {
-        methodId = [...methods][0] ?? null;
-      }
-    }
-    if (methodId) {
-      await this.request("authenticate", {
-        methodId,
-        _meta: { headless: true },
-      });
-    }
-
-    const model = initialMetadata.model;
-    /** Prefer session-scoped catalog when present; otherwise initialize's agent list. */
-    const modelsFromInit = initialMetadata.availableModels;
-
-    if (opts.resumeId) {
-      // Show cached transcript immediately, then agent replays on top.
-      // Tag seed user/agent/thought rows so session/load replay claims by
-      // identity instead of concatenating or double-appending the same turn.
-      if (opts.seed && opts.seed.id === opts.resumeId) {
-        this.setState({
-          ...opts.seed,
-          timeline: tagSeedUserMessages(opts.seed.timeline),
-          workspace: opts.cwd || opts.seed.workspace,
-          model: opts.seed.model || String(model),
-          availableCommands: preferCommands(
-            opts.seed.availableCommands,
-            initialMetadata.availableCommands,
-          ),
-          availableModels:
-            (opts.seed.availableModels && opts.seed.availableModels.length > 0
-              ? opts.seed.availableModels
-              : undefined) ?? modelsFromInit,
-          agentCapabilities:
-            opts.seed.agentCapabilities ?? agentCapabilities,
-          status: "idle",
-          pendingPermission: undefined,
-        });
-      } else {
-        this.setState({
-          ...createSessionState({
-            id: opts.resumeId,
-            workspace: opts.cwd,
-            model: String(model),
-            mode: "build",
-          }),
-          availableCommands: initialMetadata.availableCommands,
-          availableModels: modelsFromInit,
-          agentCapabilities,
-        });
-      }
-      // grok-build requires session/load to include both cwd and mcpServers; missing either is Invalid params.
-      const loadResult = await this.request("session/load", {
-        sessionId: opts.resumeId,
-        cwd: opts.cwd,
-        mcpServers: opts.mcpServers ?? [],
-      });
-      const loadedModel = extractModelFromSessionResult(loadResult) || model;
-      const loadedModels = extractAvailableModelsFromSessionResult(loadResult);
-      // Keep id stable; replay / available_commands_update may have already populated fields.
-      const cur = this.getSessionState();
-      this.setState({
-        ...cur,
-        id: opts.resumeId,
-        workspace: opts.cwd || cur.workspace,
-        model: cur.model || String(loadedModel),
-        availableCommands: preferCommands(
-          cur.availableCommands,
-          initialMetadata.availableCommands,
-        ),
-        availableModels: resolveAvailableModels(
-          loadedModels,
-          cur.availableModels,
-          modelsFromInit,
-        ),
-        agentCapabilities: cur.agentCapabilities ?? agentCapabilities,
-        status: cur.status === "disconnected" ? "idle" : cur.status,
-        errorMessage: undefined,
-      });
-      return { init, sessionId: opts.resumeId, resumed: true };
-    }
-
-    const session = (await this.request("session/new", {
-      cwd: opts.cwd,
-      mcpServers: opts.mcpServers ?? [],
-    })) as { sessionId?: string };
-
-    const sessionId = session.sessionId ?? "";
-    if (!sessionId) {
-      throw new Error("session/new did not return sessionId");
-    }
-
-    const newModel = extractModelFromSessionResult(session) || model;
-    const sessionModels = extractAvailableModelsFromSessionResult(session);
-    /**
-     * session/new may emit available_commands_update / current_mode_update while the RPC
-     * is in flight. Merge those into the post-handshake snapshot instead of wiping them
-     * with a blank createSessionState().
-     */
-    const interim = this.getSessionState();
-    this.setState({
-      ...createSessionState({
-        id: sessionId,
-        workspace: opts.cwd,
-        model: String(newModel),
-        mode: interim.mode || "build",
-      }),
-      availableCommands: preferCommands(
-        interim.availableCommands,
-        initialMetadata.availableCommands,
-      ),
-      availableModels:
-        sessionModels.length > 0 ? sessionModels : modelsFromInit,
-      agentCapabilities,
-      configOptions: interim.configOptions,
-      title: interim.title,
-    });
-
-    return { init, sessionId, resumed: false };
   }
 
   /**
    * Replace session snapshot (used when bridge seeds cache before replay).
+   * @param state Next SessionState (not mutated in place by the client).
    */
   replaceSessionState(state: SessionState): void {
     this.setState(state);
   }
 
   /**
+   * Open or close the `session/load` replay window.
+   * While open, replayed chunks mutate the snapshot silently; closing emits
+   * exactly one state carrying the finished transcript. Callers must always
+   * close the window they opened (including on RPC failure), otherwise the
+   * session goes mute and no later live update ever reaches the UI.
+   * @param on True to suppress per-chunk fan-out, false to close and flush once.
+   */
+  setReplaying(on: boolean): void {
+    if (this.replaying === on) {
+      return;
+    }
+    this.replaying = on;
+    if (on) {
+      return;
+    }
+    // Replay leaves no live turn behind: drop the pending settle so it cannot
+    // fire a second full-timeline repaint right after the flush.
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = null;
+    }
+    this.onStateChange?.(this.state);
+  }
+
+  /**
    * Send a user prompt and wait for the PromptResponse.
    * Streaming updates are applied as they arrive via handleLine.
+   * @param sessionId Active ACP session id.
+   * @param blocks Prompt content blocks (text / image / resource_link).
+   * @returns PromptResult from the agent; throws on RPC error.
    */
   async prompt(
     sessionId: string,
@@ -317,6 +213,7 @@ export class AcpClient {
   /**
    * Respond to a pending session/request_permission.
    * Also clears waiting_permission in local state.
+   * @param optionId Permission option id from the agent request.
    */
   respondPermission(optionId: string): void {
     const pending = this.state.pendingPermission;
@@ -352,7 +249,9 @@ export class AcpClient {
 
   dispose(): void {
     this.disposed = true;
-    if (this.settleTimer) {clearTimeout(this.settleTimer);}
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+    }
     this.transport.dispose?.();
   }
 
@@ -360,112 +259,57 @@ export class AcpClient {
 
   private setState(next: SessionState): void {
     this.state = next;
+    if (this.replaying) {
+      // Coalesced into the single flush in setReplaying(false).
+      return;
+    }
     this.onStateChange?.(next);
   }
 
   private scheduleSettle(): void {
-    if (this.settleTimer) {clearTimeout(this.settleTimer);}
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+    }
     this.settleTimer = setTimeout(() => {
-      if (this.promptInFlight) {return;}
-      if (this.state.status === "waiting_permission") {return;}
-      if (this.state.status === "disconnected") {return;}
+      if (this.promptInFlight) {
+        return;
+      }
+      if (this.state.status === "waiting_permission") {
+        return;
+      }
+      if (this.state.status === "disconnected") {
+        return;
+      }
       this.setState(markPromptSettled(this.state));
     }, this.settleQuietMs);
   }
 
   private handleLine(line: string): void {
     const decoded = decodeLine(line);
-    if (!decoded.ok) {return;}
+    if (!decoded.ok) {
+      return;
+    }
     this.dispatchMessage(decoded.message);
   }
 
   /**
    * Public for tests: feed a fully decoded JSON-RPC message through the same path.
+   * @param message Decoded JSON-RPC message.
    */
   dispatchMessage(message: JsonRpcMessage): void {
-    const kind = classifyMessage(message);
-
-    if (kind.kind === "response") {
-      if (kind.id === null || kind.id === undefined) {return;}
-      const waiter = this.pending.get(kind.id);
-      if (!waiter) {return;}
-      this.pending.delete(kind.id);
-      if (kind.error) {
-        waiter.reject(
-          new Error(kind.error.message || `RPC error ${kind.error.code}`),
-        );
-      } else {
-        waiter.resolve(kind.result);
-      }
-      return;
-    }
-
-    if (kind.kind === "notification") {
-      if (kind.method === "session/update") {
-        const update = extractSessionUpdate(kind.params);
-        if (update) {
-          this.setState(applySessionUpdate(this.state, update));
-          // activity delays settle
-          if (this.promptInFlight || this.state.status === "streaming") {
-            this.scheduleSettle();
-          }
-        }
-      }
-      return;
-    }
-
-    if (kind.kind === "request") {
-      void this.handleIncomingRequest(kind.id, kind.method, kind.params);
-    }
-  }
-
-  private async handleIncomingRequest(
-    id: number | string,
-    method: string,
-    params: unknown,
-  ): Promise<void> {
-    if (method === "session/request_permission") {
-      const shaped = shapePermissionRequest(id, params);
-      this.setState(setPendingPermission(this.state, shaped));
-      if (this.autoPermissionOptionId) {
-        this.respondPermission(this.autoPermissionOptionId);
-      }
-      return;
-    }
-
-    // Reverse handlers (fs/terminal/…). Must return real errors — never silent {}.
-    if (this.onAgentRequest) {
-      try {
-        const result = await this.onAgentRequest(method, id, params);
-        this.transport.write(encodeResponse(id, result ?? {}));
-      } catch (e) {
-        const code =
-          e &&
-          typeof e === "object" &&
-          "code" in e &&
-          typeof (e as { code: unknown }).code === "number"
-            ? (e as { code: number }).code
-            : -32000;
-        const msg = e instanceof Error ? e.message : String(e);
-        // Prefer -32601 when handler signals method-not-found (message or code).
-        const rpcCode = resolveReverseErrorCode(code, msg);
-        this.transport.write(
-          encodeResponse(id, undefined, {
-            code: rpcCode,
-            message: msg.includes(String(method))
-              ? msg
-              : `${msg} (${method})`,
-          }),
-        );
-      }
-      return;
-    }
-
-    this.transport.write(
-      encodeResponse(id, undefined, {
-        code: -32601,
-        message: `Method not found: ${method}`,
-      }),
+    dispatchAcpMessage(
+      {
+        pending: this.pending,
+        getSessionState: () => this.getSessionState(),
+        replaceSessionState: (state) => this.replaceSessionState(state),
+        write: (line) => this.transport.write(line),
+        scheduleSettle: () => this.scheduleSettle(),
+        isPromptInFlight: () => this.promptInFlight,
+        autoPermissionOptionId: this.autoPermissionOptionId,
+        respondPermission: (optionId) => this.respondPermission(optionId),
+        onAgentRequest: this.onAgentRequest,
+      },
+      message,
     );
   }
 

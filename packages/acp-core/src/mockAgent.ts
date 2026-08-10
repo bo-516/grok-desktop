@@ -19,6 +19,12 @@ export type MockAgentOptions = {
   emitPermission?: boolean;
   /** Delay between stream chunks (ms). */
   chunkDelayMs?: number;
+  /**
+   * Turns replayed as `session/update` before `session/load` answers, matching
+   * the ACP rule that history is streamed ahead of the response. 0 (default)
+   * keeps the historical no-replay behaviour for tests that only check params.
+   */
+  loadReplayTurns?: number;
 };
 
 /**
@@ -32,6 +38,7 @@ export function createMockAcpPair(opts: MockAgentOptions = {}): {
 } {
   const chunkDelayMs = opts.chunkDelayMs ?? 5;
   const emitPermission = opts.emitPermission ?? true;
+  const loadReplayTurns = Math.max(0, opts.loadReplayTurns ?? 0);
 
   type Handler = (line: string) => void;
   let clientLineHandler: Handler | null = null;
@@ -62,6 +69,48 @@ export function createMockAcpPair(opts: MockAgentOptions = {}): {
 
   const sleep = (ms: number) =>
     new Promise<void>((r) => setTimeout(r, ms));
+
+  /**
+   * Stream `loadReplayTurns` finished turns the way a real agent replays
+   * history: user echo, reasoning, one tool call, then the answer.
+   * @param sessionId Session being loaded; a missing id still emits, letting
+   *   tests observe that the client ignores updates for unknown sessions.
+   * @returns Resolves once every replayed chunk has been written.
+   */
+  const replayHistory = async (sessionId?: string): Promise<void> => {
+    for (let turn = 1; turn <= loadReplayTurns; turn += 1) {
+      const toolCallId = `tool-replay-${turn}`;
+      const updates = [
+        {
+          sessionUpdate: "user_message_chunk",
+          content: { type: "text", text: `question ${turn}` },
+        },
+        {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: `recalling step ${turn}… ` },
+        },
+        {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          title: `read file-${turn}.ts`,
+          kind: "read",
+          status: "completed",
+        },
+        {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `answer ${turn}` },
+        },
+      ];
+      for (const update of updates) {
+        toClient({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: { sessionId, update },
+        });
+        await sleep(chunkDelayMs);
+      }
+    }
+  };
 
   const handleClientLine = async (line: string): Promise<void> => {
     const decoded = decodeLine(line);
@@ -144,6 +193,8 @@ export function createMockAcpPair(opts: MockAgentOptions = {}): {
         });
         return;
       }
+      // ACP contract: the whole transcript is replayed before the response.
+      await replayHistory(p.sessionId);
       toClient({
         jsonrpc: "2.0",
         id,

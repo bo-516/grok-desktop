@@ -12,6 +12,7 @@ import {
   extractSessionUpdate,
   patchToolCard,
   resetTimelineIdCounter,
+  userImagesFromBlocks,
   userTextFromBlocks,
 } from "../src/timeline.js";
 import {
@@ -206,6 +207,18 @@ describe("timeline / tool patch-merge", () => {
     assert.equal(state.status, "streaming");
   });
 
+  it("userImagesFromBlocks keeps image payloads for timeline preview", () => {
+    const blocks = [
+      { type: "text" as const, text: "see this" },
+      { type: "image" as const, mimeType: "image/png", data: "abc123" },
+      { type: "resource_link" as const, uri: "file:///x" },
+    ];
+    assert.equal(userTextFromBlocks(blocks), "see this");
+    assert.deepEqual(userImagesFromBlocks(blocks), [
+      { mimeType: "image/png", data: "abc123" },
+    ]);
+  });
+
   it("user_message_chunk does not duplicate optimistic appendUserPrompt text", () => {
     let state = createSessionState({ id: "s1" });
     state = appendUserPrompt(state, [
@@ -246,9 +259,10 @@ describe("timeline / tool patch-merge", () => {
     }
   });
 
-  it("tagSeedUserMessages collapses exact X+X bodies from pre-fix catalog cache", () => {
+  it("tagSeedUserMessages collapses repeated bodies from pre-fix catalog cache", () => {
     const once = "In one sentence, describe what the demo workspace is for. Do not change any files.";
-    const doubled = once + once;
+    // Odd counts too: the pre-fix bug added one copy per replay, not per pair.
+    const doubled = once + once + once;
     const tagged = tagSeedUserMessages([
       {
         kind: "user",

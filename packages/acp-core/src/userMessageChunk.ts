@@ -5,23 +5,33 @@
 
 import type { ContentBlock, TimelineItem } from "./types.js";
 import { nextTimelineId } from "./timelineId.js";
+import { echoRepeatsBody, normalizeEchoBody } from "./userEchoText.js";
 
 /**
- * Collapse exact doubled user text produced by the pre-fix seed+replay bug
- * (`"hellohello"` → `"hello"`). Repeats while the body is an exact X+X pair.
+ * Collapse a body that is one unit repeated back-to-back, as the pre-fix
+ * seed+replay bug produced (`"hellohello"` → `"hello"`).
+ *
+ * Any repeat count collapses, not just pairs: a replayed turn gained one copy
+ * per replay, so caches hold odd counts (`P+P+P`) that halving alone cannot
+ * heal. Finding the shortest period covers every count in one pass.
  * @param text Raw user text body from cache or blocks.
- * @returns Single-copy body when an exact double is detected; otherwise `text`.
+ * @returns The single repeating unit, or `text` when it is not a clean repeat.
  */
-export function collapseExactDoubledText(text: string): string {
-  let cur = text;
-  while (cur.length >= 2 && cur.length % 2 === 0) {
-    const half = cur.length / 2;
-    if (cur.slice(0, half) !== cur.slice(half)) {
-      break;
-    }
-    cur = cur.slice(0, half);
+export function collapseRepeatedText(text: string): string {
+  const n = text.length;
+  if (n < 2) {
+    return text;
   }
-  return cur;
+  for (let unit = 1; unit <= n / 2; unit += 1) {
+    if (n % unit !== 0) {
+      continue;
+    }
+    const head = text.slice(0, unit);
+    if (head.repeat(n / unit) === text) {
+      return head;
+    }
+  }
+  return text;
 }
 
 /**
@@ -46,12 +56,10 @@ export function applyUserMessageChunk(
     // (extra full-text session/load replay after chunked confirm).
     const lastUser = findLastUserItem(timeline);
     if (lastUser && lastUser.agentConfirmed) {
-      const body = userTextFromBlocks(lastUser.blocks);
-      if (
-        text === body ||
-        body.startsWith(text) ||
-        text.startsWith(body)
-      ) {
+      // Compared on the normalized body: the re-echo carries the agent's own
+      // rewrites (`[Image #N]`, reflowed spaces), and a literal compare would
+      // read those as a brand-new message and open a duplicate bubble.
+      if (echoRepeatsBody(text, userTextFromBlocks(lastUser.blocks))) {
         return timeline;
       }
     }
@@ -81,7 +89,7 @@ export function applyUserMessageChunk(
     // Untagged rows from older caches still act as seed during resume.
     item.origin === undefined;
 
-  // Heal exact X+X bodies still present on older catalog rows before absorb.
+  // Heal repeated bodies still present on older catalog rows before absorb.
   const cleanedBlocks = normalizeUserBlocks(item.blocks);
   const itemClean: Extract<TimelineItem, { kind: "user" }> =
     cleanedBlocks === item.blocks
@@ -101,7 +109,48 @@ export function applyUserMessageChunk(
     );
   }
 
-  // Agent-origin (or empty) streaming: append chunk text into blocks.
+  // Agent-origin (or empty) streaming.
+  //
+  // These rows never reach agentConfirmed, so without the two guards below the
+  // first one stays the absorb slot for the rest of the session: every extra
+  // replay of the turn (reconnect, a second session/load, reopening the chat)
+  // stacked another copy of the body, and a later turn's echo was concatenated
+  // onto an unrelated message.
+  const existing = userTextFromBlocks(item.blocks);
+  const normExisting = normalizeEchoBody(existing);
+  const normText = normalizeEchoBody(text);
+
+  // Replay of what this row already holds: identical → nothing to do; longer →
+  // the agent resent the whole message, so replace rather than concatenate.
+  if (normExisting.length > 0 && normText.startsWith(normExisting)) {
+    if (normText.length === normExisting.length) {
+      return timeline;
+    }
+    return replaceTimelineItem(timeline, pendingIdx, {
+      ...item,
+      blocks: replaceTextBlocks(item.blocks, text),
+      origin: item.origin ?? "agent",
+      agentEchoAcc: text,
+    });
+  }
+
+  // Only a row still at the tail is mid-message. Anything after it (an answer,
+  // a tool card, a newer prompt) means that turn closed, so unrelated text
+  // opens its own bubble instead of merging into the previous one.
+  if (pendingIdx !== timeline.length - 1) {
+    return [
+      ...timeline,
+      {
+        kind: "user",
+        id: nextTimelineId("user"),
+        blocks: [{ type: "text", text }],
+        origin: "agent",
+        agentConfirmed: false,
+        agentEchoAcc: text,
+      },
+    ];
+  }
+
   const blocks = appendTextToBlocks(item.blocks, text);
   const acc = (item.agentEchoAcc ?? "") + text;
   const next: TimelineItem = {
@@ -130,10 +179,18 @@ function absorbEchoIntoAuthoritativeUser(
   text: string,
 ): TimelineItem[] {
   const existing = userTextFromBlocks(item.blocks);
+  // Normalized twins of both sides: the agent echoes its own rewrite of the
+  // prompt (image blocks become `[Image #N]`, whitespace reflows), so every
+  // "is this the same message" decision below runs on the flattened form while
+  // the stored body stays exactly what the person sent.
+  const normExisting = normalizeEchoBody(existing);
+  const normText = normalizeEchoBody(text);
   let acc = item.agentEchoAcc ?? "";
 
   // Agent has a longer complete sentence than optimistic local — adopt it.
-  if (text.startsWith(existing) && text.length > existing.length) {
+  // Placeholder-only growth is not "longer", so a re-echo can never overwrite
+  // the local body with the agent's placeholder spelling.
+  if (normText.startsWith(normExisting) && normText.length > normExisting.length) {
     const next: TimelineItem = {
       ...item,
       blocks: replaceTextBlocks(item.blocks, text),
@@ -148,7 +205,7 @@ function absorbEchoIntoAuthoritativeUser(
     acc = text;
   } else if (existing.startsWith(acc + text) || acc + text === existing) {
     acc = acc + text;
-  } else if (text === existing || existing.startsWith(text)) {
+  } else if (normExisting.startsWith(normText)) {
     // Full-message or progressive prefix replay of the authoritative body.
     if (text.length >= acc.length) {
       acc = text;
@@ -159,9 +216,9 @@ function absorbEchoIntoAuthoritativeUser(
     return timeline;
   }
 
+  const normAcc = normalizeEchoBody(acc);
   const confirmed =
-    acc === existing ||
-    (acc.length >= existing.length && acc.startsWith(existing));
+    normAcc.length >= normExisting.length && normAcc.startsWith(normExisting);
 
   const next: TimelineItem = {
     ...item,
@@ -180,8 +237,35 @@ export function userTextFromBlocks(blocks: ContentBlock[]): string {
   return blocks.map((b) => (b.type === "text" ? b.text : "")).join("");
 }
 
+/** Image payload extracted for timeline / composer preview (base64, no data: prefix). */
+export type UserImageBlock = {
+  mimeType: string;
+  data: string;
+};
+
 /**
- * Collapse exact X+X text blocks in a user row (pre-fix catalog heal).
+ * Collect image ContentBlocks from a user prompt row (order preserved).
+ * Resource / resource_link blocks stay out — they are agent payload only and
+ * must not paint as raw type names in the bubble.
+ * @param blocks User row blocks from appendUserPrompt / seed.
+ * @returns Image slices with mime + base64 data; empty when none.
+ */
+export function userImagesFromBlocks(blocks: ContentBlock[]): UserImageBlock[] {
+  const images: UserImageBlock[] = [];
+  for (const block of blocks) {
+    if (block.type !== "image") {
+      continue;
+    }
+    if (!block.data || !block.mimeType) {
+      continue;
+    }
+    images.push({ mimeType: block.mimeType, data: block.data });
+  }
+  return images;
+}
+
+/**
+ * Collapse repeated text blocks in a user row (pre-fix catalog heal).
  * @param blocks User content blocks.
  * @returns Same array reference when unchanged; otherwise new blocks with cleaned text.
  */
@@ -191,7 +275,7 @@ function normalizeUserBlocks(blocks: ContentBlock[]): ContentBlock[] {
     if (block.type !== "text") {
       return block;
     }
-    const cleaned = collapseExactDoubledText(block.text);
+    const cleaned = collapseRepeatedText(block.text);
     if (cleaned === block.text) {
       return block;
     }

@@ -9,8 +9,9 @@ import {
 } from "./timeline.js";
 import { nextTimelineId } from "./timelineId.js";
 import {
-  collapseExactDoubledText,
+  collapseRepeatedText,
 } from "./userMessageChunk.js";
+import { stripSystemReminders } from "./userEchoText.js";
 import type {
   ContentBlock,
   PermissionRequest,
@@ -18,7 +19,7 @@ import type {
   SessionStatus,
 } from "./types.js";
 
-export { collapseExactDoubledText } from "./userMessageChunk.js";
+export { collapseRepeatedText } from "./userMessageChunk.js";
 
 /**
  * Transition the session to an explicit status; a disconnected session may only resume streaming
@@ -73,24 +74,29 @@ export function appendUserPrompt(
 /**
  * Tag cached transcript rows as seed so session/load replay can confirm them
  * without concatenating or double-appending.
- * - User rows: also normalizes exact X+X bodies left by the old bug.
+ * - User rows: also heals bodies written by earlier builds — a prompt repeated
+ *   once per replay, and swallowed `<system-reminder>` log dumps — then drops rows left with no
+ *   content at all, so an old cache full of harness noise does not repaint it.
  * - Agent / thought rows: origin seed + agentConfirmed false so
  *   appendOrMergeText / appendOrMergeThought claim them in order.
  * Confirmed or already agent-origin rows are left alone (users still text-healed).
  * @param timeline Seed or disk-restored timeline; not mutated in place.
- * @returns Timeline where claimable rows carry origin seed and agentConfirmed false.
+ * @returns Timeline where claimable rows carry origin seed and agentConfirmed
+ *   false, minus user rows that healed down to nothing.
  */
 export function tagSeedUserMessages(
   timeline: SessionState["timeline"],
 ): SessionState["timeline"] {
-  return timeline.map((item) => {
+  const tagged = timeline.map((item) => {
     if (item.kind === "user") {
       let changed = false;
       const blocks = item.blocks.map((block) => {
         if (block.type !== "text") {
           return block;
         }
-        const cleaned = collapseExactDoubledText(block.text);
+        const cleaned = stripSystemReminders(
+          collapseRepeatedText(block.text),
+        );
         if (cleaned === block.text) {
           return block;
         }
@@ -121,6 +127,23 @@ export function tagSeedUserMessages(
     }
     return item;
   });
+  return tagged.filter((item) => item.kind !== "user" || hasUserContent(item));
+}
+
+/**
+ * Whether a user row still has anything worth painting after healing.
+ * A row whose only text was a `<system-reminder>` dump heals to empty; keeping
+ * it would render an empty bubble and, worse, offer itself as an absorb slot
+ * for the next real echo.
+ * @param item User timeline row.
+ * @returns true when some text or non-text block survives.
+ */
+function hasUserContent(
+  item: Extract<SessionState["timeline"][number], { kind: "user" }>,
+): boolean {
+  return item.blocks.some((block) =>
+    block.type === "text" ? block.text.trim().length > 0 : true,
+  );
 }
 
 /**
