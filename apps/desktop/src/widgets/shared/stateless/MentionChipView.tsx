@@ -1,10 +1,10 @@
 /**
- * Codex-style mention chip: kind icon + token label on a tinted, hairline-ringed pill.
+ * Optional mention chip: kind icon + token label on a tinted, hairline-ringed pill.
  *
- * Used wherever a `@file` / `/command` token is *rendered* rather than *typed*
- * (timeline history, completion menu). The composer mirror layer cannot use this
- * component — real icons there would change glyph advance widths and push the
- * textarea caret out of alignment — so it repeats only the chip's colors.
+ * Draft and timeline history intentionally do *not* use this — both use
+ * `.composer-mention` accent text (see MentionTextView / ComposerInputView) so
+ * caret metrics stay plain-text and the two surfaces never disagree. Keep this
+ * chip for non-caret surfaces that want heavier chrome (e.g. future menus).
  */
 
 import cs from "classnames";
