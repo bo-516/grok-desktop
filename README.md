@@ -64,6 +64,7 @@ Desktop **dev** embeds a vendored [ide-byebye](https://github.com/dravenLee/ide-
 - **Hotkey**: `Alt+Shift+I` toggles picker mode
 - **Click**: hold ⌘ (macOS) / Ctrl (elsewhere) and click a component
 - **Enter** in the intent dialog defaults to **Grok Build**; handoff `cwd` is the monorepo root
+- Source `@` refs are monorepo-relative (`@apps/desktop/…`); screenshots / stills use **absolute** paths (configurable via `pathStyle` / `artifactPathStyle`)
 - Artifacts land under `apps/desktop/.intent-inspector/` (gitignored)
 
 ### Live e2e (stdio, tools, subagent)

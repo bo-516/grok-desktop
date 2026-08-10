@@ -28,9 +28,9 @@ These are the project's hard constraints and take highest priority.
   cs('xxxx', bool1 ? 'c1 c2 c3' : '');
   ```
 - **icon**: render uniformly via `StoryEditorModeIconView`; SVGs under `icon/source` are already built by svg-sprite — do not import them separately
-- **Buttons**: business buttons funnel to `src/widgets/shared/stateless/AppButtonView.tsx`, import from `@/widgets/shared`
-  - Size / radius / full width / icon differences extend via `size` / `shape` / `fullWidth` / `className`; new visuals go through `variant` — do not copy buttons ad hoc
-  - Business buttons use `AppButtonView`; when a generic primitive is missing, follow "UI control library" above for shadcn
+- **Buttons**: prefer semantic class buttons already defined in Uno shortcuts (`btn-ghost`, `btn-new-chat`, `shell-toggle`, `turn-step`, `msg-action-btn`, etc.) so chrome matches the shell IA; do not invent ad-hoc button chrome
+  - Primary / secondary product actions that need a shared primitive go through shadcn `Button` in `src/components/ui` (see "UI control library") when a generic control is missing
+  - Collapsible rail/step headers use `CollapsibleStepView` from `@/widgets/shared` rather than re-implementing chevron + `aria-expanded` chrome
 - **Widget registration**: new features register as exports in `src/widgets/<feature>/index.*`; if `src/widgets/index.*` exists, export there too. Upper layers import from `src/widgets/<feature>`, not deep relative paths into internals
 - **Prefer functional style**: utility methods should be pure functions when possible
 - **Declaration order (const first)**: in the same scope / function body, declare all `const` first, then all `let`.

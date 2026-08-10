@@ -71,11 +71,18 @@ export async function loadAiInspectorDevPlugins(): Promise<PluginOption[]> {
     // Opt out of rrweb so host project need not install @rrweb/* for basic use.
     recording: false,
     outputDir: ".intent-inspector",
+    // Source chips stay monorepo-relative via grokBuild.projectRoot; screenshots /
+    // recording stills use absolute paths so Grok can open them regardless of cwd.
+    // Override with artifactPathStyle: "relative" only if short chips are preferred.
+    pathStyle: "relative",
+    artifactPathStyle: "absolute",
     agents: {
       grokBuild: {
         // Handoff cwd is the monorepo root so Grok sees packages/* and apps/*.
         // Relative @ refs are rooted here → @apps/desktop/src/… (not ugly absolute paths).
         projectRoot: REPO_ROOT,
+        pathStyle: "relative",
+        artifactPathStyle: "absolute",
       },
     },
   });
