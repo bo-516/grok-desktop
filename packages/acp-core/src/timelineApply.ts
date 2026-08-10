@@ -22,6 +22,10 @@ import {
   appendOrMergeThought,
   finalizeLatestThought,
 } from "./timelineTextMerge.js";
+import {
+  applyOrchestrationUpdate,
+  isOrchestrationUpdate,
+} from "./timelineOrchestration.js";
 
 /**
  * Session-update kinds that insert a visible timeline row (or update one).
@@ -126,6 +130,12 @@ export function applySessionUpdate(
   update: SessionUpdate,
 ): SessionState {
   const kind = update.sessionUpdate;
+
+  // Orchestration is sidebar data: delegate before the visible-kind switch so
+  // these events can never finalize a thought or append a timeline row.
+  if (isOrchestrationUpdate(String(kind))) {
+    return applyOrchestrationUpdate(state, update);
+  }
 
   switch (kind) {
     case "user_message_chunk": {
@@ -322,8 +332,20 @@ export function applySessionUpdate(
     default: {
       // Soft-ignore unknown kinds that look like metadata; only soft-error opaque ones.
       // Soft-ignore must not finalize thought; hard error rows must finalize.
-      const soft =
-        /token|usage|context|compact|subagent|task|notification|hook/i;
+      // `subagent` / `task` are gone: those kinds are handled above, and leaving
+      // them here would let the fallback shadow real cases. Remaining vendor
+      // kinds below are explicitly listed rather than pattern-matched.
+      const soft = /token|usage|context|compact|notification|hook/i;
+      const knownSilent = new Set([
+        "turn_completed", // usage rollup, no UI yet
+        "session_recap", // candidate for the session header
+        "retry_state", // candidate for a transient status chip
+        "image_compressed", // composer already reports its own result
+        "image_dropped",
+      ]);
+      if (knownSilent.has(String(kind))) {
+        return state;
+      }
       if (soft.test(String(kind))) {
         return state;
       }

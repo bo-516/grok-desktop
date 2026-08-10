@@ -33,6 +33,10 @@ export {
   tryAbsorbEchoIntoSeedTextRow,
 } from "./timelineTextMerge.js";
 export { applySessionUpdate } from "./timelineApply.js";
+export {
+  applyOrchestrationUpdate,
+  isOrchestrationUpdate,
+} from "./timelineOrchestration.js";
 
 /**
  * Extract a SessionUpdate from a session/update notification params object.

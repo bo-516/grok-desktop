@@ -284,6 +284,71 @@ export type SessionUpdate =
       [key: string]: unknown;
     };
 
+/**
+ * Orchestration goal snapshot from `goal_updated`; absent outside goal mode.
+ * Counters default to 0 when a goal exists (agent always reports them).
+ */
+export type GoalSnapshot = {
+  /** Stable goal id from the orchestrator. */
+  goalId: string;
+  /** User objective verbatim; drives the goal header. */
+  objective: string;
+  /** active | complete | … — agent-defined, kept as string on purpose. */
+  status: string;
+  /** executing | idle | … — the orchestrator's current stage. */
+  phase: string;
+  totalDeliverables: number;
+  completedDeliverables: number;
+  workerRounds: number;
+  verifyRounds: number;
+  tokensUsed: number;
+  /** Last state-machine transition name (e.g. `goal_created`). */
+  lastEvent?: string;
+  lastEventAt?: string;
+};
+
+/**
+ * One subagent the orchestrator spawned.
+ * `spawned` creates the card, `finished` patches it in place — same lifecycle
+ * as `toolCalls`, so out-of-order or replayed events converge on one row.
+ * Unreported counters stay `undefined` (not `0`) so the UI can hide missing data.
+ */
+export type SubagentCard = {
+  subagentId: string;
+  /** Drill-down target: a real session id loadable via `session/load`. */
+  childSessionId: string;
+  /** Parent turn that spawned it; groups fan-out by round. */
+  parentPromptId?: string;
+  /** general-purpose | explore | plan */
+  type: string;
+  /** Agent-written role label, e.g. "goal achievement skeptic". */
+  description: string;
+  model?: string;
+  /** running until `subagent_finished` reports completed / failed. */
+  status: string;
+  toolCalls?: number;
+  turns?: number;
+  durationMs?: number;
+  tokensUsed?: number;
+  output?: string;
+};
+
+/**
+ * One backgrounded shell task from `task_backgrounded` / `task_completed`.
+ * Unreported optional fields stay undefined rather than collapsing to empty.
+ */
+export type BackgroundTaskCard = {
+  taskId: string;
+  /** Tool call that spawned it; links the card back to its timeline row. */
+  toolCallId?: string;
+  command: string;
+  cwd?: string;
+  /** Absolute log path under `<session>/terminal/`; readable for a preview. */
+  outputFile?: string;
+  description?: string;
+  status: string;
+};
+
 /** Full single-session state consumed by the UI. */
 export type SessionState = {
   id: string;
@@ -330,6 +395,12 @@ export type SessionState = {
   /** Accumulated agent text for M0 logging convenience. */
   lastAgentText: string;
   errorMessage?: string;
+  /** Goal-mode snapshot; absent when the agent is not running an orchestrated goal. */
+  goal?: GoalSnapshot;
+  /** subagentId → card; sidebar data, never timeline rows. */
+  subagents?: Record<string, SubagentCard>;
+  /** taskId → card; replaces hand-pasted JSON in the Tasks panel. */
+  backgroundTasks?: Record<string, BackgroundTaskCard>;
 };
 
 /** One model the agent advertises for session/set_model and the model picker. */
