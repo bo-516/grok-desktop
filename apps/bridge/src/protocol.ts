@@ -83,6 +83,18 @@ export type ClientMsg =
       path: string;
       cwd?: string;
     }
+  /**
+   * Read text for the preview drawer. Oversize truncates (does not hard-fail);
+   * sensitive / binary / directory / outside still reject with reason.
+   */
+  | {
+      type: "preview_workspace_file";
+      requestId: string;
+      path: string;
+      cwd?: string;
+      /** Optional ceiling in bytes (capped server-side at 1MB). */
+      maxBytes?: number;
+    }
   | { type: "ping" }
   /** Mid-session ACP set_model when supported. */
   | { type: "set_model"; sessionId?: string; modelId: string }
@@ -161,6 +173,17 @@ export type ServerMsg =
       content?: string;
       mimeType?: string;
       bytes: number;
+      reason?: string;
+      error?: string;
+    }
+  | {
+      type: "preview_workspace_file_result";
+      requestId: string;
+      ok: boolean;
+      content?: string;
+      mimeType?: string;
+      bytes: number;
+      truncated?: boolean;
       reason?: string;
       error?: string;
     }

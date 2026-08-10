@@ -116,4 +116,57 @@ describe("reverseServices", () => {
     assert.equal(typeof killed.ok, "boolean");
     terminals.disposeAll();
   });
+
+  it("runs a full shell-line command without crashing the process", async () => {
+    // Agent often sends `/bin/bash -lc '…'` as a single command string with no
+    // args. shell:false would ENOENT and used to kill the bridge via unhandled
+    // ChildProcess 'error'.
+    const dir = await mkdtemp(path.join(os.tmpdir(), "rev-shell-"));
+    const terminals = new TerminalRegistry();
+    const created = (await handleReverseRequest(
+      "terminal/create",
+      {
+        command: `${process.execPath} -e "console.log('shell-line-ok')"`,
+      },
+      dir,
+      terminals,
+    )) as { terminalId: string };
+    assert.ok(created.terminalId);
+
+    const waited = (await handleReverseRequest(
+      "terminal/wait_for_exit",
+      { terminalId: created.terminalId, timeoutMs: 10_000 },
+      dir,
+      terminals,
+    )) as { output: string; exitCode: number | null };
+    assert.match(waited.output, /shell-line-ok/);
+    assert.equal(waited.exitCode, 0);
+    terminals.disposeAll();
+  });
+
+  it("records spawn ENOENT on the handle instead of throwing unhandled error", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "rev-enoent-"));
+    const terminals = new TerminalRegistry();
+    // Explicit argv pointing at a path that cannot exist — shell:false ENOENT.
+    const created = (await handleReverseRequest(
+      "terminal/create",
+      {
+        command: "/this/path/does/not/exist/grok-desktop-term-bin",
+        args: ["--noop"],
+      },
+      dir,
+      terminals,
+    )) as { terminalId: string };
+
+    const waited = (await handleReverseRequest(
+      "terminal/wait_for_exit",
+      { terminalId: created.terminalId, timeoutMs: 5_000 },
+      dir,
+      terminals,
+    )) as { output: string; exitCode: number | null };
+    assert.equal(waited.exitCode, 1);
+    assert.match(waited.output, /spawn failed/i);
+    // If the unhandled 'error' path still fired, this process would already be dead.
+    terminals.disposeAll();
+  });
 });

@@ -4,24 +4,51 @@
  */
 
 import { assertCliOk, runGrokCli, type CliRunResult } from "./cliRunner.js";
+import { listSessionsFromDisk } from "./sessionDiskList.js";
 
 /**
- * List upstream sessions (`grok sessions list --json` when supported).
- * @param cwd Optional workspace filter.
+ * List upstream sessions across workspaces.
+ * Prefers on-disk `~/.grok/sessions` enumeration (every workspace folder) so
+ * the desktop rail is not limited to the currently open session's cwd.
+ * Falls back to `grok sessions list` when the disk tree is empty / unreadable.
+ * @param cwd Unused for the disk path (kept for CLI signature compatibility).
+ *   Pass `scopeCwd` via a future args bag if single-workspace filter is needed.
  */
 export async function sessionsList(cwd?: string): Promise<unknown> {
-  const result = await runGrokCli(
-    ["sessions", "list", "--json"],
-    { cwd, timeoutMs: 30_000 },
-  );
+  // Always enumerate all workspaces — rail must show every project with history.
+  // `cwd` is intentionally not used as a filter (historical CLI callers passed
+  // the open session workspace, which hid other projects in the side-nav).
+  void cwd;
+  try {
+    const disk = await listSessionsFromDisk({ limit: 500 });
+    if (disk.length > 0) {
+      return {
+        sessions: disk.map((row) => ({
+          id: row.id,
+          title: row.title,
+          cwd: row.cwd,
+          workspace: row.cwd,
+          updatedAt: row.updatedAt,
+          createdAt: row.createdAt,
+        })),
+      };
+    }
+  } catch {
+    // fall through to CLI
+  }
+
+  const result = await runGrokCli(["sessions", "list", "-n", "200"], {
+    timeoutMs: 30_000,
+  });
   if (result.code !== 0 && !result.json) {
-    // Fallback without --json for older CLI
-    const plain = await runGrokCli(["sessions", "list"], {
-      cwd,
+    const plain = await runGrokCli(["sessions", "list", "-n", "200"], {
       timeoutMs: 30_000,
     });
     assertCliOk(plain, "sessions list");
-    return { raw: plain.stdout, lines: plain.stdout.split("\n").filter(Boolean) };
+    return {
+      raw: plain.stdout,
+      lines: plain.stdout.split("\n").filter(Boolean),
+    };
   }
   assertCliOk(result, "sessions list");
   return result.json ?? { raw: result.stdout };

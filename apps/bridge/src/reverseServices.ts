@@ -52,6 +52,11 @@ export class TerminalRegistry {
 
   /**
    * Spawn a shell command under workspace; tracks output and exit code.
+   * Agents may pass either argv form (`command` + `args`) or a full shell line
+   * in `command` alone (e.g. `/bin/bash -lc '…'`). The latter must use
+   * `shell: true` — with `shell: false` Node treats the whole string as the
+   * executable path, gets ENOENT, and without an `error` listener that event
+   * crashes the entire bridge process (unhandled 'error' on ChildProcess).
    * @param workspaceAbs Session cwd.
    * @param params Agent terminal/create params (command, args, cwd, env optional).
    * @returns terminalId for subsequent wait/kill.
@@ -75,10 +80,20 @@ export class TerminalRegistry {
       : path.resolve(workspaceAbs);
     const terminalId = `term-${++this.seq}`;
     const args = Array.isArray(params.args) ? params.args.map(String) : [];
+    /**
+     * Full command line with no argv: run via the platform shell so spaces and
+     * shell metacharacters are parsed. Explicit argv stays shell:false so a
+     * single binary path is not re-tokenized.
+     *
+     * Agents frequently send `/bin/bash -lc '…'` as one string (no args). With
+     * shell:false Node treats that entire string as the executable path →
+     * ENOENT, and without an `error` listener the bridge process dies.
+     */
+    const useShell = args.length === 0 && /\s/.test(command);
     const child = spawn(command, args, {
       cwd: workCwd,
       env: { ...process.env, ...(params.env ?? {}) },
-      shell: false,
+      shell: useShell,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -90,16 +105,32 @@ export class TerminalRegistry {
       cwd: workCwd,
     };
     const limit = params.outputByteLimit ?? 256_000;
-    const append = (chunk: Buffer) => {
-      handle.output += chunk.toString("utf8");
+    const append = (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      handle.output += text;
       if (handle.output.length > limit) {
         handle.output = handle.output.slice(handle.output.length - limit);
       }
     };
+    /**
+     * Attach `error` before any other listeners: spawn failures (ENOENT,
+     * EACCES, …) emit `error` and often never emit a useful `close`. Unhandled
+     * → process-level crash of the whole bridge.
+     */
+    child.on("error", (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      append(`\n[bridge terminal] spawn failed: ${message}\n`);
+      if (handle.exitCode === null) {
+        handle.exitCode = 1;
+      }
+    });
     child.stdout.on("data", append);
     child.stderr.on("data", append);
     child.on("close", (code) => {
-      handle.exitCode = code;
+      // Keep a prior spawn-error exitCode if close fires with null afterward.
+      if (handle.exitCode === null) {
+        handle.exitCode = code;
+      }
     });
     this.terminals.set(terminalId, handle);
     return { terminalId };
@@ -115,6 +146,9 @@ export class TerminalRegistry {
 
   /**
    * Wait until process exits or timeout.
+   * Listens for both `close` and `error`: a failed spawn (ENOENT) sets
+   * exitCode on `error` and may never emit `close`, so waiting only on close
+   * would hang until timeout.
    * @param terminalId Target.
    * @param timeoutMs Optional max wait; 0 = poll once.
    */
@@ -134,15 +168,16 @@ export class TerminalRegistry {
       };
     }
     await new Promise<void>((resolve) => {
-      const onClose = () => {
+      const onDone = () => {
         clearTimeout(timer);
+        handle.child.removeListener("close", onDone);
+        handle.child.removeListener("error", onDone);
         resolve();
       };
-      const timer = setTimeout(() => {
-        handle.child.removeListener("close", onClose);
-        resolve();
-      }, timeoutMs);
-      handle.child.once("close", onClose);
+      const timer = setTimeout(onDone, timeoutMs);
+      handle.child.once("close", onDone);
+      // Spawn failures resolve here; create()'s error handler already wrote exitCode.
+      handle.child.once("error", onDone);
     });
     return {
       output: handle.output,

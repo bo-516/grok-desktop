@@ -253,6 +253,19 @@ export function spawnGrokAgent(opts: SpawnGrokOptions): {
   child.on("close", (code) => {
     for (const h of closeHandlers) {h(code);}
   });
+  /**
+   * Missing/unrunnable `grok` binary emits `error` (ENOENT) with no `close`.
+   * Without a listener Node throws unhandled 'error' and kills the bridge.
+   */
+  child.on("error", (err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    for (const h of errHandlers) {
+      h(`[bridge] spawn grok failed: ${message}\n`);
+    }
+    for (const h of closeHandlers) {
+      h(1);
+    }
+  });
 
   const transport: AcpTransport = {
     write: (data) => {

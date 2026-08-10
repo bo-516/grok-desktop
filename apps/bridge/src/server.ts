@@ -124,3 +124,28 @@ process.on("SIGTERM", () => {
   server.close();
   process.exit(0);
 });
+
+/**
+ * Last-resort guard: a ChildProcess without an `error` listener turns spawn
+ * failures (ENOENT / EACCES / …) into process death. Terminal reverse and other
+ * spawn sites should listen themselves; this keeps the bridge alive if one is
+ * missed so a single bad agent shell line cannot take down all sessions.
+ * Non-spawn uncaught exceptions still exit so real bugs stay visible.
+ */
+process.on("uncaughtException", (err) => {
+  const e = err as NodeJS.ErrnoException;
+  const syscall = typeof e.syscall === "string" ? e.syscall : "";
+  const isSpawnFailure =
+    syscall === "spawn" ||
+    syscall.startsWith("spawn ") ||
+    (typeof e.path === "string" && e.code === "ENOENT" && syscall.includes("spawn"));
+  if (isSpawnFailure) {
+    console.error(
+      `[bridge] unhandled spawn failure (kept alive): ${e.message ?? String(err)}`,
+    );
+    return;
+  }
+  console.error("[bridge] uncaughtException", err);
+  pool.disposeAll();
+  process.exit(1);
+});
