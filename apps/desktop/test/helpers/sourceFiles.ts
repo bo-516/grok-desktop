@@ -31,7 +31,7 @@ export function readSrc(rel: string): string {
 /**
  * Reads a file from the desktop app root (vite/uno configs, index.html).
  * Also used for sibling paths under `apps/` via `../bridge/...`.
- * @param rel Path relative to `apps/desktop/`, e.g. "uno.shortcuts.ts".
+ * @param rel Path relative to `apps/desktop/`, e.g. "uno/shortcuts.ts".
  */
 export function readDesktopRoot(rel: string): string {
   return readFileSync(path.join(DESKTOP_ROOT, rel), "utf8");
@@ -49,16 +49,17 @@ export function srcExists(rel: string): boolean {
 /**
  * Concatenate all UnoCSS shortcut modules (entry + domain slices).
  * Structural tests should match against this so domain splits stay transparent.
- * @returns Joined source of uno.shortcuts*.ts under apps/desktop.
+ * @returns Joined source of `uno/shortcuts*.ts` under apps/desktop.
  */
 export function readAllUnoShortcuts(): string {
   const files = [
-    "uno.shortcuts.ts",
-    "uno.shortcuts.sidenav.ts",
-    "uno.shortcuts.shell.ts",
-    "uno.shortcuts.timeline.ts",
-    "uno.shortcuts.composer.ts",
-    "uno.shortcuts.chrome.ts",
+    "uno/shortcuts.ts",
+    "uno/shortcuts.sidenav.ts",
+    "uno/shortcuts.shell.ts",
+    "uno/shortcuts.timeline.ts",
+    "uno/shortcuts.composer.ts",
+    "uno/shortcuts.chrome.ts",
+    "uno/shortcuts.preview.ts",
   ];
   return files.map((f) => readDesktopRoot(f)).join("\n");
 }

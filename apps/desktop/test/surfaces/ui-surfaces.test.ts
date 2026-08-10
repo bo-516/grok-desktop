@@ -229,7 +229,7 @@ describe("UI surface presence", () => {
     assert.match(prefs, /export function loadContextDrawerPrefs/);
     assert.match(prefs, /export function saveContextDrawerPrefs/);
 
-    const chrome = readDesktopRoot("uno.shortcuts.chrome.ts");
+    const chrome = readDesktopRoot("uno/shortcuts.chrome.ts");
     assert.match(chrome, /"context-drawer":/);
     assert.match(chrome, /"context-drawer-open":/);
     assert.match(chrome, /"context-drawer-closed":/);
@@ -237,7 +237,7 @@ describe("UI surface presence", () => {
     assert.match(chrome, /context-drawer-closed[\s\S]*?translate-x-full/);
     assert.doesNotMatch(chrome, /plan-approval/);
 
-    const shellShortcuts = readDesktopRoot("uno.shortcuts.shell.ts");
+    const shellShortcuts = readDesktopRoot("uno/shortcuts.shell.ts");
     assert.match(shellShortcuts, /"top-nav-railed":/);
     assert.match(shellShortcuts, /"main-body-railed":/);
     // Close-frame sync: transition must live on the base class so removing
@@ -392,7 +392,7 @@ describe("UI surface presence", () => {
 
   it("narrow shell collapses rail off-canvas and keeps top-nav full-bleed", () => {
     const shortcuts = readAllUnoShortcuts();
-    const sideNav = readDesktopRoot("uno.shortcuts.sidenav.ts");
+    const sideNav = readDesktopRoot("uno/shortcuts.sidenav.ts");
     const base = readSrc("styles/base.css");
     assert.match(shortcuts, /"main-column":[\s\S]*?max-sm:ml-0/);
     assert.match(shortcuts, /"top-nav":[\s\S]*?max-sm:left-0/);
@@ -601,7 +601,7 @@ describe("UI surface presence", () => {
     assert.match(attachments, /openFilePicker|handleFileInputChange|fileInputRef/);
     // Prefer showPicker so focusing a clipped input does not scroll/jitter the dock.
     assert.match(attachments, /showPicker/);
-    const composerShortcuts = readSrc("../uno.shortcuts.composer.ts");
+    const composerShortcuts = readDesktopRoot("uno/shortcuts.composer.ts");
     assert.match(
       composerShortcuts,
       /"composer-attach-input":\s*"[^"]*fixed[^"]*h-0[^"]*w-0/,
@@ -695,7 +695,7 @@ describe("UI surface presence", () => {
     const menu = readSrc("widgets/project/ProjectSwitcherMenuView.tsx");
     assert.match(menu, /Work without a project/);
     assert.match(menu, /Search projects/);
-    const composerShortcuts = readDesktopRoot("uno.shortcuts.composer.ts");
+    const composerShortcuts = readDesktopRoot("uno/shortcuts.composer.ts");
     assert.match(
       composerShortcuts,
       /"project-switcher-menu":[\s\S]*?bottom-\[calc\(100%/,
@@ -734,9 +734,9 @@ describe("UI surface presence", () => {
     assert.match(sessionRow, /onReorder/);
     assert.match(railHook, /applyWorkspaceSessionOrder|moveSessionIdInOrder/);
     assert.match(railHook, /sessionOrderByWorkspace/);
-    const shortcuts = readDesktopRoot("uno.shortcuts.sidenav.ts");
-    const appShortcuts = readDesktopRoot("uno.shortcuts.ts");
-    assert.match(appShortcuts, /sideNavShortcuts|uno\.shortcuts\.sidenav/);
+    const shortcuts = readDesktopRoot("uno/shortcuts.sidenav.ts");
+    const appShortcuts = readDesktopRoot("uno/shortcuts.ts");
+    assert.match(appShortcuts, /sideNavShortcuts|shortcuts\.sidenav/);
     assert.match(appShortcuts, /shellShortcuts|timelineShortcuts|composerShortcuts|chromeShortcuts/);
     assert.match(
       shortcuts,
@@ -820,16 +820,16 @@ describe("UI surface presence", () => {
     const uno = readDesktopRoot("uno.config.ts");
     assert.match(uno, /presetUno/);
     assert.match(uno, /configDeps/);
-    assert.match(uno, /uno\.shortcuts\.ts/);
+    assert.match(uno, /uno\/shortcuts/);
     assert.match(uno, /var\(--color-bg-app\)/);
     assert.doesNotMatch(uno, /text-white|bg-black|border-red-500/);
 
     const shortcuts = readAllUnoShortcuts();
-    const entry = readDesktopRoot("uno.shortcuts.ts");
-    const sideNav = readDesktopRoot("uno.shortcuts.sidenav.ts");
+    const entry = readDesktopRoot("uno/shortcuts.ts");
+    const sideNav = readDesktopRoot("uno/shortcuts.sidenav.ts");
     assert.match(sideNav, /side-nav/);
-    assert.match(entry, /sideNavShortcuts|uno\.shortcuts\.sidenav/);
-    assert.match(entry, /composerShortcuts|uno\.shortcuts\.composer/);
+    assert.match(entry, /sideNavShortcuts|shortcuts\.sidenav/);
+    assert.match(entry, /composerShortcuts|shortcuts\.composer/);
     assert.match(shortcuts, /composer-dock/);
     assert.match(shortcuts, /context-drawer/);
 

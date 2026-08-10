@@ -180,7 +180,7 @@ code {
  *                          other non-caret surfaces that deliberately want a
  *                          heavier chip; not used for draft or history text.
  *
- * Styles live here rather than in uno.shortcuts because the kind class comes
+ * Styles live here rather than in uno/shortcuts because the kind class comes
  * from mentionKindClass() at runtime; UnoCSS only emits classes it can see as
  * source literals, so dynamic names must not depend on the scanner.
  */

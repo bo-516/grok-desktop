@@ -8,7 +8,7 @@ import {
   presetUno,
   transformerVariantGroup,
 } from "unocss";
-import { appShortcuts } from "./uno.shortcuts";
+import { appShortcuts } from "./uno/shortcuts";
 
 /** Semantic color tokens → CSS variables from defineColor.css */
 const colors = {
@@ -86,13 +86,13 @@ export default defineConfig({
    * the common "UI changed but HMR did nothing" failure after the UnoCSS migration.
    */
   configDeps: [
-    "uno.shortcuts.ts",
-    "uno.shortcuts.sidenav.ts",
-    "uno.shortcuts.shell.ts",
-    "uno.shortcuts.timeline.ts",
-    "uno.shortcuts.composer.ts",
-    "uno.shortcuts.chrome.ts",
-    "uno.shortcuts.preview.ts",
+    "uno/shortcuts.ts",
+    "uno/shortcuts.sidenav.ts",
+    "uno/shortcuts.shell.ts",
+    "uno/shortcuts.timeline.ts",
+    "uno/shortcuts.composer.ts",
+    "uno/shortcuts.chrome.ts",
+    "uno/shortcuts.preview.ts",
   ],
   /**
    * Colon only. UnoCSS also accepts `-` as a variant separator by default, so
@@ -105,9 +105,9 @@ export default defineConfig({
    * UnoCSS only scans .tsx/.html by default, so class literals that live in
    * plain .ts data modules never emitted — the palette picker's swatch classes
    * come from src/lib/colorPalette.ts, which is why every colour dot rendered
-   * as a 0x0 transparent span. Scoped to src/ on purpose: scanning the
-   * root-level uno.shortcuts.*.ts would emit every utility inside a shortcut
-   * body as a standalone class.
+   * as a 0x0 transparent span. Scoped to src/ on purpose: scanning
+   * uno/shortcuts.*.ts would emit every utility inside a shortcut body as a
+   * standalone class.
    */
   content: {
     pipeline: {

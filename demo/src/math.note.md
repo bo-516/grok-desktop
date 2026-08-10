@@ -1,1 +1,1 @@
-The average() function takes an array of numbers and returns 0 if the array is empty, otherwise returns the arithmetic mean (sum of elements divided by length).
+The average() function returns 0 for an empty array, otherwise the arithmetic mean (sum of numbers divided by length).

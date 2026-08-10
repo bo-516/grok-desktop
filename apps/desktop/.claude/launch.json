@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "desktop-dev",
+      "url": "http://localhost:8172",
+      "port": 8172
+    }
+  ]
+}
