@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  caretJumpOverMention,
   deleteMentionUnit,
   hasMentionTokens,
   materializeMentionTriggers,
@@ -61,6 +62,65 @@ describe("splitMentionTokens", () => {
       assert.equal(parts[0].kind, "command");
       assert.equal(parts[0].trigger, "/");
       assert.equal(parts[0].body, "review");
+    }
+  });
+
+  it("leaves filesystem paths in a pasted shell line as plain text", () => {
+    // Real timeline text: only the leading token can be a slash command, so
+    // paths further in must not paint as commands.
+    const source =
+      'ls -la /Users/me/idea 2>/dev/null; pkill -f "npm run dev -w @pkg"';
+    const parts = splitMentionTokens(source);
+    assert.equal(
+      parts
+        .filter((p) => p.type === "mention")
+        .some((p) => p.type === "mention" && p.kind === "command"),
+      false,
+    );
+    assert.equal(parts.map((p) => p.text).join(""), source);
+  });
+
+  it("keeps a leading /command but not a leading absolute path", () => {
+    const command = splitMentionTokens("/browser-use 弄完测一下");
+    assert.equal(command[0]?.type, "mention");
+    if (command[0]?.type === "mention") {
+      assert.equal(command[0].kind, "command");
+      assert.equal(command[0].text, "/browser-use");
+    }
+
+    const path = splitMentionTokens("/Users/me/idea is the root");
+    assert.equal(
+      path.some((p) => p.type === "mention"),
+      false,
+    );
+  });
+
+  it("stops @mentions before trailing sentence punctuation", () => {
+    const source = 'compare @src/App.tsx, @README.md. and @"a b/c.ts"';
+    const parts = splitMentionTokens(source);
+    const mentions = parts.filter((p) => p.type === "mention");
+    assert.deepEqual(
+      mentions.map((p) => p.text),
+      ["@src/App.tsx", "@README.md", '@"a b/c.ts"'],
+    );
+    assert.equal(parts.map((p) => p.text).join(""), source);
+  });
+
+  it("does not treat absolute @paths as workspace mentions", () => {
+    const parts = splitMentionTokens("see @/etc/hosts ok");
+    assert.equal(
+      parts.some((p) => p.type === "mention"),
+      false,
+    );
+  });
+
+  it("keeps committed marks classified anywhere in the draft", () => {
+    const parts = splitMentionTokens(`run ${MENTION_SLASH_MARK}review now`);
+    const mention = parts.find((p) => p.type === "mention");
+    assert.ok(mention && mention.type === "mention");
+    if (mention?.type === "mention") {
+      assert.equal(mention.kind, "command");
+      assert.equal(mention.committed, true);
     }
   });
 
@@ -202,5 +262,34 @@ describe("zero-width composer marks", () => {
     assert.equal(mentionUnitForBackspace(text, text.length), null);
     assert.equal(mentionUnitForDelete(text, 0), null);
     assert.equal(snapCaretToMentionEdge(text, 3), 3);
+    assert.equal(caretJumpOverMention(text, text.length, "left"), null);
+    assert.equal(caretJumpOverMention(text, 0, "right"), null);
+  });
+
+  it("jumps the caret over a committed path with one Left / Right", () => {
+    // Mirrors a menu-picked file like docs/refactor-plan-drawer-2026-08-10.md.
+    const path = "docs/refactor-plan-drawer-2026-08-10.md";
+    const token = `${MENTION_AT_MARK}${path}`;
+    const text = `see ${token} now`;
+    const tokenStart = 4;
+    const tokenEnd = tokenStart + token.length;
+
+    // One Left from just after the chip lands before the body (token start).
+    assert.equal(caretJumpOverMention(text, tokenEnd, "left"), tokenStart);
+    // One Right from the leading edge lands after the whole chip.
+    assert.equal(caretJumpOverMention(text, tokenStart, "right"), tokenEnd);
+    // Inside the body also hops the full unit in the arrow direction.
+    assert.equal(
+      caretJumpOverMention(text, tokenStart + 5, "left"),
+      tokenStart,
+    );
+    assert.equal(
+      caretJumpOverMention(text, tokenStart + 5, "right"),
+      tokenEnd,
+    );
+    // Outside the chip: browser keeps char-by-char motion.
+    assert.equal(caretJumpOverMention(text, tokenEnd + 1, "left"), null);
+    assert.equal(caretJumpOverMention(text, tokenStart, "left"), null);
+    assert.equal(caretJumpOverMention(text, tokenEnd, "right"), null);
   });
 });

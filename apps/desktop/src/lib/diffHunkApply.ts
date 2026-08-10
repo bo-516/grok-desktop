@@ -1,8 +1,11 @@
 /**
  * Per-hunk accept/reject for native diff review (F-NATIVE-06).
- * Pure: builds resulting file text from line decisions; bridge writes to disk.
+ * Pure: builds resulting file text from jsdiff chunks so trailing newlines
+ * and CRLF are preserved byte-for-byte (no split/join on "\n").
  */
 
+import { diffLines } from "diff";
+import { DIFF_MAX_EDIT_LENGTH } from "./diffCore";
 import { buildLineDiff, type DiffLine } from "./diffReview";
 
 export type HunkDecision = "pending" | "accept" | "reject";
@@ -19,6 +22,7 @@ export type ReviewableHunk = {
  * Split a full line-diff into reviewable hunks (contiguous non-same runs).
  * Same lines between change runs become separate context (not interactive).
  * @param lines Full diff lines from buildLineDiff.
+ * @returns Ordered reviewable hunks with pending decisions.
  */
 export function splitIntoHunks(lines: DiffLine[]): ReviewableHunk[] {
   const hunks: ReviewableHunk[] = [];
@@ -48,74 +52,85 @@ export function splitIntoHunks(lines: DiffLine[]): ReviewableHunk[] {
 
 /**
  * Apply hunk decisions to produce the final file text.
- * - accept: take new side (skip del, keep add)
- * - reject: keep old side (keep del text as content, skip add)
- * - pending: treated as accept (agent already wrote new file by default)
- * Context (same) lines always kept.
+ * Uses jsdiff `diffLines` chunks (values already include `\n`) so trailing
+ * newline presence/absence is preserved byte-for-byte.
+ * - accept / pending: take new side (added chunks)
+ * - reject: keep old side (removed chunks)
+ * Context (unchanged) chunks always kept.
  * @param oldText Original file content before agent edit.
  * @param newText Agent-proposed content.
  * @param hunks Decisions for each change run (must match splitIntoHunks order).
+ * @returns Merged file text.
  */
 export function applyHunkDecisions(
   oldText: string | undefined | null,
   newText: string | undefined | null,
   hunks: ReviewableHunk[],
 ): string {
-  const full = buildLineDiff(oldText, newText);
-  const decisions = new Map(hunks.map((h) => [h.id, h.decision]));
-  // Re-split to align ids with current algorithm
-  const currentHunks = splitIntoHunks(full.lines);
-  let hunkCursor = 0;
-  const out: string[] = [];
+  const old = oldText == null ? "" : String(oldText);
+  const next = newText == null ? "" : String(newText);
+  if (old === next) {
+    return next;
+  }
 
+  const changes = diffLines(old, next, {
+    maxEditLength: DIFF_MAX_EDIT_LENGTH,
+  });
+
+  // When the engine bails, honor all-reject vs otherwise new text.
+  if (changes == null) {
+    const allReject =
+      hunks.length > 0 && hunks.every((h) => h.decision === "reject");
+    return allReject ? old : next;
+  }
+
+  let hunkCursor = 0;
+  let out = "";
   let i = 0;
-  while (i < full.lines.length) {
-    const line = full.lines[i];
-    if (line === undefined) {
+  while (i < changes.length) {
+    const chunk = changes[i];
+    if (chunk === undefined) {
       break;
     }
-    if (line.type === "same") {
-      out.push(line.text);
+    if (!chunk.added && !chunk.removed) {
+      out += chunk.value;
       i += 1;
       continue;
     }
-    // Consume a change run
-    const run: DiffLine[] = [];
-    while (i < full.lines.length) {
-      const cur = full.lines[i];
-      if (cur === undefined || cur.type === "same") {
+    // Contiguous added/removed run = one reviewable hunk.
+    const run: typeof changes = [];
+    while (i < changes.length) {
+      const cur = changes[i];
+      if (cur === undefined || (!cur.added && !cur.removed)) {
         break;
       }
       run.push(cur);
       i += 1;
     }
-    const hunkMeta = currentHunks[hunkCursor++];
-    const decision =
-      (hunkMeta && decisions.get(hunkMeta.id)) || hunkMeta?.decision || "accept";
+    const decision = hunks[hunkCursor]?.decision ?? "accept";
+    hunkCursor += 1;
     if (decision === "reject") {
-      for (const l of run) {
-        if (l.type === "del") {
-          out.push(l.text);
+      for (const part of run) {
+        if (part.removed) {
+          out += part.value;
         }
-        // skip adds
       }
     } else {
-      // accept / pending → new side
-      for (const l of run) {
-        if (l.type === "add") {
-          out.push(l.text);
+      for (const part of run) {
+        if (part.added) {
+          out += part.value;
         }
-        // skip dels
       }
     }
   }
-  return out.join("\n");
+  return out;
 }
 
 /**
  * Build review state from old/new text.
  * @param oldText Prior content.
  * @param newText Proposed content.
+ * @returns Hunks + summary string.
  */
 export function createDiffReview(
   oldText: string | undefined | null,
@@ -130,6 +145,10 @@ export function createDiffReview(
 
 /**
  * Set decision on one hunk immutably.
+ * @param hunks Current hunk list.
+ * @param hunkId Target id.
+ * @param decision New decision.
+ * @returns New array with the one hunk updated.
  */
 export function setHunkDecision(
   hunks: ReviewableHunk[],

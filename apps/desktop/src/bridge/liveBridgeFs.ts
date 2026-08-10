@@ -3,7 +3,11 @@
  * Keeps connectLiveBridge under the file-size limit; disk safety still lives on bridge.
  */
 
-import type { WorkspaceEntry, ReadWorkspaceFileResult } from "./liveBridgeTypes";
+import type {
+  WorkspaceEntry,
+  ReadWorkspaceFileResult,
+  PreviewWorkspaceFileResult,
+} from "./liveBridgeTypes";
 
 /** Pending map entry shared by list/read/write request patterns. */
 type Pending<T> = {
@@ -25,6 +29,17 @@ export type LiveBridgeFsApi = {
     path: string,
     cwd?: string,
   ) => Promise<ReadWorkspaceFileResult>;
+  /**
+   * Read a workspace file for the preview drawer (may truncate).
+   * @param path Workspace-relative path.
+   * @param cwd Optional workspace root.
+   * @param maxBytes Optional client-side ceiling hint.
+   */
+  previewWorkspaceFile: (
+    path: string,
+    cwd?: string,
+    maxBytes?: number,
+  ) => Promise<PreviewWorkspaceFileResult>;
   /** Reject all in-flight fs requests (socket close/error). */
   rejectAll: (error: Error) => void;
   /**
@@ -45,9 +60,11 @@ export function createLiveBridgeFs(
   const pendingWorkspaceRequests = new Map<string, Pending<WorkspaceEntry[]>>();
   const pendingWrite = new Map<string, Pending<{ ok: boolean; error?: string }>>();
   const pendingRead = new Map<string, Pending<ReadWorkspaceFileResult>>();
+  const pendingPreview = new Map<string, Pending<PreviewWorkspaceFileResult>>();
   const workspaceRequestState = { sequence: 0 };
   const writeRequestState = { sequence: 0 };
   const readRequestState = { sequence: 0 };
+  const previewRequestState = { sequence: 0 };
 
   function rejectMap<T>(map: Map<string, Pending<T>>, error: Error): void {
     for (const pending of map.values()) {
@@ -134,14 +151,46 @@ export function createLiveBridgeFs(
     });
   };
 
+  const previewWorkspaceFile = (
+    filePath: string,
+    cwd?: string,
+    maxBytes?: number,
+  ): Promise<PreviewWorkspaceFileResult> => {
+    previewRequestState.sequence += 1;
+    const requestId = `preview-${previewRequestState.sequence}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pendingPreview.delete(requestId);
+        reject(new Error("preview_workspace_file timed out"));
+      }, 15_000);
+      pendingPreview.set(requestId, { resolve, reject, timeout });
+      if (
+        send({
+          type: "preview_workspace_file",
+          requestId,
+          path: filePath,
+          cwd,
+          maxBytes,
+        })
+      ) {
+        return;
+      }
+      clearTimeout(timeout);
+      pendingPreview.delete(requestId);
+      reject(new Error("Bridge WebSocket is not connected"));
+    });
+  };
+
   return {
     listWorkspaceEntries,
     writeWorkspaceFile,
     readWorkspaceFile,
+    previewWorkspaceFile,
     rejectAll: (error) => {
       rejectMap(pendingWorkspaceRequests, error);
       rejectMap(pendingWrite, error);
       rejectMap(pendingRead, error);
+      rejectMap(pendingPreview, error);
     },
     handleServerMsg: (msg) => {
       const requestId =
@@ -185,6 +234,25 @@ export function createLiveBridgeFs(
           mimeType:
             typeof msg.mimeType === "string" ? msg.mimeType : undefined,
           bytes: typeof msg.bytes === "number" ? msg.bytes : 0,
+          reason: typeof msg.reason === "string" ? msg.reason : undefined,
+          error: typeof msg.error === "string" ? msg.error : undefined,
+        });
+        return true;
+      }
+      if (msg.type === "preview_workspace_file_result" && requestId) {
+        const pending = pendingPreview.get(requestId);
+        if (!pending) {
+          return true;
+        }
+        clearTimeout(pending.timeout);
+        pendingPreview.delete(requestId);
+        pending.resolve({
+          ok: Boolean(msg.ok),
+          content: typeof msg.content === "string" ? msg.content : undefined,
+          mimeType:
+            typeof msg.mimeType === "string" ? msg.mimeType : undefined,
+          bytes: typeof msg.bytes === "number" ? msg.bytes : 0,
+          truncated: msg.truncated === true,
           reason: typeof msg.reason === "string" ? msg.reason : undefined,
           error: typeof msg.error === "string" ? msg.error : undefined,
         });

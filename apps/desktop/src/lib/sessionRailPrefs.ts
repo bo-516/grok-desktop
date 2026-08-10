@@ -1,44 +1,73 @@
 /**
- * Session rail UI prefs: which workspace groups are pinned / collapsed.
- * Pure helpers + localStorage — no React. Pin order is user-controlled;
- * collapse is a set of workspace path keys.
+ * Session rail UI prefs: pin, collapse, and per-project drag order storage.
+ * Pure helpers + localStorage — no React. Ordering algorithms live in
+ * {@link ./sessionRailOrder} (within each workspace: pin → drag → title
+ * first-char auto-sort; project folders are not reordered by pin).
  */
 
-import type { ProjectGroup } from "@/store/sessionCatalog";
-
-/** localStorage key for pin + collapse state. */
+/** localStorage key for pin + collapse + drag order state. */
 export const SESSION_RAIL_PREFS_KEY = "grok-desktop.session-rail-prefs.v1";
 
-/** Persisted rail chrome for workspace project groups. */
+export {
+  applyWorkspaceSessionOrder,
+  moveSessionIdInOrder,
+  orderGroupsBySessionPin,
+  orderSessionsByPin,
+  orderSessionsByTitleAscii,
+  orderSessionsByUserThenAscii,
+} from "@/lib/sessionRailOrder";
+
+/** Persisted rail chrome for project groups, pins, and drag order. */
 export type SessionRailPrefs = {
   /**
-   * Pinned workspace paths, top-to-bottom order (index 0 = highest).
-   * Only known catalog workspaces are applied; stale paths are kept until
-   * the next save so temporarily empty projects stay pinned after prune.
+   * Pinned session ids, top-to-bottom order (index 0 = highest).
+   * Stale ids are kept until the next save so a temporarily missing catalog
+   * row can reappear still pinned after a re-sync.
    */
-  pinnedWorkspaces: string[];
+  pinnedSessions: string[];
   /** Workspace paths whose session list is collapsed. */
   collapsedWorkspaces: string[];
+  /**
+   * Per-workspace user drag order (session ids, top-to-bottom).
+   * When set for a workspace, that list outranks title auto-sort for every
+   * id it still contains; unknown / new sessions append by title ASCII.
+   * Empty / missing workspace key → pure auto-sort for that project.
+   */
+  sessionOrderByWorkspace: Record<string, string[]>;
 };
 
 const EMPTY_PREFS: SessionRailPrefs = {
-  pinnedWorkspaces: [],
+  pinnedSessions: [],
   collapsedWorkspaces: [],
+  sessionOrderByWorkspace: {},
 };
 
 /**
  * Normalize a prefs object from storage or partial input.
+ * Accepts legacy `pinnedWorkspaces` (ignored) so old blobs still load.
  * @param raw Unknown parse result; non-arrays are treated as empty.
- * @returns Defensive copy with string-only path lists (deduped, order kept).
+ * @returns Defensive copy with string-only id/path lists (deduped, order kept).
  */
 export function normalizeSessionRailPrefs(raw: unknown): SessionRailPrefs {
   if (!raw || typeof raw !== "object") {
-    return { ...EMPTY_PREFS, pinnedWorkspaces: [], collapsedWorkspaces: [] };
+    return {
+      ...EMPTY_PREFS,
+      pinnedSessions: [],
+      collapsedWorkspaces: [],
+      sessionOrderByWorkspace: {},
+    };
   }
   const obj = raw as Record<string, unknown>;
+  // Prefer the session pin list; fall back to empty when only legacy folder pins exist.
+  const pinnedSessions = uniqueStrings(
+    obj.pinnedSessions ?? obj.pinnedSessionIds,
+  );
   return {
-    pinnedWorkspaces: uniqueStrings(obj.pinnedWorkspaces),
+    pinnedSessions,
     collapsedWorkspaces: uniqueStrings(obj.collapsedWorkspaces),
+    sessionOrderByWorkspace: normalizeOrderByWorkspace(
+      obj.sessionOrderByWorkspace,
+    ),
   };
 }
 
@@ -48,16 +77,31 @@ export function normalizeSessionRailPrefs(raw: unknown): SessionRailPrefs {
  */
 export function loadSessionRailPrefs(): SessionRailPrefs {
   if (typeof localStorage === "undefined") {
-    return { ...EMPTY_PREFS, pinnedWorkspaces: [], collapsedWorkspaces: [] };
+    return {
+      ...EMPTY_PREFS,
+      pinnedSessions: [],
+      collapsedWorkspaces: [],
+      sessionOrderByWorkspace: {},
+    };
   }
   try {
     const raw = localStorage.getItem(SESSION_RAIL_PREFS_KEY);
     if (!raw) {
-      return { ...EMPTY_PREFS, pinnedWorkspaces: [], collapsedWorkspaces: [] };
+      return {
+        ...EMPTY_PREFS,
+        pinnedSessions: [],
+        collapsedWorkspaces: [],
+        sessionOrderByWorkspace: {},
+      };
     }
     return normalizeSessionRailPrefs(JSON.parse(raw) as unknown);
   } catch {
-    return { ...EMPTY_PREFS, pinnedWorkspaces: [], collapsedWorkspaces: [] };
+    return {
+      ...EMPTY_PREFS,
+      pinnedSessions: [],
+      collapsedWorkspaces: [],
+      sessionOrderByWorkspace: {},
+    };
   }
 }
 
@@ -80,15 +124,15 @@ export function saveSessionRailPrefs(prefs: SessionRailPrefs): void {
 }
 
 /**
- * Whether a workspace path is in the pinned list.
+ * Whether a session id is in the pinned list.
  * @param prefs Current prefs.
- * @param workspace Absolute path key (or "(no project)").
+ * @param sessionId Catalog session id.
  */
-export function isWorkspacePinned(
+export function isSessionPinned(
   prefs: SessionRailPrefs,
-  workspace: string,
+  sessionId: string,
 ): boolean {
-  return prefs.pinnedWorkspaces.includes(workspace);
+  return prefs.pinnedSessions.includes(sessionId);
 }
 
 /**
@@ -104,25 +148,28 @@ export function isWorkspaceCollapsed(
 }
 
 /**
- * Toggle pin for a workspace. Newly pinned is inserted at the front so it
+ * Toggle pin for one session. Newly pinned is inserted at the front so it
  * appears at the top of the pinned block; unpin removes it from the list.
  * @param prefs Current prefs (not mutated).
- * @param workspace Workspace path key.
+ * @param sessionId Catalog session id.
  * @returns New prefs with pin list updated.
  */
-export function togglePinnedWorkspace(
+export function togglePinnedSession(
   prefs: SessionRailPrefs,
-  workspace: string,
+  sessionId: string,
 ): SessionRailPrefs {
-  if (prefs.pinnedWorkspaces.includes(workspace)) {
+  if (prefs.pinnedSessions.includes(sessionId)) {
     return {
       ...prefs,
-      pinnedWorkspaces: prefs.pinnedWorkspaces.filter((w) => w !== workspace),
+      pinnedSessions: prefs.pinnedSessions.filter((id) => id !== sessionId),
     };
   }
   return {
     ...prefs,
-    pinnedWorkspaces: [workspace, ...prefs.pinnedWorkspaces.filter((w) => w !== workspace)],
+    pinnedSessions: [
+      sessionId,
+      ...prefs.pinnedSessions.filter((id) => id !== sessionId),
+    ],
   };
 }
 
@@ -148,33 +195,6 @@ export function toggleCollapsedWorkspace(
     ...prefs,
     collapsedWorkspaces: [...prefs.collapsedWorkspaces, workspace],
   };
-}
-
-/**
- * Order project groups: pinned workspaces first (prefs pin order), then the
- * remaining groups in their original recency order.
- * @param groups Groups already sorted by last-message recency.
- * @param pinnedWorkspaces Pin order from prefs (index 0 highest).
- * @returns New array; does not mutate `groups`.
- */
-export function orderGroupsByPin(
-  groups: ProjectGroup[],
-  pinnedWorkspaces: string[],
-): ProjectGroup[] {
-  if (pinnedWorkspaces.length === 0 || groups.length === 0) {
-    return groups;
-  }
-  const byWs = new Map(groups.map((g) => [g.workspace, g]));
-  const pinned: ProjectGroup[] = [];
-  for (const ws of pinnedWorkspaces) {
-    const g = byWs.get(ws);
-    if (g) {
-      pinned.push(g);
-      byWs.delete(ws);
-    }
-  }
-  const rest = groups.filter((g) => byWs.has(g.workspace));
-  return [...pinned, ...rest];
 }
 
 /**
@@ -218,6 +238,30 @@ function uniqueStrings(value: unknown): string[] {
     }
     seen.add(item);
     out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Normalize the per-workspace drag-order map from storage.
+ * @param value Unknown object; non-string keys / non-array values dropped.
+ * @returns Defensive copy of workspace → ordered session id lists.
+ */
+function normalizeOrderByWorkspace(
+  value: unknown,
+): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, string[]> = {};
+  for (const [key, list] of Object.entries(value as Record<string, unknown>)) {
+    if (!key) {
+      continue;
+    }
+    const ids = uniqueStrings(list);
+    if (ids.length > 0) {
+      out[key] = ids;
+    }
   }
   return out;
 }

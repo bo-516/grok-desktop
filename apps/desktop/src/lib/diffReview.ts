@@ -1,12 +1,26 @@
 /**
- * Pure line-level diff helpers for tool edit cards and native diff review (F-TOOL-04 / F-NATIVE-06).
+ * Pure line-level diff helpers for tool edit cards and native diff review.
+ * Internals use jsdiff via diffCore (D4); external shape stays compatible.
  */
+
+import {
+  buildFileDiff,
+  flattenFileDiffRows,
+  type DiffRow,
+} from "./diffCore";
 
 export type DiffLine = {
   type: "same" | "add" | "del";
   text: string;
-  /** 1-based line number in new file for add/same; old for del. */
+  /**
+   * Legacy single line number: del → old, add/same → new.
+   * Prefer oldNo/newNo for dual gutters.
+   */
   lineNo?: number;
+  /** 1-based old-file line number; undefined on add rows. */
+  oldNo?: number;
+  /** 1-based new-file line number; undefined on del rows. */
+  newNo?: number;
 };
 
 export type DiffHunk = {
@@ -15,83 +29,58 @@ export type DiffHunk = {
   lines: DiffLine[];
   added: number;
   removed: number;
+  /** True when the engine bailed to a whole-file replace view. */
+  degraded?: boolean;
 };
 
 /**
- * Build a simple LCS-free line diff (patience-free sequential) for UI review.
- * Good enough for tool cards; not a full Myers algorithm.
+ * Build a line-level diff for UI review.
+ * Signature and return shape match the pre-jsdiff API; dual line numbers are
+ * filled in addition to the legacy lineNo field.
  * @param oldText Previous file content (empty for new files).
  * @param newText Updated file content.
+ * @returns Summary, flat lines, and added/removed counts.
  */
-/**
- * Split file text into lines; drop a single trailing empty segment from split("\n").
- * @param text Source text; null/empty → no lines.
- */
-function splitContentLines(text: string | undefined | null): string[] {
-  if (text == null || text === "") {
-    return [];
-  }
-  const parts = String(text).split("\n");
-  if (parts.length > 1 && parts[parts.length - 1] === "") {
-    return parts.slice(0, -1);
-  }
-  return parts;
-}
-
 export function buildLineDiff(
   oldText: string | undefined | null,
   newText: string | undefined | null,
 ): DiffHunk {
-  const a = splitContentLines(oldText);
-  const b = splitContentLines(newText);
-
-  const lines: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-  let added = 0;
-  let removed = 0;
-  while (i < a.length || j < b.length) {
-    const oldLine = a[i];
-    const newLine = b[j];
-    if (oldLine !== undefined && newLine !== undefined && oldLine === newLine) {
-      lines.push({ type: "same", text: oldLine, lineNo: j + 1 });
-      i += 1;
-      j += 1;
-      continue;
-    }
-    // Prefer deletions then additions when mismatch
-    if (
-      oldLine !== undefined &&
-      (newLine === undefined || !b.slice(j).includes(oldLine))
-    ) {
-      lines.push({ type: "del", text: oldLine, lineNo: i + 1 });
-      removed += 1;
-      i += 1;
-      continue;
-    }
-    if (newLine !== undefined) {
-      lines.push({ type: "add", text: newLine, lineNo: j + 1 });
-      added += 1;
-      j += 1;
-      continue;
-    }
-    if (oldLine !== undefined) {
-      lines.push({ type: "del", text: oldLine, lineNo: i + 1 });
-      removed += 1;
-      i += 1;
-    }
-  }
+  const fileDiff = buildFileDiff(oldText, newText);
+  const rows = flattenFileDiffRows(fileDiff, false);
+  const lines: DiffLine[] = rows.map((row) => rowToDiffLine(row));
   return {
-    summary: `+${added}/-${removed}`,
+    summary: `+${fileDiff.added}/-${fileDiff.removed}`,
     lines,
-    added,
-    removed,
+    added: fileDiff.added,
+    removed: fileDiff.removed,
+    degraded: fileDiff.degraded,
+  };
+}
+
+/**
+ * Map a DiffRow onto the legacy DiffLine shape with dual numbers.
+ * @param row Structured dual-numbered row.
+ */
+function rowToDiffLine(row: DiffRow): DiffLine {
+  const lineNo =
+    row.type === "del"
+      ? row.oldNo
+      : row.newNo !== undefined
+        ? row.newNo
+        : row.oldNo;
+  return {
+    type: row.type,
+    text: row.text,
+    lineNo,
+    oldNo: row.oldNo,
+    newNo: row.newNo,
   };
 }
 
 /**
  * Parse MCP tool title `server__tool` into parts for badge display (F-TOOL-08).
  * @param title Tool card title or name.
+ * @returns Server/tool pair or null when the title is not MCP-shaped.
  */
 export function parseMcpToolName(
   title: string | undefined,
@@ -111,6 +100,7 @@ export function parseMcpToolName(
 /**
  * Whether consecutive tool kinds should collapse for timeline readability (F-TOOL-06).
  * @param kind Tool kind.
+ * @returns True for read/search/list only.
  */
 export function isCollapsibleToolKind(kind: string | undefined): boolean {
   return kind === "read" || kind === "search" || kind === "list";

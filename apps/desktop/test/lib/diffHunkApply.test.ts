@@ -36,4 +36,18 @@ describe("diffHunkApply", () => {
     const next = setHunkDecision(hunks, hunks[0]!.id, "reject");
     assert.equal(next[0]?.decision, "reject");
   });
+
+  it("createDiffReview rebuilds from new texts when target switches", () => {
+    // DiffReviewView resets state from createDiffReview when path/old/new change.
+    const first = createDiffReview("a\nb\n", "a\nx\n");
+    assert.ok(first.hunks.length >= 1);
+    const second = createDiffReview("p\nq\nr\n", "p\nQ\nR\nr\n");
+    assert.ok(second.hunks.length >= 1);
+    // Different content must produce different review material (not a cached first).
+    const firstTexts = first.hunks.flatMap((h) => h.lines.map((l) => l.text));
+    const secondTexts = second.hunks.flatMap((h) => h.lines.map((l) => l.text));
+    assert.notDeepEqual(firstTexts, secondTexts);
+    assert.ok(firstTexts.includes("b") || firstTexts.includes("x"));
+    assert.ok(secondTexts.includes("Q") || secondTexts.includes("q"));
+  });
 });

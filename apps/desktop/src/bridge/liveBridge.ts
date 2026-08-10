@@ -12,6 +12,7 @@ import type {
   EnvironmentInfo,
   LiveBridgeHandlers,
   PoolEntry,
+  PreviewWorkspaceFileResult,
   ReadWorkspaceFileResult,
   SessionSpawnConfig,
   StartOpts,
@@ -80,6 +81,15 @@ export function connectLiveBridge(
     path: string,
     cwd?: string,
   ) => Promise<ReadWorkspaceFileResult>;
+  /**
+   * Read a workspace file for the preview drawer (may truncate with flag).
+   * Sensitive / binary / outside still reject with reason.
+   */
+  previewWorkspaceFile: (
+    path: string,
+    cwd?: string,
+    maxBytes?: number,
+  ) => Promise<PreviewWorkspaceFileResult>;
   setModel: (modelId: string, sessionId?: string) => boolean;
   setMode: (modeId: string, sessionId?: string) => boolean;
   compact: (instruction?: string, sessionId?: string) => boolean;
@@ -231,6 +241,7 @@ export function connectLiveBridge(
     listWorkspaceEntries: fsApi.listWorkspaceEntries,
     writeWorkspaceFile: fsApi.writeWorkspaceFile,
     readWorkspaceFile: fsApi.readWorkspaceFile,
+    previewWorkspaceFile: fsApi.previewWorkspaceFile,
     setModel: (modelId, sessionId) =>
       send({ type: "set_model", modelId, sessionId }),
     setMode: (modeId, sessionId) =>

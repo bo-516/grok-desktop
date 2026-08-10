@@ -23,6 +23,19 @@ export type ReadWorkspaceFileResult = {
   error?: string;
 };
 
+/** Result of bridge preview_workspace_file for the preview drawer. */
+export type PreviewWorkspaceFileResult = {
+  ok: boolean;
+  content?: string;
+  mimeType?: string;
+  /** Full file size on disk (not the truncated length). */
+  bytes: number;
+  /** True when content was cut at the preview ceiling. */
+  truncated?: boolean;
+  reason?: string;
+  error?: string;
+};
+
 /** Aligned with bridge PoolEntry. */
 export type PoolEntry = {
   sessionId: string;
@@ -93,6 +106,17 @@ export type BridgeServerMsg =
       content?: string;
       mimeType?: string;
       bytes: number;
+      reason?: string;
+      error?: string;
+    }
+  | {
+      type: "preview_workspace_file_result";
+      requestId: string;
+      ok: boolean;
+      content?: string;
+      mimeType?: string;
+      bytes: number;
+      truncated?: boolean;
       reason?: string;
       error?: string;
     }
