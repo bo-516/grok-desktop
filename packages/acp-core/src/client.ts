@@ -26,6 +26,7 @@ import type {
   JsonRpcMessage,
   PromptResult,
   SessionState,
+  SessionUpdate,
 } from "./types.js";
 import { runAcpHandshake } from "./clientHandshake.js";
 import { dispatchAcpMessage } from "./clientDispatch.js";
@@ -39,6 +40,15 @@ export type AcpClientOptions = {
   /** Auto-respond to permission requests (tests / --always-approve style). */
   autoPermissionOptionId?: string | null;
   onStateChange?: (state: SessionState) => void;
+  /**
+   * Raw session/update callback for thin-bridge relay (fires even during
+   * session/load replay so UIs can reduce without full-state broadcasts).
+   */
+  onSessionUpdate?: (
+    update: SessionUpdate,
+    sessionId: string,
+    eventId: string | null,
+  ) => void;
   onStderr?: (line: string) => void;
   /** Called when agent issues reverse requests other than permission (fs/terminal). */
   onAgentRequest?: (
@@ -56,6 +66,7 @@ export class AcpClient {
   private readonly settleQuietMs: number;
   private readonly autoPermissionOptionId: string | null;
   private readonly onStateChange?: (state: SessionState) => void;
+  private readonly onSessionUpdate?: AcpClientOptions["onSessionUpdate"];
   private readonly onStderr?: (line: string) => void;
   private readonly onAgentRequest?: AcpClientOptions["onAgentRequest"];
 
@@ -87,6 +98,7 @@ export class AcpClient {
         ? null
         : opts.autoPermissionOptionId;
     this.onStateChange = opts.onStateChange;
+    this.onSessionUpdate = opts.onSessionUpdate;
     this.onStderr = opts.onStderr;
     this.onAgentRequest = opts.onAgentRequest;
     this.state = createSessionState({ id: "", workspace: "" });
@@ -307,6 +319,7 @@ export class AcpClient {
         isPromptInFlight: () => this.promptInFlight,
         autoPermissionOptionId: this.autoPermissionOptionId,
         respondPermission: (optionId) => this.respondPermission(optionId),
+        onSessionUpdate: this.onSessionUpdate,
         onAgentRequest: this.onAgentRequest,
       },
       message,

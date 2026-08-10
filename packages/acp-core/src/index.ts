@@ -12,3 +12,9 @@ export * from "./transport.js";
 export * from "./client.js";
 export * from "./mockAgent.js";
 export * from "./sessionTitle.js";
+export * from "./eventIdDedupe.js";
+export {
+  dispatchAcpMessage,
+  isSessionUpdateMethod,
+  type DispatchHost,
+} from "./clientDispatch.js";

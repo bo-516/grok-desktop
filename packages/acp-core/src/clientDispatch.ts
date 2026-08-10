@@ -11,12 +11,34 @@ import {
   applySessionUpdate,
   extractSessionUpdate,
 } from "./timeline.js";
+import { extractEventId } from "./eventIdDedupe.js";
 import {
   setPendingPermission,
   shapePermissionRequest,
 } from "./sessionLifecycle.js";
 import { resolveReverseErrorCode } from "./sessionMetadata.js";
-import type { JsonRpcMessage, SessionState } from "./types.js";
+import type { JsonRpcMessage, SessionState, SessionUpdate } from "./types.js";
+
+/** Vendor namespace grok-build uses for non-standard session notifications. */
+const XAI_METHOD_PREFIX = "_x.ai/";
+
+/**
+ * Whether a notification method carries an ACP session update payload.
+ *
+ * grok-build reports orchestration (goal / subagent / background task / retry)
+ * under `_x.ai/session/update`. The params shape is identical to the standard
+ * method — `{ sessionId, update, _meta }` — so both names must feed the same
+ * reducer and the same settle bookkeeping. Routing the vendor method through a
+ * second path would fork `status` / `scheduleSettle` and desynchronize the canvas.
+ * @param method Raw JSON-RPC notification method name.
+ * @returns True when params should go through extractSessionUpdate.
+ */
+export function isSessionUpdateMethod(method: string): boolean {
+  return (
+    method === "session/update" ||
+    method === `${XAI_METHOD_PREFIX}session/update`
+  );
+}
 
 /** Host surface dispatch needs from AcpClient. */
 export type DispatchHost = {
@@ -39,6 +61,16 @@ export type DispatchHost = {
   autoPermissionOptionId: string | null;
   /** Respond to pending permission (used by auto-approve). */
   respondPermission: (optionId: string) => void;
+  /**
+   * Optional raw session/update fan-out for thin bridges (relay mode).
+   * Fired for every accepted update including during session/load replay so
+   * clients can rebuild SessionState without full-state broadcasts.
+   */
+  onSessionUpdate?: (
+    update: SessionUpdate,
+    sessionId: string,
+    eventId: string | null,
+  ) => void;
   /** Reverse fs/terminal handlers from the bridge. */
   onAgentRequest?: (
     method: string,
@@ -78,9 +110,19 @@ export function dispatchAcpMessage(
   }
 
   if (kind.kind === "notification") {
-    if (kind.method === "session/update") {
+    if (isSessionUpdateMethod(kind.method)) {
       const update = extractSessionUpdate(kind.params);
       if (update) {
+        const eventId = extractEventId(kind.params);
+        const sessionId =
+          kind.params &&
+          typeof kind.params === "object" &&
+          typeof (kind.params as { sessionId?: unknown }).sessionId === "string"
+            ? (kind.params as { sessionId: string }).sessionId
+            : host.getSessionState().id;
+        // Relay listeners see the raw update even while AcpClient is replaying
+        // (session/load); state fan-out remains gated by setReplaying.
+        host.onSessionUpdate?.(update, sessionId, eventId);
         host.replaceSessionState(
           applySessionUpdate(host.getSessionState(), update),
         );
