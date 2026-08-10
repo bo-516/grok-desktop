@@ -85,6 +85,51 @@ describe("sessionCatalog", () => {
     assert.equal(cat[0]?.updatedAt, 1000);
   });
 
+  it("resource embed blocks change activity without using type names as text", () => {
+    const withText = createSessionState({
+      id: "s-embed",
+      workspace: "/proj/demo",
+    });
+    withText.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "see this" }],
+      },
+    ];
+    withText.lastAgentText = "";
+    let cat = upsertFromLiveState([], withText, 1000);
+    assert.equal(cat[0]?.updatedAt, 1000);
+
+    // Same text + resource attach must advance recency (real new send payload).
+    const withResource = createSessionState({
+      id: "s-embed",
+      workspace: "/proj/demo",
+    });
+    withResource.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [
+          { type: "text", text: "see this" },
+          {
+            type: "resource",
+            resource: {
+              uri: "file:///proj/demo/docs/a.md",
+              text: "body",
+            },
+          },
+        ],
+      },
+    ];
+    withResource.lastAgentText = "";
+    cat = upsertFromLiveState(cat, withResource, 2000);
+    assert.equal(cat[0]?.updatedAt, 2000);
+
+    // Title / catalog fields must not absorb the literal "resource" type token.
+    assert.doesNotMatch(cat[0]?.title ?? "", /resource/);
+  });
+
   it("upsert advances updatedAt only when user/agent message content changes", () => {
     const base = createSessionState({
       id: "s-recency",
@@ -284,12 +329,25 @@ describe("sessionCatalog", () => {
     assert.equal(empties[0]?.id, "ghost2");
   });
 
-  it("groupSessionsByProject clusters by workspace", () => {
+  it("groupSessionsByProject clusters by workspace and sorts by first-char ASCII", () => {
     const groups = groupSessionsByProject([
       {
         id: "a",
         workspace: "/proj/demo",
-        title: "A",
+        title: "Zeta",
+        mode: "build",
+        model: "m",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 300,
+        timeline: [],
+        toolCalls: {},
+        lastAgentText: "",
+      },
+      {
+        id: "a2",
+        workspace: "/proj/demo",
+        title: "Alpha",
         mode: "build",
         model: "m",
         status: "idle",
@@ -313,8 +371,14 @@ describe("sessionCatalog", () => {
         lastAgentText: "",
       },
     ]);
-    assert.equal(groups[0]?.projectName, "other");
-    assert.equal(groups[1]?.projectName, "demo");
+    // Project names: "demo" before "other" by first-char ASCII (d < o).
+    assert.equal(groups[0]?.projectName, "demo");
+    assert.equal(groups[1]?.projectName, "other");
+    // Within demo: Alpha before Zeta (not by updatedAt recency).
+    assert.deepEqual(
+      groups[0]?.sessions.map((s) => s.id),
+      ["a2", "a"],
+    );
   });
 
   it("groupSessionsByTime buckets Today / Yesterday / Earlier", () => {

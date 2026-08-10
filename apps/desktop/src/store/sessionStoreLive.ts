@@ -17,6 +17,11 @@ import {
   type StartOpts as BridgeStartOpts,
 } from "../bridge/liveBridge";
 import {
+  mergeRemoteSessionsIntoCatalog,
+  normalizeSessionsList,
+} from "../lib/sessionActions";
+import { loadWorkspacePrefs } from "../lib/workspacePrefs";
+import {
   normalizeCatalog,
   upsertFromLiveState,
 } from "./sessionCatalog";
@@ -26,6 +31,16 @@ import {
   type StartOpts,
 } from "./sessionStoreSupport";
 import { clearPendingModeTimer } from "./pendingMode";
+import {
+  mergeOptimisticLocalUsers,
+  resolveCanvasFollow,
+} from "./sessionStoreLiveFollow";
+
+export {
+  mergeOptimisticLocalUsers,
+  resolveCanvasFollow,
+  shouldFollowSession,
+} from "./sessionStoreLiveFollow";
 
 /** Product UI path never auto-approves tools by default. */
 export const DEFAULT_ALWAYS_APPROVE = false;
@@ -87,10 +102,25 @@ export type LiveStoreSlice = {
   /** SPAWN restart banner (J-06). */
   restartNotice: string | null;
   /**
+   * True after New chat until first send or selectSession.
+   * Optional so older call sites still type-check.
+   */
+  localDraft?: boolean;
+  /**
+   * True while first send of a New chat draft is forceNew-creating.
+   * Optional so older call sites still type-check.
+   */
+  creatingSession?: boolean;
+  /**
    * In-flight mode switch target; cleared when inbound session.mode matches.
    * Optional so older call sites still type-check.
    */
   pendingMode?: AgentMode | null;
+  /**
+   * Uncached session waiting for session/load replay to land.
+   * Optional so older call sites still type-check.
+   */
+  restoringSessionId?: string | null;
 };
 
 type SetState = (
@@ -99,26 +129,6 @@ type SetState = (
     | ((state: LiveStoreSlice) => Partial<LiveStoreSlice>),
 ) => void;
 type GetState = () => LiveStoreSlice;
-
-/**
- * Whether inbound state should paint onto the main canvas.
- * @param viewing Currently viewed session.
- * @param active Most recently active id.
- * @param sessionId Inbound session id.
- */
-export function shouldFollowSession(
-  viewing: string | null,
-  active: string | null,
-  sessionId: string,
-): boolean {
-  if (!sessionId) {
-    return true;
-  }
-  if (!viewing) {
-    return true;
-  }
-  return viewing === sessionId || active === sessionId;
-}
 
 /**
  * Heal exact X+X user bodies on any inbound live state before paint/persist.
@@ -177,34 +187,70 @@ export async function startLiveBridgeSession(
     try {
       live = connectLiveBridge(url, {
         onState: (session) => {
-          const healed = healSessionTimeline(session);
+          /** Snapshot with legacy duplicate seed rows normalized before routing. */
+          const healedTimeline = healSessionTimeline(session);
+          // User chose "work without a project": bridge still has a default
+          // cwd for the agent process, but do not let that overwrite the UI
+          // selection or catalog grouping a few seconds later.
+          const healed = loadWorkspacePrefs().noProject
+            ? { ...healedTimeline, workspace: "" }
+            : healedTimeline;
+          /** Shared history receives every session, including background streams. */
           const catalog = normalizeCatalog(
             upsertFromLiveState(get().catalog, healed),
           );
           persistCatalog(catalog);
+          /** Explicit rail selection; background pool snapshots must not replace it. */
           const viewing = get().viewingSessionId;
-          const follow = shouldFollowSession(
+          /** Last canvas-owned live id, used only before an explicit selection exists. */
+          const active = get().activeSessionId;
+          /** Whether this inbound snapshot may update canvas-scoped state. */
+          const follow = resolveCanvasFollow({
             viewing,
-            get().activeSessionId,
-            healed.id,
-          );
-          // Clear pendingMode when agent confirms the requested mode.
+            active,
+            localDraft: Boolean(get().localDraft),
+            creatingSession: Boolean(get().creatingSession),
+            inbound: healed,
+          });
+          // Mode requests belong to the painted chat; a background session
+          // using the same mode must not acknowledge the foreground request.
           const pending = get().pendingMode ?? null;
           const modeConfirmed =
-            pending !== null && healed.mode === pending;
+            follow && pending !== null && healed.mode === pending;
           if (modeConfirmed) {
             clearPendingModeTimer();
           }
+          // Only a canvas-owned snapshot may promote activeSessionId. Keeping
+          // background ids out prevents alternating streams from taking turns
+          // satisfying the active fallback and repainting the selected chat.
+          const nextActive = follow && healed.id ? healed.id : active;
+          // forceNew empty paint must not wipe the optimistic user bubble
+          // already shown on the draft canvas while create+prompt still runs.
+          const canvasSession = follow
+            ? mergeOptimisticLocalUsers(healed, get().session)
+            : healed;
+          // Replay landed: the first snapshot for this id that carries content
+          // is the single post-load flush. A session that really is empty keeps
+          // the hint until the user's first prompt fills the canvas — harmless,
+          // and it never hides content that exists.
+          const restoreDone =
+            get().restoringSessionId === healed.id &&
+            healed.timeline.length > 0;
           set({
             catalog,
-            activeSessionId: healed.id || get().activeSessionId,
+            activeSessionId: nextActive,
             connectionMode: "live-bridge",
             lastError: null,
+            ...(restoreDone ? { restoringSessionId: null } : {}),
             ...(modeConfirmed ? { pendingMode: null } : {}),
             ...(follow
               ? {
-                  session: healed,
+                  session: canvasSession,
                   viewingSessionId: healed.id || viewing,
+                  // Handshake painted the forceNew session — leave draft mode.
+                  ...(get().creatingSession && healed.id
+                    ? { creatingSession: false, localDraft: false }
+                    : {}),
                 }
               : {}),
           });
@@ -284,6 +330,8 @@ export async function startLiveBridgeSession(
       // Event-driven onPool is primary; 1s poll keeps streaming "N running"
       // honest if a push is missed (stream end / exit without ACP, partial WS drop).
       startPoolPoll(() => bridge.listPool());
+      // Pull every workspace's sessions into the rail catalog (F-SESS-07).
+      void syncCatalogFromBridge(bridge, set, get);
     } catch (e) {
       stopPoolPoll();
       const message = e instanceof Error ? e.message : String(e);
@@ -340,4 +388,41 @@ export async function startLiveBridgeSession(
       ? get().viewingSessionId
       : resumeId ?? get().viewingSessionId,
   });
+}
+
+/**
+ * Fetch upstream sessions (all workspaces) and merge into the local catalog.
+ * Used on connect and by the Sync sessions menu. Empty remote does not clear
+ * local rows. Failures are silent so a flaky CLI does not block the UI.
+ * @param bridge Live bridge handle with `cli`.
+ * @param set Zustand set for catalog write-back.
+ * @param get Zustand get for the current catalog snapshot.
+ */
+export async function syncCatalogFromBridge(
+  bridge: LiveHandle,
+  set: SetState,
+  get: GetState,
+): Promise<{ ok: boolean; count: number; error?: string }> {
+  try {
+    // Omit cwd so the bridge returns every workspace under ~/.grok/sessions.
+    const result = await bridge.cli("sessions_list", {});
+    if (!result.ok) {
+      return {
+        ok: false,
+        count: 0,
+        error: result.error ?? "sessions_list failed",
+      };
+    }
+    const rows = normalizeSessionsList(result.data);
+    const catalog = mergeRemoteSessionsIntoCatalog(get().catalog, rows);
+    persistCatalog(catalog);
+    set({ catalog });
+    return { ok: true, count: rows.length };
+  } catch (e) {
+    return {
+      ok: false,
+      count: 0,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
 }
