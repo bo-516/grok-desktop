@@ -86,6 +86,20 @@ export async function dispatchClientMsg(
     send(ws, { type: "pool", entries: pool.list() });
     return;
   }
+  if (msg.type === "get_state") {
+    // On-demand full snapshot (reconnect / multi-window); not the streaming path.
+    try {
+      const rt = requireRuntime(msg.sessionId);
+      send(ws, { type: "state", session: rt.getSessionState() });
+    } catch (e) {
+      send(ws, {
+        type: "error",
+        message: e instanceof Error ? e.message : String(e),
+        sessionId: msg.sessionId,
+      });
+    }
+    return;
+  }
   if (msg.type === "list_workspace_entries") {
     const listCwd = msg.cwd ? path.resolve(msg.cwd) : state.defaultListCwd;
     const entries = await listWorkspaceEntries(listCwd, msg.query);

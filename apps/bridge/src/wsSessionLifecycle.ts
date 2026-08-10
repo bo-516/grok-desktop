@@ -2,6 +2,10 @@
  * Session start/resume/restart + crash-recovery lifecycle for the bridge.
  * Owns focused-session seed bookkeeping shared with the client-message dispatcher.
  * Pure lifecycle — no ClientMsg type switch (that lives in wsClientDispatch).
+ *
+ * Relay freeze: hot-path ACP updates go out as session_update; full `state` is
+ * only for hydrate (start/reconnect) and lifecycle side channels when
+ * status/permission/model/mode change without a timeline-only delta.
  */
 
 import path from "node:path";
@@ -23,6 +27,55 @@ export type SessionLifecycleDeps = {
   broadcast: (msg: ServerMsg) => void;
   broadcastPool: () => void;
 };
+
+/** Last lifecycle snapshot fields used to suppress hot-path full-state broadcasts. */
+type LifecycleFingerprint = {
+  status: SessionState["status"];
+  permKey: string;
+  model: string;
+  mode: SessionState["mode"];
+  id: string;
+};
+
+/**
+ * Fingerprint of non-timeline fields that warrant a lifecycle/state push.
+ * @param session Current SessionState.
+ */
+function lifecycleFingerprint(session: SessionState): LifecycleFingerprint {
+  const perm = session.pendingPermission;
+  const permKey = perm
+    ? `${String(perm.requestId)}:${perm.toolCall?.toolCallId ?? ""}`
+    : "";
+  return {
+    status: session.status,
+    permKey,
+    model: session.model,
+    mode: session.mode,
+    id: session.id,
+  };
+}
+
+/**
+ * Whether non-timeline lifecycle fields changed enough to notify UIs.
+ * Timeline / toolCalls growth alone must NOT force a full `state` broadcast.
+ * @param prev Previous fingerprint, or undefined on first observation.
+ * @param next Current fingerprint.
+ */
+function lifecycleChanged(
+  prev: LifecycleFingerprint | undefined,
+  next: LifecycleFingerprint,
+): boolean {
+  if (!prev) {
+    return true;
+  }
+  return (
+    prev.status !== next.status ||
+    prev.permKey !== next.permKey ||
+    prev.model !== next.model ||
+    prev.mode !== next.mode ||
+    prev.id !== next.id
+  );
+}
 
 /**
  * acquire / start: touch if already in pool; otherwise spawn + handshake and insert.
@@ -85,17 +138,56 @@ export async function startOrResume(
     }
   }
 
+  /** Per-session last lifecycle fingerprint so timeline-only deltas stay quiet. */
+  const lastLifecycle = new Map<string, LifecycleFingerprint>();
+
   const runtime = await createSessionRuntime({
     cwd,
     alwaysApprove: opts.alwaysApprove,
     resumeId: opts.forceNew ? undefined : opts.resumeId,
     seed: opts.forceNew ? undefined : opts.seed,
     spawnConfig: opts.spawnConfig,
+    onSessionUpdate: (update, sessionId, eventId) => {
+      // Hot path: O(1) raw update, never a growing SessionState blob.
+      broadcast({
+        type: "session_update",
+        sessionId,
+        update,
+        ...(eventId ? { eventId } : {}),
+      });
+    },
     onState: (session) => {
       if (session.id) {
         sessionSeeds.set(session.id, session);
       }
-      broadcast({ type: "state", session });
+      const fp = lifecycleFingerprint(session);
+      const prev = session.id ? lastLifecycle.get(session.id) : undefined;
+      const changed = lifecycleChanged(prev, fp);
+      if (session.id) {
+        lastLifecycle.set(session.id, fp);
+      }
+      if (!changed) {
+        // Timeline-only growth: skip full state and skip pool spam.
+        return;
+      }
+      // Lifecycle side channel (status / permission / model / mode / id).
+      const needsFullState =
+        !prev ||
+        prev.id !== fp.id ||
+        Boolean(session.pendingPermission) ||
+        (prev.permKey !== "" && fp.permKey === "");
+      if (needsFullState) {
+        broadcast({ type: "state", session });
+      } else {
+        broadcast({
+          type: "session_lifecycle",
+          sessionId: session.id,
+          status: session.status,
+          pendingPermission: session.pendingPermission ?? null,
+          model: session.model,
+          mode: session.mode,
+        });
+      }
       broadcastPool();
     },
     onStderr: (text, sessionId) => {
@@ -115,6 +207,7 @@ export async function startOrResume(
         const exitCwd =
           pool.get(sessionId)?.cwd ?? seed?.workspace ?? state.defaultListCwd;
         pool.close(sessionId);
+        lastLifecycle.delete(sessionId);
         broadcast({
           type: "info",
           message: `agent process exited (code ${code}); recovering via session/load…`,
@@ -142,7 +235,11 @@ export async function startOrResume(
 
   pool.insert(runtime);
   state.focusedSessionId = runtime.sessionId;
-  sessionSeeds.set(runtime.sessionId, runtime.getSessionState());
+  const initial = runtime.getSessionState();
+  sessionSeeds.set(runtime.sessionId, initial);
+  // One-shot hydrate after spawn/handshake (and optional session/load).
+  lastLifecycle.set(runtime.sessionId, lifecycleFingerprint(initial));
+  broadcast({ type: "state", session: initial });
   broadcastPool();
 }
 

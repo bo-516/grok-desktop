@@ -5,8 +5,10 @@
 
 import type {
   ContentBlock,
+  PermissionRequest,
   SessionState,
   SessionStatus,
+  SessionUpdate,
 } from "@grok-desktop/acp-core";
 import type { SessionSpawnConfig } from "./sessionRuntime.js";
 
@@ -96,6 +98,11 @@ export type ClientMsg =
       maxBytes?: number;
     }
   | { type: "ping" }
+  /**
+   * On-demand full SessionState snapshot (reconnect / multi-window).
+   * Hot-path streaming uses session_update relay instead.
+   */
+  | { type: "get_state"; sessionId?: string }
   /** Mid-session ACP set_model when supported. */
   | { type: "set_model"; sessionId?: string; modelId: string }
   /** Mid-session ACP set_mode when supported. */
@@ -143,8 +150,44 @@ export type ClientMsg =
 
 /** bridge → browser. */
 export type ServerMsg =
-  | { type: "hello"; cwd: string; port: number; poolCapacity: number }
+  | {
+      type: "hello";
+      cwd: string;
+      port: number;
+      poolCapacity: number;
+      /** Which bridge binary is serving (cold switch observability). */
+      impl: "node" | "go";
+      /** Bridge package / build version string. */
+      version: string;
+    }
+  /**
+   * Full SessionState: hydrate after start/resume, reconnect, or get_state.
+   * Not the hot path — streaming uses session_update.
+   */
   | { type: "state"; session: SessionState }
+  /**
+   * Raw ACP session/update relay. Client rebuilds SessionState via
+   * applySessionUpdate + eventId set dedupe (ids are non-monotonic under task_*).
+   */
+  | {
+      type: "session_update";
+      sessionId: string;
+      update: SessionUpdate;
+      /** Wire `_meta.eventId` when present; used for set-based dedupe. */
+      eventId?: string;
+    }
+  /**
+   * Lifecycle side channel when status / pendingPermission change without a
+   * corresponding session_update (settle quiet window, permission reverse RPC).
+   */
+  | {
+      type: "session_lifecycle";
+      sessionId: string;
+      status: SessionStatus;
+      pendingPermission?: PermissionRequest | null;
+      model?: string;
+      mode?: SessionState["mode"];
+    }
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
   | { type: "stderr"; text: string; sessionId?: string }

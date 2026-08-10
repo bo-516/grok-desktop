@@ -10,6 +10,7 @@ import {
   type ContentBlock,
   type SessionState,
   type SessionStatus,
+  type SessionUpdate,
 } from "@grok-desktop/acp-core";
 import {
   handleReverseRequest,
@@ -52,7 +53,20 @@ export type CreateSessionRuntimeOpts = {
   seed?: SessionState;
   /** SPAWN flags applied at process start. */
   spawnConfig?: SessionSpawnConfig;
+  /**
+   * Lifecycle / seed bookkeeping. After relay freeze this is NOT the hot path
+   * for timeline growth — use onSessionUpdate for raw ACP updates.
+   */
   onState: (session: SessionState) => void;
+  /**
+   * Raw session/update relay for the UI reduce path (O(n) broadcast).
+   * Fired for every ACP update including session/load replay.
+   */
+  onSessionUpdate?: (
+    update: SessionUpdate,
+    sessionId: string,
+    eventId: string | null,
+  ) => void;
   onStderr: (text: string, sessionId: string) => void;
   onInfo: (message: string, sessionId: string) => void;
   /** Child process exit (crash) — pool may auto-recover. */
@@ -177,6 +191,10 @@ export async function createSessionRuntime(
     onStateChange: (session) => {
       sessionIdHint = session.id || sessionIdHint;
       opts.onState(session);
+    },
+    onSessionUpdate: (update, sessionId, eventId) => {
+      const id = sessionId || sessionIdHint;
+      opts.onSessionUpdate?.(update, id, eventId);
     },
     onStderr: (text) => {
       process.stderr.write(text);
