@@ -2,9 +2,19 @@
  * Browser client for the local Node bridge (real grok agent stdio).
  * Multi-session: prompt/cancel/permission carry sessionId; pool and env-probe callbacks.
  * CLI channel + set_model/set_mode/restart/compact. Workspace FS helpers live in liveBridgeFs.
+ *
+ * Relay protocol: hot-path streaming arrives as session_update; this client reduces
+ * via applySessionUpdate + eventId set dedupe and surfaces SessionState to handlers.
  */
 
 import type { ContentBlock } from "@grok-desktop/acp-core";
+import {
+  applySessionLifecycle,
+  createSessionReduceBucket,
+  hydrateSessionBucket,
+  reduceSessionUpdate,
+  type SessionReduceBucket,
+} from "../lib/sessionReduce";
 import { createLiveBridgeFs } from "./liveBridgeFs";
 import type {
   BridgeServerMsg,
@@ -108,6 +118,8 @@ export function connectLiveBridge(
 } {
   const ws = new WebSocket(url);
   const pendingCli = new Map<string, PendingCli>();
+  /** Per-session reduce state for the relay path (raw updates → SessionState). */
+  const reduceBuckets = new Map<string, SessionReduceBucket>();
   const readyCallbacks: {
     resolve?: () => void;
     reject?: (error: Error) => void;
@@ -127,6 +139,20 @@ export function connectLiveBridge(
   };
 
   const fsApi = createLiveBridgeFs(send);
+
+  /**
+   * Resolve or create the reduce bucket for a session id.
+   * @param sessionId ACP session id (empty ids share one provisional bucket).
+   */
+  function bucketFor(sessionId: string): SessionReduceBucket {
+    const key = sessionId || "__pending__";
+    let bucket = reduceBuckets.get(key);
+    if (!bucket) {
+      bucket = createSessionReduceBucket();
+      reduceBuckets.set(key, bucket);
+    }
+    return bucket;
+  }
 
   function rejectCliRequests(error: Error): void {
     for (const pending of pendingCli.values()) {
@@ -148,6 +174,7 @@ export function connectLiveBridge(
   ws.onclose = () => {
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
+    reduceBuckets.clear();
     handlers.onClose?.();
   };
   ws.onmessage = (ev) => {
@@ -161,7 +188,54 @@ export function connectLiveBridge(
       return;
     }
     if (msg.type === "state") {
+      // Authoritative hydrate: replace client reduce bucket then notify store.
+      const sid = msg.session.id || "__pending__";
+      const bucket = bucketFor(sid);
+      hydrateSessionBucket(bucket, msg.session, true);
+      // If we had provisional empty-id bucket, re-key under real id.
+      if (msg.session.id && reduceBuckets.has("__pending__")) {
+        reduceBuckets.delete("__pending__");
+        reduceBuckets.set(msg.session.id, bucket);
+      }
       handlers.onState(msg.session);
+    } else if (msg.type === "session_update") {
+      const bucket = bucketFor(msg.sessionId);
+      // Ensure id is stamped before reduce so catalog upserts key correctly.
+      if (msg.sessionId && !bucket.state.id) {
+        bucket.state = { ...bucket.state, id: msg.sessionId };
+      }
+      const before = bucket.state;
+      const next = reduceSessionUpdate(bucket, msg.update, msg.eventId);
+      const applied = next !== before;
+      if (handlers.onSessionUpdate) {
+        handlers.onSessionUpdate(next, {
+          sessionId: msg.sessionId,
+          eventId: msg.eventId,
+          applied,
+        });
+      } else if (applied) {
+        // Default: same paint path as full state when store did not wire relay.
+        handlers.onState(next);
+      }
+    } else if (msg.type === "session_lifecycle") {
+      const bucket = bucketFor(msg.sessionId);
+      if (msg.sessionId && !bucket.state.id) {
+        bucket.state = { ...bucket.state, id: msg.sessionId };
+      }
+      const next = applySessionLifecycle(bucket, {
+        status: msg.status,
+        pendingPermission: msg.pendingPermission,
+        model: msg.model,
+        mode: msg.mode,
+      });
+      if (handlers.onSessionUpdate) {
+        handlers.onSessionUpdate(next, {
+          sessionId: msg.sessionId,
+          applied: true,
+        });
+      } else {
+        handlers.onState(next);
+      }
     } else if (msg.type === "pool") {
       handlers.onPool?.(msg.entries);
     } else if (msg.type === "environment") {
@@ -173,7 +247,10 @@ export function connectLiveBridge(
     } else if (msg.type === "stderr") {
       handlers.onStderr?.(msg.text, msg.sessionId);
     } else if (msg.type === "hello") {
-      handlers.onHello?.(msg.cwd, msg.poolCapacity);
+      handlers.onHello?.(msg.cwd, msg.poolCapacity, {
+        impl: msg.impl,
+        version: msg.version,
+      });
     } else if (msg.type === "restart_required") {
       handlers.onRestartRequired?.(msg);
     } else if (msg.type === "cli_result") {
@@ -266,10 +343,32 @@ export function connectLiveBridge(
   };
 }
 
-/** Default bridge URL (dev). Overridable via VITE_BRIDGE_URL. */
+/**
+ * Default bridge URL (dev / packaged shell).
+ * Priority: window.__GROK_BRIDGE_URL__ (Wails shell inject) → VITE_BRIDGE_URL
+ * → VITE_BRIDGE_TOKEN on default port → bare ws://127.0.0.1:8765 (dev only).
+ */
 export function defaultBridgeUrl(): string {
-  return (
-    (import.meta as { env?: { VITE_BRIDGE_URL?: string } }).env
-      ?.VITE_BRIDGE_URL ?? "ws://127.0.0.1:8765"
-  );
+  // Packaged shell injects the per-start tokenized URL before the app boots.
+  if (typeof window !== "undefined") {
+    const injected = (
+      window as unknown as { __GROK_BRIDGE_URL__?: string }
+    ).__GROK_BRIDGE_URL__;
+    if (typeof injected === "string" && injected.trim()) {
+      return injected.trim();
+    }
+  }
+  const envUrl = (import.meta as { env?: { VITE_BRIDGE_URL?: string } }).env
+    ?.VITE_BRIDGE_URL;
+  if (envUrl) {
+    return envUrl;
+  }
+  // Dev convenience: match bridge default port; token must be in env for auth.
+  const token = (
+    import.meta as { env?: { VITE_BRIDGE_TOKEN?: string } }
+  ).env?.VITE_BRIDGE_TOKEN;
+  if (token) {
+    return `ws://127.0.0.1:8765?token=${encodeURIComponent(token)}`;
+  }
+  return "ws://127.0.0.1:8765";
 }

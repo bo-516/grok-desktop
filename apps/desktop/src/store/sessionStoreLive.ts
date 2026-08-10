@@ -143,6 +143,99 @@ export function healSessionTimeline(session: SessionState): SessionState {
 }
 
 /**
+ * Route one inbound SessionState (hydrate or post-reduce relay) into catalog + canvas.
+ * Shared by full `state` and client-reduced `session_update` so both paths stay identical.
+ * @param set Zustand set.
+ * @param get Zustand get.
+ * @param session SessionState after heal-ready reduce / hydrate.
+ */
+export function applyInboundSession(
+  set: SetState,
+  get: GetState,
+  session: SessionState,
+): void {
+  /** Snapshot with legacy duplicate seed rows normalized before routing. */
+  const healedTimeline = healSessionTimeline(session);
+  // User chose "work without a project": bridge still has a default
+  // cwd for the agent process, but do not let that overwrite the UI
+  // selection or catalog grouping a few seconds later.
+  const healed = loadWorkspacePrefs().noProject
+    ? { ...healedTimeline, workspace: "" }
+    : healedTimeline;
+  /** Shared history receives every session, including background streams. */
+  const catalog = normalizeCatalog(
+    upsertFromLiveState(get().catalog, healed),
+  );
+  persistCatalog(catalog);
+  /** Explicit rail selection; background pool snapshots must not replace it. */
+  const viewing = get().viewingSessionId;
+  /** Last canvas-owned live id, used only before an explicit selection exists. */
+  const active = get().activeSessionId;
+  /** Whether this inbound snapshot may update canvas-scoped state. */
+  const follow = resolveCanvasFollow({
+    viewing,
+    active,
+    localDraft: Boolean(get().localDraft),
+    creatingSession: Boolean(get().creatingSession),
+    inbound: healed,
+  });
+  // Mode requests belong to the painted chat; a background session
+  // using the same mode must not acknowledge the foreground request.
+  const pending = get().pendingMode ?? null;
+  const modeConfirmed =
+    follow && pending !== null && healed.mode === pending;
+  if (modeConfirmed) {
+    clearPendingModeTimer();
+  }
+  // Only a canvas-owned snapshot may promote activeSessionId. Keeping
+  // background ids out prevents alternating streams from taking turns
+  // satisfying the active fallback and repainting the selected chat.
+  const nextActive = follow && healed.id ? healed.id : active;
+  // forceNew empty paint must not wipe the optimistic user bubble
+  // already shown on the draft canvas while create+prompt still runs.
+  const canvasSession = follow
+    ? mergeOptimisticLocalUsers(healed, get().session)
+    : healed;
+  // Replay landed: the first snapshot for this id that carries content
+  // is the single post-load flush. A session that really is empty keeps
+  // the hint until the user's first prompt fills the canvas — harmless,
+  // and it never hides content that exists.
+  const restoreDone =
+    get().restoringSessionId === healed.id &&
+    healed.timeline.length > 0;
+  set({
+    catalog,
+    activeSessionId: nextActive,
+    connectionMode: "live-bridge",
+    lastError: null,
+    ...(restoreDone ? { restoringSessionId: null } : {}),
+    ...(modeConfirmed ? { pendingMode: null } : {}),
+    ...(follow
+      ? {
+          session: canvasSession,
+          viewingSessionId: healed.id || viewing,
+          // Handshake painted the forceNew session — leave draft mode.
+          ...(get().creatingSession && healed.id
+            ? { creatingSession: false, localDraft: false }
+            : {}),
+        }
+      : {}),
+  });
+  // Drain prompt queue when turn settles (F-STREAM-09).
+  if (healed.status === "idle" && follow) {
+    const queue = get().promptQueue;
+    if (queue.length > 0) {
+      const [next, ...rest] = queue;
+      set({ promptQueue: rest });
+      const sid = healed.id || get().activeSessionId;
+      if (next && sid && get().live) {
+        get().live?.prompt(next, sid);
+      }
+    }
+  }
+}
+
+/**
  * Connect to the real bridge and start/resume a session (pool acquire).
  */
 export async function startLiveBridgeSession(
@@ -186,86 +279,19 @@ export async function startLiveBridgeSession(
     const url = opts?.url ?? defaultBridgeUrl();
     try {
       live = connectLiveBridge(url, {
+        /**
+         * Shared paint path for full hydrate `state` and post-reduce relay
+         * `session_update` / `session_lifecycle` messages.
+         * @param session SessionState already reduced / hydrated.
+         */
         onState: (session) => {
-          /** Snapshot with legacy duplicate seed rows normalized before routing. */
-          const healedTimeline = healSessionTimeline(session);
-          // User chose "work without a project": bridge still has a default
-          // cwd for the agent process, but do not let that overwrite the UI
-          // selection or catalog grouping a few seconds later.
-          const healed = loadWorkspacePrefs().noProject
-            ? { ...healedTimeline, workspace: "" }
-            : healedTimeline;
-          /** Shared history receives every session, including background streams. */
-          const catalog = normalizeCatalog(
-            upsertFromLiveState(get().catalog, healed),
-          );
-          persistCatalog(catalog);
-          /** Explicit rail selection; background pool snapshots must not replace it. */
-          const viewing = get().viewingSessionId;
-          /** Last canvas-owned live id, used only before an explicit selection exists. */
-          const active = get().activeSessionId;
-          /** Whether this inbound snapshot may update canvas-scoped state. */
-          const follow = resolveCanvasFollow({
-            viewing,
-            active,
-            localDraft: Boolean(get().localDraft),
-            creatingSession: Boolean(get().creatingSession),
-            inbound: healed,
-          });
-          // Mode requests belong to the painted chat; a background session
-          // using the same mode must not acknowledge the foreground request.
-          const pending = get().pendingMode ?? null;
-          const modeConfirmed =
-            follow && pending !== null && healed.mode === pending;
-          if (modeConfirmed) {
-            clearPendingModeTimer();
+          applyInboundSession(set, get, session);
+        },
+        onSessionUpdate: (session, meta) => {
+          if (!meta.applied) {
+            return;
           }
-          // Only a canvas-owned snapshot may promote activeSessionId. Keeping
-          // background ids out prevents alternating streams from taking turns
-          // satisfying the active fallback and repainting the selected chat.
-          const nextActive = follow && healed.id ? healed.id : active;
-          // forceNew empty paint must not wipe the optimistic user bubble
-          // already shown on the draft canvas while create+prompt still runs.
-          const canvasSession = follow
-            ? mergeOptimisticLocalUsers(healed, get().session)
-            : healed;
-          // Replay landed: the first snapshot for this id that carries content
-          // is the single post-load flush. A session that really is empty keeps
-          // the hint until the user's first prompt fills the canvas — harmless,
-          // and it never hides content that exists.
-          const restoreDone =
-            get().restoringSessionId === healed.id &&
-            healed.timeline.length > 0;
-          set({
-            catalog,
-            activeSessionId: nextActive,
-            connectionMode: "live-bridge",
-            lastError: null,
-            ...(restoreDone ? { restoringSessionId: null } : {}),
-            ...(modeConfirmed ? { pendingMode: null } : {}),
-            ...(follow
-              ? {
-                  session: canvasSession,
-                  viewingSessionId: healed.id || viewing,
-                  // Handshake painted the forceNew session — leave draft mode.
-                  ...(get().creatingSession && healed.id
-                    ? { creatingSession: false, localDraft: false }
-                    : {}),
-                }
-              : {}),
-          });
-          // Drain prompt queue when turn settles (F-STREAM-09).
-          if (healed.status === "idle" && follow) {
-            const queue = get().promptQueue;
-            if (queue.length > 0) {
-              const [next, ...rest] = queue;
-              set({ promptQueue: rest });
-              const sid = healed.id || get().activeSessionId;
-              if (next && sid && get().live) {
-                get().live?.prompt(next, sid);
-              }
-            }
-          }
+          applyInboundSession(set, get, session);
         },
         onPool: (entries) => {
           set({ poolEntries: entries });
@@ -291,10 +317,16 @@ export async function startLiveBridgeSession(
             bridgeInfo: payload.reason,
           });
         },
-        onHello: (cwdHello, poolCapacity) => {
+        onHello: (cwdHello, poolCapacity, meta) => {
           const cap =
             poolCapacity !== undefined ? ` · pool≤${poolCapacity}` : "";
-          set({ bridgeInfo: `live grok-build · cwd=${cwdHello}${cap}` });
+          const impl =
+            meta?.impl !== undefined
+              ? ` · bridge=${meta.impl}${meta.version ? `@${meta.version}` : ""}`
+              : "";
+          set({
+            bridgeInfo: `live grok-build · cwd=${cwdHello}${cap}${impl}`,
+          });
         },
         onClose: () => {
           stopPoolPoll();

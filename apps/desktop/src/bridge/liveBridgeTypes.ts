@@ -3,7 +3,14 @@
  * Split from liveBridge.ts so the connect module stays under the line limit.
  */
 
-import type { ContentBlock, SessionState } from "@grok-desktop/acp-core";
+import type {
+  AgentMode,
+  ContentBlock,
+  PermissionRequest,
+  SessionState,
+  SessionStatus,
+  SessionUpdate,
+} from "@grok-desktop/acp-core";
 
 /** Workspace-relative paths scanned by the real bridge for `@` completion. */
 export type WorkspaceEntry = {
@@ -85,8 +92,29 @@ export type SessionSpawnConfig = {
 };
 
 export type BridgeServerMsg =
-  | { type: "hello"; cwd: string; port: number; poolCapacity?: number }
+  | {
+      type: "hello";
+      cwd: string;
+      port: number;
+      poolCapacity?: number;
+      impl?: "node" | "go";
+      version?: string;
+    }
   | { type: "state"; session: SessionState }
+  | {
+      type: "session_update";
+      sessionId: string;
+      update: SessionUpdate;
+      eventId?: string;
+    }
+  | {
+      type: "session_lifecycle";
+      sessionId: string;
+      status: SessionStatus;
+      pendingPermission?: PermissionRequest | null;
+      model?: string;
+      mode?: AgentMode;
+    }
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
   | { type: "stderr"; text: string; sessionId?: string }
@@ -130,13 +158,26 @@ export type BridgeServerMsg =
   | { type: "pong" };
 
 export type LiveBridgeHandlers = {
+  /** Full hydrate snapshot (start / reconnect / get_state). */
   onState: (session: SessionState) => void;
+  /**
+   * Raw ACP update after client-side reduce (relay path).
+   * session is the post-reduce SessionState for that sessionId.
+   */
+  onSessionUpdate?: (
+    session: SessionState,
+    meta: { sessionId: string; eventId?: string; applied: boolean },
+  ) => void;
   onPool?: (entries: PoolEntry[]) => void;
   onEnvironment?: (env: EnvironmentInfo) => void;
   onInfo?: (message: string, sessionId?: string) => void;
   onError?: (message: string, sessionId?: string) => void;
   onStderr?: (text: string, sessionId?: string) => void;
-  onHello?: (cwd: string, poolCapacity?: number) => void;
+  onHello?: (
+    cwd: string,
+    poolCapacity?: number,
+    meta?: { impl?: "node" | "go"; version?: string },
+  ) => void;
   onClose?: () => void;
   onRestartRequired?: (payload: {
     sessionId: string;
