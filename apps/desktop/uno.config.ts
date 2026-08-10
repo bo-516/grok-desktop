@@ -43,6 +43,8 @@ const colors = {
   "danger-muted": "var(--color-danger-muted)",
   warning: "var(--color-warning)",
   "warning-muted": "var(--color-warning-muted)",
+  success: "var(--color-success)",
+  "success-muted": "var(--color-success-muted)",
   fg: "var(--color-text-primary)",
   "fg-secondary": "var(--color-text-secondary)",
   "fg-muted": "var(--color-text-muted)",
@@ -55,6 +57,7 @@ const colors = {
   "line-muted": "var(--color-border-muted)",
   "line-strong": "var(--color-border-strong)",
   "line-focus": "var(--color-border-focus)",
+  "rail-line": "var(--color-rail-line)",
   "line-suggestion": "var(--color-border-composer-suggestion)",
   /* Composer field chrome (wrap sole owner — color only per state) */
   field: "var(--color-border-field)",
@@ -82,7 +85,35 @@ export default defineConfig({
    * Without them, edits to shortcuts only apply after a full Vite restart —
    * the common "UI changed but HMR did nothing" failure after the UnoCSS migration.
    */
-  configDeps: ["uno.shortcuts.ts"],
+  configDeps: [
+    "uno.shortcuts.ts",
+    "uno.shortcuts.sidenav.ts",
+    "uno.shortcuts.shell.ts",
+    "uno.shortcuts.timeline.ts",
+    "uno.shortcuts.composer.ts",
+    "uno.shortcuts.chrome.ts",
+    "uno.shortcuts.preview.ts",
+  ],
+  /**
+   * Colon only. UnoCSS also accepts `-` as a variant separator by default, so
+   * every `md-*` shortcut (Markdown chrome) parsed as the `md:` breakpoint
+   * variant — `md-table` became `@media(min-width:768px){display:table}` and the
+   * shortcut never emitted. All variants in this app are written `variant:`.
+   */
+  separators: [":"],
+  /*
+   * UnoCSS only scans .tsx/.html by default, so class literals that live in
+   * plain .ts data modules never emitted — the palette picker's swatch classes
+   * come from src/lib/colorPalette.ts, which is why every colour dot rendered
+   * as a 0x0 transparent span. Scoped to src/ on purpose: scanning the
+   * root-level uno.shortcuts.*.ts would emit every utility inside a shortcut
+   * body as a standalone class.
+   */
+  content: {
+    pipeline: {
+      include: [/\.([jt]sx|html)($|\?)/, /[\\/]src[\\/].*\.ts($|\?)/],
+    },
+  },
   presets: [
     presetUno({
       // defineColor/base own document chrome; avoid double preflight fights
@@ -118,7 +149,7 @@ export default defineConfig({
     },
     width: {
       sidebar: "var(--sidebar-width)",
-      "rail-right": "280px",
+      "rail-right": "var(--rail-right-width)",
       "side-panel": "400px",
       palette: "520px",
     },
@@ -199,6 +230,12 @@ export default defineConfig({
     ["left-sidebar", { left: "var(--sidebar-width)" }],
     ["ml-sidebar", { "margin-left": "var(--sidebar-width)" }],
     ["pt-topnav", { "padding-top": "var(--topnav-height)" }],
+    ["right-rail", { right: "var(--rail-right-width)" }],
+    ["pr-rail", { "padding-right": "var(--rail-right-width)" }],
+    ["translate-x-rail", { transform: "translateX(var(--rail-right-width))" }],
+    /* Own-width off-screen slide (preview/plan closed state; not rail token). */
+    ["translate-x-full", { transform: "translateX(100%)" }],
+    ["translate-x-none", { transform: "translateX(0)" }],
     [
       "px-container",
       {
@@ -213,7 +250,15 @@ export default defineConfig({
         "margin-right": "var(--container-padding)",
       },
     ],
+    /*
+     * Standalone transforms. presetUno's transform utilities compose through
+     * --un-translate / --un-skew / --un-scale custom properties that only its
+     * preflight defines, and preflight is off here — the generated
+     * `transform: translate(var(--un-translate-x)) …` is invalid and drops the
+     * whole declaration. Anything that must actually move gets a plain rule.
+     */
     ["scale-96", { transform: "scale(0.96)" }],
+    ["rotate-90", { transform: "rotate(90deg)" }],
     ["rounded-inherit", { "border-radius": "inherit" }],
     ["tabular-nums", { "font-variant-numeric": "tabular-nums" }],
     ["tracking-tight", { "letter-spacing": "var(--letter-spacing-tight)" }],

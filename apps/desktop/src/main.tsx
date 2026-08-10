@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "virtual:uno.css";
 import "./styles/defineColor.css";
 import "./styles/base.css";
+import "./styles/base.react-bits.css";
 import { App } from "./App";
 import { applyTheme, loadTheme } from "./lib/theme";
 import { applyPalette, loadPalette } from "./lib/colorPalette";

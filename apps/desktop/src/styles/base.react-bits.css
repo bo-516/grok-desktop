@@ -1,0 +1,231 @@
+/**
+ * React Bits adaptations (token-only colors).
+ * Pseudo-elements / keyframes are not expressible as pure Uno utilities.
+ */
+
+/* ── React Bits adaptations (token-only colors) ── */
+
+/*
+ * Fade is progressive enhancement only: default is fully readable so a missed
+ * IntersectionObserver / frozen document timeline never hides content.
+ * .rb-fade-pending marks the pre-reveal state when JS intentionally animates.
+ */
+.rb-fade {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  transition-property: opacity, transform, filter;
+  transition-timing-function: var(--ease-out);
+}
+.rb-fade.rb-fade-pending {
+  opacity: 0;
+  transform: translateY(8px);
+  will-change: opacity, transform;
+}
+.rb-fade-blur.rb-fade-pending {
+  filter: blur(8px);
+}
+.rb-fade-visible {
+  opacity: 1;
+  transform: translateY(0);
+  filter: none;
+}
+
+/* Base of the gradient is muted text so the full string stays readable;
+ * only the mid-stop brightens as it sweeps (transparent stops hide glyphs). */
+.rb-shiny-text {
+  display: inline-block;
+  color: var(--color-text-muted);
+  background-image: linear-gradient(
+    120deg,
+    var(--color-text-muted) 35%,
+    var(--color-text-primary) 50%,
+    var(--color-text-muted) 65%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: rb-shine 4.5s linear infinite;
+}
+.rb-shiny-text-slow {
+  animation-duration: 7s;
+}
+.rb-shiny-text-fast {
+  animation-duration: 2.4s;
+}
+.rb-shiny-text-disabled {
+  animation: none;
+  -webkit-text-fill-color: var(--color-text-muted);
+  color: var(--color-text-muted);
+  background: none;
+}
+@keyframes rb-shine {
+  0% {
+    background-position: 100%;
+  }
+  100% {
+    background-position: -100%;
+  }
+}
+
+.rb-blur-text {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  gap: 0;
+}
+.rb-blur-text-unit {
+  display: inline-block;
+  will-change: transform, filter, opacity;
+}
+
+.rb-star-border {
+  position: relative;
+  display: inline-flex;
+  border: none;
+  padding: 1px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: transparent;
+  cursor: pointer;
+  --rb-star-speed: 5s;
+}
+.rb-star-border-glow {
+  position: absolute;
+  width: 300%;
+  height: 50%;
+  border-radius: 50%;
+  opacity: 0.75;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-text-primary) 70%, transparent),
+    transparent 12%
+  );
+  animation-duration: var(--rb-star-speed);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+.rb-star-border-glow-bottom {
+  bottom: -12px;
+  right: -250%;
+  animation-name: rb-star-move-bottom;
+}
+.rb-star-border-glow-top {
+  top: -12px;
+  left: -250%;
+  animation-name: rb-star-move-top;
+}
+.rb-star-border-inner {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+.rb-star-border-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.rb-star-border-disabled .rb-star-border-glow {
+  animation: none;
+  opacity: 0.25;
+}
+@keyframes rb-star-move-bottom {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-100%, 0);
+    opacity: 0.35;
+  }
+}
+@keyframes rb-star-move-top {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(100%, 0);
+    opacity: 0.35;
+  }
+}
+
+.rb-glare-hover {
+  position: relative;
+  overflow: hidden;
+}
+.rb-glare-hover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(
+    -45deg,
+    transparent 55%,
+    color-mix(in srgb, var(--color-text-primary) 14%, transparent) 70%,
+    transparent 85%
+  );
+  background-size: 250% 250%;
+  background-repeat: no-repeat;
+  background-position: -100% -100%;
+  transition: background-position 0.65s var(--ease-soft);
+}
+.rb-glare-hover:hover::before {
+  background-position: 100% 100%;
+}
+.rb-glare-hover-once:hover::before {
+  transition: background-position 0.65s var(--ease-soft);
+}
+
+.rb-spotlight-card {
+  position: relative;
+  overflow: hidden;
+  --rb-mouse-x: 50%;
+  --rb-mouse-y: 50%;
+}
+.rb-spotlight-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.45s var(--ease-soft);
+  background: radial-gradient(
+    circle 180px at var(--rb-mouse-x) var(--rb-mouse-y),
+    color-mix(in srgb, var(--color-text-primary) 12%, transparent),
+    transparent 72%
+  );
+}
+.rb-spotlight-card:hover::before,
+.rb-spotlight-card:focus-within::before {
+  opacity: 1;
+}
+.rb-spotlight-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.rb-click-spark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rb-click-spark-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}

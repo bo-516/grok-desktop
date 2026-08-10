@@ -1,6 +1,8 @@
 /**
  * Global document chrome only.
  * Component layout/visuals live in UnoCSS (uno.config.ts shortcuts + utilities).
+ * Dynamic mention kind classes and React Bits pseudo/keyframes stay here —
+ * Uno only emits classes visible as source literals.
  */
 
 html,
@@ -25,6 +27,18 @@ body,
 *::before,
 *::after {
   box-sizing: border-box;
+  /*
+   * UnoCSS `border*` utilities only emit border-width/-color; border-style comes
+   * from the Tailwind-style reset we deliberately skip (presetUno preflight is
+   * off). Without this reset every `border`/`border-t`/`border-l-2` in the
+   * shortcuts computed to `border-style: none` and painted nothing — Markdown
+   * tables, blockquote bars and `<hr>` all rendered bare. Width must be zeroed
+   * alongside it: the initial `border-width` is `medium`, so `border-style:
+   * solid` on its own would put a 3px frame on every element.
+   */
+  border-width: 0;
+  border-style: solid;
+  border-color: var(--color-border-default);
 }
 
 button,
@@ -56,31 +70,6 @@ button {
   outline-offset: 2px;
 }
 
-/*
- * Narrow shell (review #4): off-canvas session rail so top-nav gets the full
- * ≥320px width. Uno max-sm utilities are mirrored here for reliability when
- * variant generation misses arbitrary translate.
- */
-@media (max-width: 639px) {
-  .main-column {
-    margin-left: 0;
-  }
-  .top-nav {
-    left: 0;
-  }
-  .side-nav {
-    transform: translateX(-100%);
-    z-index: 100;
-    box-shadow: var(--shadow-modal);
-  }
-  .side-nav[data-open="true"] {
-    transform: translateX(0);
-  }
-  .top-nav-rail-btn {
-    display: flex;
-  }
-}
-
 /* Reduced motion: skip entrance displacement; content stays readable */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -102,13 +91,11 @@ button {
 /*
  * Native form chrome defaults to OS light fields — force token surfaces so
  * Settings/Extensions drawers never render as white-out on dark theme.
+ * Layout of .text-input is Uno; only color-scheme + option paint stay here.
  */
 select.text-input,
 textarea.text-input,
 input.text-input {
-  background-color: var(--color-surface-high);
-  color: var(--color-text-primary);
-  border-color: var(--color-border-muted);
   color-scheme: dark;
 }
 
@@ -128,26 +115,22 @@ code {
   font-size: 0.92em;
 }
 
-.banner code {
-  font-size: 0.95em;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--color-bg-white-soft);
+/*
+ * Streaming caret for StreamingMarkdownView. Rendered as ::after on the last
+ * block Streamdown produced so it trails the final glyph; a real element would
+ * be a sibling of the wrapper div and always start a new line.
+ */
+.md-root[data-streaming="true"] .md-streamdown > *:last-child::after {
+  content: "▌";
+  margin-left: 1px;
+  color: var(--color-text-muted);
+  animation: md-caret-blink 1.05s step-end infinite;
 }
 
-.modal h2 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--color-text-primary);
-}
-
-.modal p {
-  margin: 0 0 16px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
+@keyframes md-caret-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 /* Search cancel control is browser-specific */
@@ -185,30 +168,60 @@ code {
   background: var(--color-scrollbar-thumb-hover);
 }
 
-/* Transparent textarea text + visible caret for @mention highlight layer. */
-.composer-input {
-  caret-color: var(--color-text-primary);
-  color: transparent;
-}
-.composer-input::placeholder {
-  color: var(--color-text-muted);
-}
-
-/* ── Mention chips (@file / /command) ──────────────────────────────────────
+/* ── Mentions (@file / /command) ───────────────────────────────────────────
  *
- * Two renderings of one token model (src/lib/mentionTokens.ts):
- *   1. .mention-chip      — rendered surfaces (timeline history). Real icon,
- *                           real padding, real border.
- *   2. .composer-mention  — the composer mirror layer under the transparent
- *                           textarea. Accent text only (no fill/ring) so caret
- *                           metrics stay identical to plain draft text.
+ * One token model (src/lib/mentionTokens.ts), two surfaces that must look the
+ * same:
+ *   1. .composer-mention — accent text only (composer mirror + timeline
+ *                          history). No icon, fill, or ring so the mirror
+ *                          layer keeps plain-text caret metrics and sent
+ *                          messages match what the user typed.
+ *   2. .mention-chip     — optional pill chrome (icon + label) for menus or
+ *                          other non-caret surfaces that deliberately want a
+ *                          heavier chip; not used for draft or history text.
  *
- * Both live here rather than in uno.shortcuts because the kind class comes from
- * mentionKindClass() at runtime; UnoCSS only emits classes it can see as source
- * literals, so dynamic names must not depend on the scanner.
+ * Styles live here rather than in uno.shortcuts because the kind class comes
+ * from mentionKindClass() at runtime; UnoCSS only emits classes it can see as
+ * source literals, so dynamic names must not depend on the scanner.
  */
 
-/* Rendered chip — history + anywhere a token is displayed, not typed. */
+/*
+ * Shared accent token (composer mirror + timeline history).
+ *
+ * Critical for the mirror layer: do not change glyph metrics (no padding /
+ * margin / font-weight / letter-spacing / font-family). The transparent
+ * textarea positions the caret from plain-text metrics; any width delta after
+ * a token makes the caret look inset into following characters.
+ *
+ * Only committed tokens get this class in the composer. Their trigger is a
+ * zero-width mark in the draft (see mentionTokens MENTION_*_MARK), so hiding
+ * it does not desync the caret. Typed `@`/`/` stay plain draft text — see
+ * ComposerInputView for why an unresolved path must not look attached.
+ * Timeline history paints every mention-like token with the same accent so
+ * sent text reads like the draft.
+ */
+.composer-mention {
+  color: var(--color-composer-mention);
+  background-color: transparent;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Trigger glyph: zero-width marks, kept in the DOM only to match draft chars. */
+.composer-mention-trigger {
+  color: transparent;
+}
+
+/* Kind classes keep the same accent; never reintroduce chip fill/ring here. */
+.composer-mention.mention-file,
+.composer-mention.mention-dir,
+.composer-mention.mention-command {
+  color: var(--color-composer-mention);
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* Optional pill chip — non-caret surfaces only (not draft / history text). */
 .mention-chip {
   display: inline-flex;
   align-items: center;
@@ -254,386 +267,4 @@ code {
 }
 .mention-chip.mention-command .mention-chip-icon {
   color: var(--color-mention-command-icon);
-}
-
-/*
- * Mirror-layer token: accent body text only, no icon and no pill chrome.
- *
- * Critical: do not change glyph metrics (no padding / margin / font-weight /
- * letter-spacing / font-family). The transparent textarea positions the caret
- * from plain-text metrics; any width delta after a token makes the caret look
- * inset into following characters.
- *
- * Only committed tokens get this class. Their trigger is a zero-width mark in
- * the draft string itself (see mentionTokens MENTION_*_MARK), so hiding it does
- * not desync the caret. Typed `@`/`/` stay plain draft text — see
- * ComposerInputView for why an unresolved path must not look attached.
- */
-.composer-input-highlight .composer-mention {
-  color: var(--color-composer-mention);
-  background-color: transparent;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
-
-/* Trigger glyph: zero-width marks, kept in the DOM only to match draft chars. */
-.composer-input-highlight .composer-mention-trigger {
-  color: transparent;
-}
-
-/* Kind classes keep the same accent; no fill/ring (unlike timeline chips). */
-.composer-input-highlight .mention-file,
-.composer-input-highlight .mention-dir,
-.composer-input-highlight .mention-command {
-  color: var(--color-composer-mention);
-  background-color: transparent;
-  box-shadow: none;
-}
-
-/* ── React Bits adaptations (token-only colors) ── */
-
-/*
- * Fade is progressive enhancement only: default is fully readable so a missed
- * IntersectionObserver / frozen document timeline never hides content.
- * .rb-fade-pending marks the pre-reveal state when JS intentionally animates.
- */
-.rb-fade {
-  opacity: 1;
-  transform: none;
-  filter: none;
-  transition-property: opacity, transform, filter;
-  transition-timing-function: var(--ease-out);
-}
-.rb-fade.rb-fade-pending {
-  opacity: 0;
-  transform: translateY(8px);
-  will-change: opacity, transform;
-}
-.rb-fade-blur.rb-fade-pending {
-  filter: blur(8px);
-}
-.rb-fade-visible {
-  opacity: 1;
-  transform: translateY(0);
-  filter: none;
-}
-
-/* Base of the gradient is muted text so the full string stays readable;
- * only the mid-stop brightens as it sweeps (transparent stops hide glyphs). */
-.rb-shiny-text {
-  display: inline-block;
-  color: var(--color-text-muted);
-  background-image: linear-gradient(
-    120deg,
-    var(--color-text-muted) 35%,
-    var(--color-text-primary) 50%,
-    var(--color-text-muted) 65%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: rb-shine 4.5s linear infinite;
-}
-.rb-shiny-text-slow {
-  animation-duration: 7s;
-}
-.rb-shiny-text-fast {
-  animation-duration: 2.4s;
-}
-.rb-shiny-text-disabled {
-  animation: none;
-  -webkit-text-fill-color: var(--color-text-muted);
-  color: var(--color-text-muted);
-  background: none;
-}
-@keyframes rb-shine {
-  0% {
-    background-position: 100%;
-  }
-  100% {
-    background-position: -100%;
-  }
-}
-
-.rb-blur-text {
-  display: flex;
-  flex-wrap: wrap;
-  margin: 0;
-  gap: 0;
-}
-.rb-blur-text-unit {
-  display: inline-block;
-  will-change: transform, filter, opacity;
-}
-
-.rb-star-border {
-  position: relative;
-  display: inline-flex;
-  border: none;
-  padding: 1px;
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-  background: transparent;
-  cursor: pointer;
-  --rb-star-speed: 5s;
-}
-.rb-star-border-glow {
-  position: absolute;
-  width: 300%;
-  height: 50%;
-  border-radius: 50%;
-  opacity: 0.75;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--color-text-primary) 70%, transparent),
-    transparent 12%
-  );
-  animation-duration: var(--rb-star-speed);
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  animation-direction: alternate;
-}
-.rb-star-border-glow-bottom {
-  bottom: -12px;
-  right: -250%;
-  animation-name: rb-star-move-bottom;
-}
-.rb-star-border-glow-top {
-  top: -12px;
-  left: -250%;
-  animation-name: rb-star-move-top;
-}
-.rb-star-border-inner {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-}
-.rb-star-border-disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-.rb-star-border-disabled .rb-star-border-glow {
-  animation: none;
-  opacity: 0.25;
-}
-@keyframes rb-star-move-bottom {
-  0% {
-    transform: translate(0, 0);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-100%, 0);
-    opacity: 0.35;
-  }
-}
-@keyframes rb-star-move-top {
-  0% {
-    transform: translate(0, 0);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(100%, 0);
-    opacity: 0.35;
-  }
-}
-
-.rb-glare-hover {
-  position: relative;
-  overflow: hidden;
-}
-.rb-glare-hover::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  background: linear-gradient(
-    -45deg,
-    transparent 55%,
-    color-mix(in srgb, var(--color-text-primary) 14%, transparent) 70%,
-    transparent 85%
-  );
-  background-size: 250% 250%;
-  background-repeat: no-repeat;
-  background-position: -100% -100%;
-  transition: background-position 0.65s var(--ease-soft);
-}
-.rb-glare-hover:hover::before {
-  background-position: 100% 100%;
-}
-.rb-glare-hover-once:hover::before {
-  transition: background-position 0.65s var(--ease-soft);
-}
-
-.rb-spotlight-card {
-  position: relative;
-  overflow: hidden;
-  --rb-mouse-x: 50%;
-  --rb-mouse-y: 50%;
-}
-.rb-spotlight-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0;
-  transition: opacity 0.45s var(--ease-soft);
-  background: radial-gradient(
-    circle 180px at var(--rb-mouse-x) var(--rb-mouse-y),
-    color-mix(in srgb, var(--color-text-primary) 12%, transparent),
-    transparent 72%
-  );
-}
-.rb-spotlight-card:hover::before,
-.rb-spotlight-card:focus-within::before {
-  opacity: 1;
-}
-.rb-spotlight-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.rb-click-spark {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.rb-click-spark-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* Composer send nested in StarBorder + ClickSpark */
-.composer-send-star {
-  border-radius: var(--radius-pill);
-  flex-shrink: 0;
-}
-.composer-send-star .rb-star-border-inner {
-  border-radius: inherit;
-  line-height: 0;
-}
-.composer-send-star .composer-send {
-  pointer-events: none;
-}
-
-/* Settings primary apply — full-width StarBorder shell */
-.settings-apply-star {
-  display: block;
-  width: 100%;
-  border-radius: var(--radius-control);
-}
-.settings-apply-star .rb-star-border-inner {
-  border-radius: inherit;
-  width: 100%;
-}
-.settings-apply-inner {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-/* Settings — UI color palette swatches (fills from defineColor tokens) */
-.palette-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.palette-picker-item {
-  margin: 0;
-  padding: 0;
-}
-.palette-swatch-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: transparent;
-  padding: 2px;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: 10px;
-  line-height: 1.2;
-}
-.palette-swatch-btn:hover {
-  color: var(--color-text-secondary);
-}
-.palette-swatch-btn-active {
-  color: var(--color-text-primary);
-}
-.palette-swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-pill);
-  border: 2px solid var(--color-border-subtle);
-  box-shadow: inset 0 0 0 1px var(--color-border-muted);
-  transition:
-    transform var(--duration-fast) var(--ease-soft),
-    box-shadow var(--duration-fast) var(--ease-soft),
-    border-color var(--duration-fast) var(--ease-soft);
-}
-.palette-swatch-btn:hover .palette-swatch {
-  transform: scale(1.06);
-  border-color: var(--color-border-muted);
-}
-.palette-swatch-btn-active .palette-swatch {
-  border-color: var(--color-text-primary);
-  box-shadow:
-    0 0 0 2px var(--color-bg-elevated),
-    0 0 0 4px var(--color-accent-muted);
-}
-.palette-swatch-black {
-  background: var(--palette-swatch-black);
-}
-.palette-swatch-white {
-  background: var(--palette-swatch-white);
-}
-.palette-swatch-blue {
-  background: var(--palette-swatch-blue);
-}
-.palette-swatch-purple {
-  background: var(--palette-swatch-purple);
-}
-.palette-swatch-pink {
-  background: var(--palette-swatch-pink);
-}
-.palette-swatch-red {
-  background: var(--palette-swatch-red);
-}
-.palette-swatch-orange {
-  background: var(--palette-swatch-orange);
-}
-.palette-swatch-yellow {
-  background: var(--palette-swatch-yellow);
-}
-.palette-swatch-green {
-  background: var(--palette-swatch-green);
-}
-.palette-swatch-gray {
-  background: var(--palette-swatch-gray);
-}
-.palette-swatch-label {
-  max-width: 40px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

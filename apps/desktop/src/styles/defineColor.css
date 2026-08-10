@@ -148,13 +148,18 @@
   --color-border-subtle: color-mix(in oklch, var(--seed-ink) 6%, transparent);
   --color-border-muted: color-mix(in oklch, var(--seed-ink) 10%, transparent);
   --color-border-focus: color-mix(in oklch, var(--seed-brand) 48%, transparent);
+  /* Turn activity rail guide line (alias of subtle border). */
+  --color-rail-line: var(--color-border-subtle);
 
   /*
    * Composer input field chrome (sole owner: .composer-input-wrap).
    * All states share 1px border + same box metrics; only color differs.
+   * Idle + focus stay transparent so the field does not draw a nested line
+   * box inside the card — focus chrome lives on the outer `.composer` card.
+   * Listening / dragover still tint the field for clear mode feedback.
    */
   --color-border-field: transparent;
-  --color-border-field-focus: var(--color-border-focus);
+  --color-border-field-focus: transparent;
   --color-border-field-listening: color-mix(
     in oklch,
     var(--seed-brand) 62%,
@@ -240,6 +245,24 @@
   );
   --color-diff-del: color-mix(in oklch, var(--seed-danger) 70%, var(--seed-ink));
   --color-diff-del-bg: color-mix(in oklch, var(--seed-danger) 12%, transparent);
+  /* Dual-gutter / collapsed-gap chrome for preview drawer */
+  --color-diff-gutter: color-mix(in oklch, var(--seed-ink) 42%, transparent);
+  --color-diff-collapsed-bg: color-mix(
+    in oklch,
+    var(--seed-ink) 6%,
+    transparent
+  );
+  /* Word-level emph reserved for S2 */
+  --color-diff-add-emph: color-mix(
+    in oklch,
+    var(--seed-success) 28%,
+    transparent
+  );
+  --color-diff-del-emph: color-mix(
+    in oklch,
+    var(--seed-danger) 26%,
+    transparent
+  );
 
   /* Modes follow brand ink */
   --color-mode-ask: color-mix(in oklch, var(--seed-ink) 72%, transparent);
@@ -247,14 +270,14 @@
   --color-mode-build: color-mix(in oklch, var(--seed-ink) 72%, transparent);
 
   /*
-   * Mentions / command chips — app-native, no borrowed brand blue.
-   * Text sits near primary ink for readability; fill is a soft elevated surface
-   * so tokens read as chips without competing with the send controls.
-   * -border draws a hairline ring around the fill (chip edge); -icon dims the
-   * kind glyph one step below the label so the path stays the loudest part.
+   * Mentions / command tokens — app-native, no borrowed brand blue.
    *
-   * Composer draft mirror is different: plain accent text (no fill/ring) so the
-   * caret stays on plain-text metrics. Timeline chips keep the pill chrome.
+   * Draft mirror + timeline history share --color-composer-mention: plain
+   * accent text (no fill/ring) so caret metrics stay plain-text and sent
+   * messages match what the user typed.
+   *
+   * Optional pill chip tokens (file/command -bg/-border/-icon) remain for
+   * non-caret surfaces that want heavier chrome; not used for draft/history.
    */
   --color-composer-mention: #1479c9;
   --color-mention-file: color-mix(
@@ -349,6 +372,12 @@
   /* Layout density (non-color) */
   --sidebar-width: 272px;
   --topnav-height: 48px;
+  --rail-right-width: 280px;
+  /* Preview drawer width tokens (width-by-rail-id; plan stays 280) */
+  --preview-width-default: 560px;
+  --preview-width-min: 420px;
+  --preview-width-max: 900px;
+  --preview-width-plan: 280px;
   --container-padding: clamp(32px, 4.5vw, 80px);
   --chat-max-width: none;
   --gutter: 12px;
@@ -408,35 +437,122 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Light polarity — invert canvas/ink; formulas stay identical
+ * Light polarity — invert canvas/ink; elevate toward white (not ink)
+ *
+ * Dark formula mixes ink into canvas as surfaces rise. On a light canvas that
+ * turns every card/chip/menu muddy gray. Light mode redefines the surface
+ * ladder so elevation goes toward pure white, with soft ink-alpha fills for
+ * chips and a hairline+shadow lift for floating chrome (composer, menus).
  * ═══════════════════════════════════════════════════════════════════════════ */
 html[data-theme="light"] {
-  --seed-canvas: #f4f5f7;
+  /* Cool, airy page canvas — slightly off-white so pure-white cards pop */
+  --seed-canvas: #f5f6f8;
   --seed-ink: #12141a;
   --seed-brand: #12141a;
   --seed-on-brand: #ffffff;
   --scheme-brand-in-surface: 0%;
-  --scheme-elevate: 4%;
-  --scheme-elevate-2: 7%;
-  --scheme-elevate-3: 11%;
-  --scheme-elevate-4: 15%;
-  --scheme-elevate-5: 19%;
-  --scheme-muted: 45%;
-  --scheme-faint: 35%;
-  --scheme-secondary: 70%;
-  --scheme-border: 10%;
-  --scheme-border-strong: 16%;
-  --scheme-overlay: 35%;
+  /*
+   * Elevate knobs kept for any residual formula consumers; the surface ladder
+   * below is fully overridden for light (mix toward white).
+   */
+  --scheme-elevate: 0%;
+  --scheme-elevate-2: 0%;
+  --scheme-elevate-3: 0%;
+  --scheme-elevate-4: 0%;
+  --scheme-elevate-5: 0%;
+  --scheme-muted: 48%;
+  --scheme-faint: 38%;
+  --scheme-secondary: 68%;
+  --scheme-border: 9%;
+  --scheme-border-strong: 15%;
+  --scheme-overlay: 32%;
 
   --brand-hover: color-mix(in oklch, var(--seed-brand) 78%, white);
   --brand-pressed: color-mix(in oklch, var(--seed-brand) 70%, black);
 
-  --shadow-modal: 0 24px 64px
-    color-mix(in oklch, black 18%, transparent);
-  --shadow-popover: 0 8px 24px color-mix(in oklch, black 12%, transparent);
-  --shadow-composer: 0 12px 32px color-mix(in oklch, black 10%, transparent);
-  --shadow-composer-suggestions: 0 12px 28px
-    color-mix(in oklch, black 10%, transparent);
+  /*
+   * Surface ladder (light): lowest = canvas gray; higher steps → pure white.
+   * Composer / menus / elevated panels land on white, not grayer mixes.
+   */
+  --color-surface-low: color-mix(
+    in oklch,
+    var(--color-surface-lowest) 55%,
+    white
+  );
+  --color-surface-container: #ffffff;
+  --color-surface-high: #ffffff;
+  --color-surface-highest: #ffffff;
+  --color-surface-bright: #ffffff;
+  --color-surface: var(--color-surface-low);
+  --color-surface-dim: color-mix(
+    in oklch,
+    var(--color-surface-lowest) 94%,
+    black
+  );
+  --color-surface-variant: color-mix(
+    in oklch,
+    var(--color-surface-lowest) 70%,
+    white
+  );
+
+  /* App chrome aliases — pure white floating panels on soft canvas */
+  --color-bg-surface: var(--color-surface-low);
+  --color-bg-elevated: #ffffff;
+  --color-bg-composer: #ffffff;
+  --color-bg-composer-suggestion: #ffffff;
+  --color-bg-composer-suggestion-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 4%,
+    white
+  );
+  --color-bg-user: #ffffff;
+  --color-bg-sidebar: var(--color-surface-low);
+  --color-bg-secondary-container: color-mix(
+    in oklch,
+    var(--seed-ink) 4%,
+    white
+  );
+
+  /*
+   * Soft fills: low ink alpha on white — chips/hovers stay cool, not muddy.
+   * (Name is historical from dark “white at low alpha”; light uses ink.)
+   */
+  --color-bg-white-soft: color-mix(in oklch, var(--seed-ink) 4.5%, transparent);
+  --color-bg-white-faint: color-mix(in oklch, var(--seed-ink) 2.75%, transparent);
+  --color-bg-white-hover: color-mix(in oklch, var(--seed-ink) 6%, transparent);
+  --color-bg-kbd: color-mix(in oklch, var(--seed-ink) 5%, transparent);
+  --color-bg-skeleton: color-mix(in oklch, var(--seed-ink) 5%, transparent);
+  --color-bg-skeleton-mid: color-mix(in oklch, var(--seed-ink) 3.5%, transparent);
+  --color-bg-skeleton-faint: color-mix(in oklch, var(--seed-ink) 2.5%, transparent);
+
+  /* Hairlines read slightly stronger against pure white panels */
+  --color-border-subtle: color-mix(in oklch, var(--seed-ink) 7.5%, transparent);
+  --color-border-muted: color-mix(in oklch, var(--seed-ink) 11%, transparent);
+  --color-border-default: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-border),
+    transparent
+  );
+  --color-border-strong: color-mix(
+    in oklch,
+    var(--seed-ink) var(--scheme-border-strong),
+    transparent
+  );
+  --color-outline: color-mix(in oklch, var(--seed-ink) 16%, transparent);
+  --color-outline-variant: color-mix(in oklch, var(--seed-ink) 9%, transparent);
+
+  /*
+   * Shadows: soft drop on bordered panels (menus already draw a hairline).
+   * Composer card uses transparent border, so its shadow includes a 1px ring
+   * so the white dock reads against the soft canvas.
+   */
+  --shadow-modal: 0 24px 64px color-mix(in oklch, black 12%, transparent);
+  --shadow-popover: 0 10px 28px color-mix(in oklch, black 7%, transparent);
+  --shadow-composer:
+    0 0 0 1px color-mix(in oklch, var(--seed-ink) 7%, transparent),
+    0 8px 24px color-mix(in oklch, black 5.5%, transparent);
+  --shadow-composer-suggestions: 0 10px 26px
+    color-mix(in oklch, black 6%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -490,7 +606,7 @@ html[data-theme="light"][data-palette="green"],
 html[data-theme="light"][data-palette="gray"] {
   /* Light mode: softer brand bleed so pages stay airy */
   --scheme-brand-in-surface: 6%;
-  --seed-canvas: #f4f5f7;
+  --seed-canvas: #f5f6f8;
   --seed-ink: #12141a;
 }
 
