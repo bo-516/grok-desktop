@@ -1,0 +1,1 @@
+{"scenario":"permission","note":"live path uses alwaysApprove; permission reverse covered by unit + optional alwaysApprove=0"}

@@ -1,0 +1,617 @@
+package acp
+
+import (
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+)
+
+// Transport is the bidirectional line transport for ACP stdio.
+// Write must send a full NDJSON line including the trailing newline.
+type Transport interface {
+	Write(line string)
+	OnLine(handler func(line string))
+	OnClose(handler func(code *int))
+	OnStderr(handler func(chunk string))
+	Dispose()
+}
+
+// ClientOptions configures the thin ACP client (no timeline reduce).
+type ClientOptions struct {
+	Transport            Transport
+	SettleQuietMs        int
+	AutoPermissionOption string // e.g. "allow_once"; empty = manual
+	OnStateChange        func(SessionState)
+	// OnSessionUpdate relays raw ACP updates for UI reduce (including load replay).
+	OnSessionUpdate func(update map[string]any, sessionID string, eventID string)
+	OnStderr        func(line string)
+	OnAgentRequest  AgentRequestHandler
+}
+
+// pendingWaiter pairs a JSON-RPC request with its response channel.
+type pendingWaiter struct {
+	ch chan pendingResult
+}
+
+type pendingResult struct {
+	result any
+	err    error
+}
+
+// Client is a production ACP client used by the Go bridge.
+// It handshakes, prompts, cancels, and replies to permission/fs/terminal reverse RPCs.
+// Timeline growth is never applied — only status / model / mode / pendingPermission
+// are tracked locally for pool + session_lifecycle.
+type Client struct {
+	mu                   sync.Mutex
+	transport            Transport
+	settleQuietMs        int
+	autoPermissionOption string
+	onStateChange        func(SessionState)
+	onSessionUpdate      func(update map[string]any, sessionID string, eventID string)
+	onStderr             func(line string)
+	onAgentRequest       AgentRequestHandler
+
+	nextID        int
+	pending       map[any]pendingWaiter
+	state         SessionState
+	settleTimer   *time.Timer
+	promptInFlight bool
+	disposed      bool
+	replaying     bool
+}
+
+// NewClient constructs an ACP client bound to transport and starts line handling.
+func NewClient(opts ClientOptions) *Client {
+	ms := opts.SettleQuietMs
+	if ms <= 0 {
+		ms = 300
+	}
+	c := &Client{
+		transport:            opts.Transport,
+		settleQuietMs:        ms,
+		autoPermissionOption: opts.AutoPermissionOption,
+		onStateChange:        opts.OnStateChange,
+		onSessionUpdate:      opts.OnSessionUpdate,
+		onStderr:             opts.OnStderr,
+		onAgentRequest:       opts.OnAgentRequest,
+		nextID:               1,
+		pending:              make(map[any]pendingWaiter),
+		state:                EmptySession("", "", "", "build"),
+	}
+	opts.Transport.OnLine(func(line string) { c.handleLine(line) })
+	opts.Transport.OnClose(func(code *int) {
+		c.mu.Lock()
+		c.replaying = false
+		c.state.Status = StatusDisconnected
+		c.state.PendingPermission = nil
+		st := c.state
+		// Reject all pending RPC waiters.
+		for id, w := range c.pending {
+			w.ch <- pendingResult{err: fmt.Errorf("ACP transport closed")}
+			delete(c.pending, id)
+		}
+		c.mu.Unlock()
+		c.emitState(st)
+	})
+	opts.Transport.OnStderr(func(chunk string) {
+		if c.onStderr != nil {
+			c.onStderr(chunk)
+		}
+	})
+	return c
+}
+
+// GetSessionState returns a copy of the minimal session snapshot.
+func (c *Client) GetSessionState() SessionState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return cloneState(c.state)
+}
+
+// ReplaceSessionState replaces the snapshot (seed before session/load, etc.).
+func (c *Client) ReplaceSessionState(state SessionState) {
+	c.mu.Lock()
+	c.state = normalizeState(state)
+	st := c.state
+	replaying := c.replaying
+	c.mu.Unlock()
+	if !replaying {
+		c.emitState(st)
+	}
+}
+
+// SetReplaying opens/closes the session/load replay window.
+// While open, state listeners are suppressed; closing flushes once.
+func (c *Client) SetReplaying(on bool) {
+	c.mu.Lock()
+	if c.replaying == on {
+		c.mu.Unlock()
+		return
+	}
+	c.replaying = on
+	st := c.state
+	if on {
+		c.mu.Unlock()
+		return
+	}
+	if c.settleTimer != nil {
+		c.settleTimer.Stop()
+		c.settleTimer = nil
+	}
+	c.mu.Unlock()
+	c.emitState(st)
+}
+
+// Request sends a JSON-RPC request and waits for the matching response.
+func (c *Client) Request(method string, params any) (any, error) {
+	c.mu.Lock()
+	if c.disposed {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("AcpClient disposed")
+	}
+	id := c.nextID
+	c.nextID++
+	w := pendingWaiter{ch: make(chan pendingResult, 1)}
+	c.pending[id] = w
+	c.mu.Unlock()
+
+	c.transport.Write(EncodeRequest(id, method, params))
+	res := <-w.ch
+	return res.result, res.err
+}
+
+// Prompt sends session/prompt and marks status streaming (no timeline append).
+func (c *Client) Prompt(sessionID string, blocks []ContentBlock) (any, error) {
+	c.mu.Lock()
+	c.state.Status = StatusStreaming
+	c.state.ErrorMessage = ""
+	c.state.LastAgentText = ""
+	c.promptInFlight = true
+	st := c.state
+	c.mu.Unlock()
+	c.emitState(st)
+
+	result, err := c.Request("session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"prompt":    blocks,
+	})
+	c.mu.Lock()
+	c.promptInFlight = false
+	if err != nil {
+		c.state.Status = StatusIdle
+		st = c.state
+		c.mu.Unlock()
+		c.emitState(st)
+		return nil, err
+	}
+	c.mu.Unlock()
+	c.scheduleSettle()
+	return result, nil
+}
+
+// Cancel notifies session/cancel and schedules settle.
+func (c *Client) Cancel(sessionID string) {
+	c.transport.Write(EncodeNotification("session/cancel", map[string]any{
+		"sessionId": sessionID,
+	}))
+	c.scheduleSettle()
+}
+
+// RespondPermission answers a pending session/request_permission reverse RPC.
+func (c *Client) RespondPermission(optionID string) error {
+	c.mu.Lock()
+	pending := c.state.PendingPermission
+	if pending == nil {
+		c.mu.Unlock()
+		return fmt.Errorf("No pending permission request")
+	}
+	reqID := pending.RequestID
+	c.state.PendingPermission = nil
+	nextStatus := StatusStreaming
+	if optionID == "deny_and_stop" {
+		nextStatus = StatusIdle
+	}
+	c.state.Status = nextStatus
+	sessionID := c.state.ID
+	st := c.state
+	c.mu.Unlock()
+
+	c.transport.Write(EncodeResponse(reqID, BuildPermissionOutcome(optionID), nil))
+	c.emitState(st)
+	if optionID == "deny_and_stop" && sessionID != "" {
+		c.Cancel(sessionID)
+	}
+	return nil
+}
+
+// Dispose stops settle timers and disposes the transport.
+func (c *Client) Dispose() {
+	c.mu.Lock()
+	c.disposed = true
+	if c.settleTimer != nil {
+		c.settleTimer.Stop()
+		c.settleTimer = nil
+	}
+	c.mu.Unlock()
+	c.transport.Dispose()
+}
+
+// --- internals ---
+
+func (c *Client) emitState(st SessionState) {
+	if c.onStateChange != nil {
+		c.onStateChange(cloneState(st))
+	}
+}
+
+func (c *Client) scheduleSettle() {
+	c.mu.Lock()
+	if c.settleTimer != nil {
+		c.settleTimer.Stop()
+	}
+	ms := c.settleQuietMs
+	c.settleTimer = time.AfterFunc(time.Duration(ms)*time.Millisecond, func() {
+		c.mu.Lock()
+		if c.promptInFlight ||
+			c.state.Status == StatusWaitingPermission ||
+			c.state.Status == StatusDisconnected {
+			c.mu.Unlock()
+			return
+		}
+		c.state.Status = StatusIdle
+		st := c.state
+		c.mu.Unlock()
+		c.emitState(st)
+	})
+	c.mu.Unlock()
+}
+
+func (c *Client) handleLine(line string) {
+	dec := DecodeLine(line)
+	if !dec.OK {
+		return
+	}
+	c.dispatchMessage(dec.Message)
+}
+
+// rpcIDKey normalizes JSON-RPC ids so pending map lookups match.
+// encoding/json decodes numbers as float64; Request stores int keys — without
+// this bridge, every handshake/prompt hangs forever waiting on a response.
+func rpcIDKey(id any) any {
+	switch v := id.(type) {
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case int32:
+		return int(v)
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i)
+		}
+		return v.String()
+	default:
+		return id
+	}
+}
+
+func (c *Client) dispatchMessage(message JsonRpcMessage) {
+	kind := ClassifyMessage(message)
+
+	switch kind.Kind {
+	case "response":
+		key := rpcIDKey(kind.ID)
+		c.mu.Lock()
+		w, ok := c.pending[key]
+		if ok {
+			delete(c.pending, key)
+		}
+		c.mu.Unlock()
+		if !ok {
+			return
+		}
+		if kind.Error != nil {
+			w.ch <- pendingResult{err: fmt.Errorf("%s", kind.Error.Message)}
+		} else {
+			w.ch <- pendingResult{result: kind.Result}
+		}
+
+	case "notification":
+		if IsSessionUpdateMethod(kind.Method) {
+			c.handleSessionUpdate(kind.Params)
+		}
+
+	case "request":
+		go c.handleIncomingRequest(kind.ID, kind.Method, kind.Params)
+	}
+}
+
+func (c *Client) handleSessionUpdate(params any) {
+	update, sessionID, eventID := ExtractSessionUpdate(params)
+	if update == nil {
+		return
+	}
+	c.mu.Lock()
+	if sessionID == "" {
+		sessionID = c.state.ID
+	}
+	// Patch minimal fields from known update kinds (no timeline).
+	if su, _ := update["sessionUpdate"].(string); su == "current_mode_update" {
+		if mode, ok := update["mode"].(string); ok && mode != "" {
+			c.state.Mode = mode
+		} else if mid, ok := update["currentModeId"].(string); ok && mid != "" {
+			if mid == "ask" || mid == "plan" || mid == "build" {
+				c.state.Mode = mid
+			}
+		}
+	}
+	if su, _ := update["sessionUpdate"].(string); su == "session_info_update" {
+		if title, ok := update["title"].(string); ok {
+			c.state.Title = title
+		}
+	}
+	// Live activity → streaming unless waiting for permission.
+	if c.state.Status != StatusWaitingPermission && c.state.Status != StatusDisconnected {
+		if c.promptInFlight || c.state.Status == StatusStreaming {
+			c.state.Status = StatusStreaming
+		}
+	}
+	st := c.state
+	replaying := c.replaying
+	promptInFlight := c.promptInFlight
+	c.mu.Unlock()
+
+	if c.onSessionUpdate != nil {
+		c.onSessionUpdate(update, sessionID, eventID)
+	}
+	if !replaying {
+		c.emitState(st)
+	}
+	if promptInFlight || st.Status == StatusStreaming {
+		c.scheduleSettle()
+	}
+}
+
+func (c *Client) handleIncomingRequest(id any, method string, params any) {
+	if method == "session/request_permission" {
+		shaped := ShapePermissionRequest(id, params)
+		c.mu.Lock()
+		c.state.PendingPermission = &shaped
+		c.state.Status = StatusWaitingPermission
+		auto := c.autoPermissionOption
+		st := c.state
+		c.mu.Unlock()
+		c.emitState(st)
+		if auto != "" {
+			_ = c.RespondPermission(auto)
+		}
+		return
+	}
+
+	if c.onAgentRequest != nil {
+		result, err := c.onAgentRequest(method, id, params)
+		if err != nil {
+			code := -32000
+			msg := err.Error()
+			if mnf, ok := err.(*MethodNotFoundError); ok {
+				code = mnf.Code()
+			} else if ce, ok := err.(interface{ Code() int }); ok {
+				code = ce.Code()
+			}
+			if code == -32601 || containsIgnoreCase(msg, "method not found") {
+				code = -32601
+			}
+			if !containsIgnoreCase(msg, method) {
+				msg = msg + " (" + method + ")"
+			}
+			c.transport.Write(EncodeResponse(id, nil, &JsonRpcError{Code: code, Message: msg}))
+			return
+		}
+		c.transport.Write(EncodeResponse(id, result, nil))
+		return
+	}
+
+	c.transport.Write(EncodeResponse(id, nil, &JsonRpcError{
+		Code:    -32601,
+		Message: "Method not found: " + method,
+	}))
+}
+
+// IsSessionUpdateMethod reports whether method carries an ACP session update.
+func IsSessionUpdateMethod(method string) bool {
+	return method == "session/update" || method == "_x.ai/session/update"
+}
+
+// ExtractSessionUpdate pulls the update object + sessionId + eventId from params.
+func ExtractSessionUpdate(params any) (update map[string]any, sessionID string, eventID string) {
+	p, ok := params.(map[string]any)
+	if !ok {
+		return nil, "", ""
+	}
+	var u map[string]any
+	if nested, ok := p["update"].(map[string]any); ok {
+		u = nested
+	} else {
+		u = p
+	}
+	if u == nil {
+		return nil, "", ""
+	}
+	if _, ok := u["sessionUpdate"].(string); !ok {
+		return nil, "", ""
+	}
+	if sid, ok := p["sessionId"].(string); ok {
+		sessionID = sid
+	}
+	eventID = extractEventID(p)
+	if eventID == "" {
+		eventID = extractEventID(u)
+	}
+	return u, sessionID, eventID
+}
+
+func extractEventID(obj map[string]any) string {
+	meta, ok := obj["_meta"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if id, ok := meta["eventId"].(string); ok {
+		return trimSpace(id)
+	}
+	return ""
+}
+
+// ShapePermissionRequest normalizes an agent permission request.
+func ShapePermissionRequest(requestID any, params any) PermissionRequest {
+	source, _ := params.(map[string]any)
+	if source == nil {
+		source = map[string]any{}
+	}
+	toolCall, _ := source["toolCall"].(map[string]any)
+	if toolCall == nil {
+		toolCall, _ = source["tool_call"].(map[string]any)
+	}
+	if toolCall == nil {
+		toolCall = map[string]any{}
+	}
+	var options []PermissionOption
+	rawOpts, _ := source["options"].([]any)
+	if len(rawOpts) == 0 {
+		if alt, ok := source["permissionOptions"].([]any); ok {
+			rawOpts = alt
+		}
+	}
+	for _, ro := range rawOpts {
+		rec, _ := ro.(map[string]any)
+		if rec == nil {
+			continue
+		}
+		oid := fmt.Sprint(firstNonNil(rec["optionId"], rec["id"], "allow_once"))
+		opt := PermissionOption{OptionID: oid}
+		if n, ok := rec["name"].(string); ok {
+			opt.Name = n
+		}
+		if k, ok := rec["kind"].(string); ok {
+			opt.Kind = k
+		}
+		options = append(options, opt)
+	}
+	if len(options) == 0 {
+		options = []PermissionOption{
+			{OptionID: "allow_once", Name: "Allow once"},
+			{OptionID: "allow_always", Name: "Always allow this tool"},
+			{OptionID: "deny", Name: "Deny"},
+			{OptionID: "deny_and_stop", Name: "Deny and stop"},
+		}
+	}
+	tc := map[string]any{}
+	if id, ok := toolCall["toolCallId"].(string); ok {
+		tc["toolCallId"] = id
+	} else if id, ok := toolCall["id"].(string); ok {
+		tc["toolCallId"] = id
+	}
+	if t, ok := toolCall["title"].(string); ok {
+		tc["title"] = t
+	}
+	if k, ok := toolCall["kind"].(string); ok {
+		tc["kind"] = k
+	}
+	if s, ok := toolCall["status"].(string); ok {
+		tc["status"] = s
+	}
+	pr := PermissionRequest{
+		RequestID: requestID,
+		ToolCall:  tc,
+		Options:   options,
+		Raw:       params,
+	}
+	if sid, ok := source["sessionId"].(string); ok {
+		pr.SessionID = sid
+	}
+	return pr
+}
+
+// BuildPermissionOutcome builds the ACP permission success body.
+func BuildPermissionOutcome(optionID string) any {
+	return map[string]any{
+		"outcome": map[string]any{
+			"outcome":  "selected",
+			"optionId": optionID,
+		},
+	}
+}
+
+func cloneState(s SessionState) SessionState {
+	out := s
+	if s.Timeline == nil {
+		out.Timeline = []any{}
+	} else {
+		out.Timeline = append([]any{}, s.Timeline...)
+	}
+	if s.ToolCalls == nil {
+		out.ToolCalls = map[string]any{}
+	} else {
+		out.ToolCalls = make(map[string]any, len(s.ToolCalls))
+		for k, v := range s.ToolCalls {
+			out.ToolCalls[k] = v
+		}
+	}
+	if s.PendingPermission != nil {
+		cp := *s.PendingPermission
+		out.PendingPermission = &cp
+	}
+	if s.AvailableModels != nil {
+		out.AvailableModels = append([]AvailableModel{}, s.AvailableModels...)
+	}
+	if s.AvailableCommands != nil {
+		out.AvailableCommands = append([]any{}, s.AvailableCommands...)
+	}
+	return out
+}
+
+func normalizeState(s SessionState) SessionState {
+	if s.Timeline == nil {
+		s.Timeline = []any{}
+	}
+	if s.ToolCalls == nil {
+		s.ToolCalls = map[string]any{}
+	}
+	if s.Mode == "" {
+		s.Mode = "build"
+	}
+	if s.Status == "" {
+		s.Status = StatusIdle
+	}
+	return s
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func containsIgnoreCase(s, sub string) bool {
+	return len(sub) == 0 || stringsContainsFold(s, sub)
+}
+
+func stringsContainsFold(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub ||
+		len(sub) == 0 ||
+		indexFold(s, sub) >= 0)
+}
+
+func indexFold(s, sub string) int {
+	// small helper without importing strings for fold — use strings package
+	return indexFoldImpl(s, sub)
+}

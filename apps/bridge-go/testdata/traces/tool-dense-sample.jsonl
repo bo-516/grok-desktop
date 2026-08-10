@@ -1,0 +1,3 @@
+{"type":"session_update","sessionId":"t","eventId":"t-10","update":{"sessionUpdate":"tool_call","toolCallId":"c1","title":"run","kind":"execute","status":"pending"}}
+{"type":"session_update","sessionId":"t","eventId":"t-12","update":{"sessionUpdate":"task_backgrounded","taskId":"bg1","toolCallId":"c1","command":"sleep 1","status":"running"}}
+{"type":"session_update","sessionId":"t","eventId":"t-11","update":{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}}

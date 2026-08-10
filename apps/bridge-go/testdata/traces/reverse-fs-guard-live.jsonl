@@ -1,0 +1,2 @@
+{"msg":{"type":"read_workspace_file_result","requestId":"fs-escape-1","ok":false,"bytes":0,"reason":"outside","error":"path outside workspace: ../../etc/passwd"}}
+{"msg":{"bytes":0,"content":"","error":"path outside workspace: ../../etc/passwd","mimeType":"","ok":false,"reason":"outside","requestId":"fs-escape-1","type":"read_workspace_file_result"}}

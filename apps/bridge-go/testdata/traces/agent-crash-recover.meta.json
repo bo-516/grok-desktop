@@ -1,0 +1,1 @@
+{"scenario":"agent-crash-recover","note":"live: kill child after start; both bridges should recover or surface error without process death"}
