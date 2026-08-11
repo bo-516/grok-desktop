@@ -15,13 +15,16 @@ import (
 
 // CreateRuntimeOpts configures one session process + handshake.
 type CreateRuntimeOpts struct {
-	Cwd           string
-	AlwaysApprove bool
-	ResumeID      string
-	Seed          *acp.SessionState
-	SpawnConfig   *pool.SessionSpawnConfig
-	OnState       func(session acp.SessionState)
+	Cwd             string
+	AlwaysApprove   bool
+	ResumeID        string
+	Seed            *acp.SessionState
+	SpawnConfig     *pool.SessionSpawnConfig
+	OnState         func(session acp.SessionState)
 	OnSessionUpdate func(update map[string]any, sessionID string, eventID string)
+	// OnReplayBegin/OnReplayEnd frame the session/load batch window for WS.
+	OnReplayBegin func(sessionID string)
+	OnReplayEnd   func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64)
 	OnStderr      func(text, sessionID string)
 	OnInfo        func(message, sessionID string)
 	OnProcessExit func(sessionID string, code *int)
@@ -155,6 +158,24 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 			}
 			if opts.OnSessionUpdate != nil {
 				opts.OnSessionUpdate(update, id, eventID)
+			}
+		},
+		OnReplayBegin: func(sessionID string) {
+			id := sessionID
+			if id == "" {
+				id = sessionIDHint
+			}
+			if opts.OnReplayBegin != nil {
+				opts.OnReplayBegin(id)
+			}
+		},
+		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
+			id := sessionID
+			if id == "" {
+				id = sessionIDHint
+			}
+			if opts.OnReplayEnd != nil {
+				opts.OnReplayEnd(id, updates, status, model, mode, count, bytes, elapsedMs)
 			}
 		},
 		OnStderr: func(text string) {

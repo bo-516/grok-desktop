@@ -61,6 +61,36 @@ func lifecycleChanged(prev *lifecycleFingerprint, next lifecycleFingerprint) boo
 		prev.id != next.id
 }
 
+// broadcastPoolFocus tells the UI a resident session is focused without wiping
+// client-side timeline. Go SessionState.timeline is always empty, so a full
+// `state` hydrate on pool hit blanks catalog-seeded history after refresh.
+// Prefer session_lifecycle (+ info) unless the snapshot somehow carries body.
+func broadcastPoolFocus(deps LifecycleDeps, session acp.SessionState, info string) {
+	if len(session.Timeline) > 0 {
+		deps.Broadcast(map[string]any{"type": "state", "session": session})
+	} else {
+		msg := map[string]any{
+			"type":      "session_lifecycle",
+			"sessionId": session.ID,
+			"status":    session.Status,
+			"model":     session.Model,
+			"mode":      session.Mode,
+		}
+		if session.PendingPermission != nil {
+			msg["pendingPermission"] = session.PendingPermission
+		} else {
+			msg["pendingPermission"] = nil
+		}
+		deps.Broadcast(msg)
+	}
+	if info != "" {
+		deps.Broadcast(map[string]any{
+			"type": "info", "message": info, "sessionId": session.ID,
+		})
+	}
+	deps.BroadcastPool()
+}
+
 // StartOrResume acquires a pool slot or reuses a live session (relay freeze).
 // Unexpected agent exit triggers seed-based session/load recovery.
 func StartOrResume(deps LifecycleDeps, opts struct {
@@ -83,12 +113,9 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		if rt != nil {
 			deps.Pool.Touch(opts.ResumeID)
 			deps.State.FocusedSessionID = opts.ResumeID
-			deps.Broadcast(map[string]any{"type": "state", "session": rt.GetSessionState()})
-			deps.Broadcast(map[string]any{
-				"type": "info", "message": "already live on " + opts.ResumeID,
-				"sessionId": opts.ResumeID,
-			})
-			deps.BroadcastPool()
+			// Go never reduces timeline — a full empty `state` would blank the
+			// catalog-seeded canvas on refresh / reselect. Lifecycle only.
+			broadcastPoolFocus(deps, rt.GetSessionState(), "already live on "+opts.ResumeID)
 			return nil
 		}
 	}
@@ -100,11 +127,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		rt := deps.Pool.Get(focused)
 		if rt != nil {
 			deps.Pool.Touch(focused)
-			deps.Broadcast(map[string]any{"type": "state", "session": rt.GetSessionState()})
-			deps.Broadcast(map[string]any{
-				"type": "info", "message": "reuse live " + focused, "sessionId": focused,
-			})
-			deps.BroadcastPool()
+			broadcastPoolFocus(deps, rt.GetSessionState(), "reuse live "+focused)
 			return nil
 		}
 	}
@@ -121,13 +144,66 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		seed = opts.Seed
 	}
 
+	// Sessions inside a load-replay window (per-session isolation).
+	replayingSessions := map[string]bool{}
+	var replayingMu sync.Mutex
+	// Suppress the setReplaying(false) state paint when replay_end already went out.
+	pendingReplayEnd := map[string]bool{}
+	// After a load replay, skip empty full-state paints (Go has no timeline) so
+	// the UI keeps the client-reduced body from replay_end.
+	skipEmptyStateAfterReplay := map[string]bool{}
+
 	runtime, err := CreateSessionRuntime(CreateRuntimeOpts{
 		Cwd:           cwd,
 		AlwaysApprove: opts.AlwaysApprove,
 		ResumeID:      resumeID,
 		Seed:          seed,
 		SpawnConfig:   opts.SpawnConfig,
+		OnReplayBegin: func(sessionID string) {
+			if sessionID == "" {
+				return
+			}
+			replayingMu.Lock()
+			replayingSessions[sessionID] = true
+			delete(pendingReplayEnd, sessionID)
+			replayingMu.Unlock()
+			deps.Broadcast(map[string]any{
+				"type": "replay_begin", "sessionId": sessionID,
+			})
+		},
+		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
+			if sessionID == "" {
+				return
+			}
+			replayingMu.Lock()
+			delete(replayingSessions, sessionID)
+			pendingReplayEnd[sessionID] = true
+			skipEmptyStateAfterReplay[sessionID] = true
+			replayingMu.Unlock()
+			// Shape wire updates: [{update, eventId?}, ...]
+			wireUpdates := make([]map[string]any, 0, len(updates))
+			for _, u := range updates {
+				item := map[string]any{"update": u.Update}
+				if u.EventID != "" {
+					item["eventId"] = u.EventID
+				}
+				wireUpdates = append(wireUpdates, item)
+			}
+			deps.Broadcast(map[string]any{
+				"type":      "replay_end",
+				"sessionId": sessionID,
+				"updates":   wireUpdates,
+				"status":    status,
+				"model":     model,
+				"mode":      mode,
+				"count":     count,
+				"bytes":     bytes,
+				"elapsedMs": elapsedMs,
+			})
+			deps.BroadcastPool()
+		},
 		OnSessionUpdate: func(update map[string]any, sessionID string, eventID string) {
+			// Live path only — replay buffers inside acp.Client and never calls this.
 			msg := map[string]any{
 				"type": "session_update", "sessionId": sessionID, "update": update,
 			}
@@ -139,6 +215,31 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		OnState: func(session acp.SessionState) {
 			if session.ID != "" {
 				deps.SessionSeeds.Store(session.ID, session)
+			}
+			// Skip the state paint that follows replay_end (already broadcast).
+			if session.ID != "" {
+				replayingMu.Lock()
+				skipPaint := pendingReplayEnd[session.ID] || replayingSessions[session.ID]
+				if pendingReplayEnd[session.ID] {
+					delete(pendingReplayEnd, session.ID)
+				}
+				// Post-load empty snapshot: Go never holds timeline; a full `state`
+				// here would blank the UI that just reduced replay_end.updates.
+				if !skipPaint && skipEmptyStateAfterReplay[session.ID] && len(session.Timeline) == 0 {
+					skipPaint = true
+					// Keep the mark until a non-empty timeline state (never on Go)
+					// or a lifecycle-only change is enough — clear after one skip
+					// of the post-handshake flush so later intentional state works.
+					delete(skipEmptyStateAfterReplay, session.ID)
+				}
+				replayingMu.Unlock()
+				if skipPaint {
+					fp := lifecycleFP(session)
+					lastLifecycleMu.Lock()
+					lastLifecycle[session.ID] = fp
+					lastLifecycleMu.Unlock()
+					return
+				}
 			}
 			fp := lifecycleFP(session)
 			lastLifecycleMu.Lock()
@@ -255,7 +356,17 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	lastLifecycleMu.Lock()
 	lastLifecycle[runtime.SessionID] = lifecycleFP(initial)
 	lastLifecycleMu.Unlock()
-	deps.Broadcast(map[string]any{"type": "state", "session": initial})
+	// After session/load, replay_end already carried the body (Go has no timeline).
+	// A trailing empty `state` would wipe the client canvas — skip it.
+	replayingMu.Lock()
+	skipInitial := skipEmptyStateAfterReplay[runtime.SessionID] && len(initial.Timeline) == 0
+	if skipInitial {
+		delete(skipEmptyStateAfterReplay, runtime.SessionID)
+	}
+	replayingMu.Unlock()
+	if !skipInitial {
+		deps.Broadcast(map[string]any{"type": "state", "session": initial})
+	}
 	deps.BroadcastPool()
 	return nil
 }

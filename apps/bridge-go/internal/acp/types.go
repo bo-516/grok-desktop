@@ -46,7 +46,10 @@ type SessionState struct {
 	Status             SessionStatus      `json:"status"`
 	Timeline           []any              `json:"timeline"`
 	ToolCalls          map[string]any     `json:"toolCalls"`
-	LastAgentText      string             `json:"lastAgentText,omitempty"`
+	// Always emit lastAgentText (even "") so desktop never receives undefined
+	// after JSON decode — omitempty dropped empty strings and crashed
+	// timelineContentKey on lastAgentText.length.
+	LastAgentText      string             `json:"lastAgentText"`
 	PendingPermission  *PermissionRequest `json:"pendingPermission,omitempty"`
 	AvailableModels    []AvailableModel   `json:"availableModels,omitempty"`
 	AvailableCommands  []any              `json:"availableCommands,omitempty"`

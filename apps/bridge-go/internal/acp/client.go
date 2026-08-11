@@ -17,16 +17,36 @@ type Transport interface {
 	Dispose()
 }
 
+// Replay buffer caps — flush a partial replay_end when either is exceeded.
+const (
+	// ReplayMaxUpdates is the max number of buffered updates before a mid-window flush.
+	ReplayMaxUpdates = 5000
+	// ReplayMaxBytes is the approximate max JSON byte size of the buffer.
+	ReplayMaxBytes = 32 << 20 // 32 MiB
+)
+
+// ReplayBufferedUpdate is one raw ACP update held during session/load replay.
+type ReplayBufferedUpdate struct {
+	Update  map[string]any
+	EventID string
+}
+
 // ClientOptions configures the thin ACP client (no timeline reduce).
 type ClientOptions struct {
 	Transport            Transport
 	SettleQuietMs        int
 	AutoPermissionOption string // e.g. "allow_once"; empty = manual
 	OnStateChange        func(SessionState)
-	// OnSessionUpdate relays raw ACP updates for UI reduce (including load replay).
+	// OnSessionUpdate relays raw ACP updates for UI reduce (live path only;
+	// during load replay updates are buffered and delivered via OnReplayEnd).
 	OnSessionUpdate func(update map[string]any, sessionID string, eventID string)
-	OnStderr        func(line string)
-	OnAgentRequest  AgentRequestHandler
+	// OnReplayBegin fires when session/load replay opens (emit replay_begin).
+	OnReplayBegin func(sessionID string)
+	// OnReplayEnd fires when the window closes or hits a buffer cap (emit replay_end).
+	// updates is the ordered raw batch for this chunk; status/model/mode are authoritative.
+	OnReplayEnd func(sessionID string, updates []ReplayBufferedUpdate, status SessionStatus, model, mode string, count, bytes int, elapsedMs int64)
+	OnStderr       func(line string)
+	OnAgentRequest AgentRequestHandler
 }
 
 // pendingWaiter pairs a JSON-RPC request with its response channel.
@@ -42,7 +62,8 @@ type pendingResult struct {
 // Client is a production ACP client used by the Go bridge.
 // It handshakes, prompts, cancels, and replies to permission/fs/terminal reverse RPCs.
 // Timeline growth is never applied — only status / model / mode / pendingPermission
-// are tracked locally for pool + session_lifecycle.
+// are tracked locally for pool + session_lifecycle. During session/load replay,
+// raw updates are buffered and flushed via OnReplayEnd (no per-update WS fan-out).
 type Client struct {
 	mu                   sync.Mutex
 	transport            Transport
@@ -50,16 +71,24 @@ type Client struct {
 	autoPermissionOption string
 	onStateChange        func(SessionState)
 	onSessionUpdate      func(update map[string]any, sessionID string, eventID string)
+	onReplayBegin        func(sessionID string)
+	onReplayEnd          func(sessionID string, updates []ReplayBufferedUpdate, status SessionStatus, model, mode string, count, bytes int, elapsedMs int64)
 	onStderr             func(line string)
 	onAgentRequest       AgentRequestHandler
 
-	nextID        int
-	pending       map[any]pendingWaiter
-	state         SessionState
-	settleTimer   *time.Timer
+	nextID         int
+	pending        map[any]pendingWaiter
+	state          SessionState
+	settleTimer    *time.Timer
 	promptInFlight bool
-	disposed      bool
-	replaying     bool
+	disposed       bool
+	replaying      bool
+	// Buffer of raw updates absorbed while replaying (not yet flushed).
+	replayBuf []ReplayBufferedUpdate
+	// Approximate UTF-8 byte size of JSON-serialized updates in replayBuf.
+	replayBytes int
+	// Wall time when the current replay window opened.
+	replayStart time.Time
 }
 
 // NewClient constructs an ACP client bound to transport and starts line handling.
@@ -74,6 +103,8 @@ func NewClient(opts ClientOptions) *Client {
 		autoPermissionOption: opts.AutoPermissionOption,
 		onStateChange:        opts.OnStateChange,
 		onSessionUpdate:      opts.OnSessionUpdate,
+		onReplayBegin:        opts.OnReplayBegin,
+		onReplayEnd:          opts.OnReplayEnd,
 		onStderr:             opts.OnStderr,
 		onAgentRequest:       opts.OnAgentRequest,
 		nextID:               1,
@@ -83,7 +114,9 @@ func NewClient(opts ClientOptions) *Client {
 	opts.Transport.OnLine(func(line string) { c.handleLine(line) })
 	opts.Transport.OnClose(func(code *int) {
 		c.mu.Lock()
+		wasReplaying := c.replaying
 		c.replaying = false
+		buf, bytes, elapsed := c.takeReplayBufferLocked()
 		c.state.Status = StatusDisconnected
 		c.state.PendingPermission = nil
 		st := c.state
@@ -93,6 +126,9 @@ func NewClient(opts ClientOptions) *Client {
 			delete(c.pending, id)
 		}
 		c.mu.Unlock()
+		if wasReplaying {
+			c.emitReplayEnd(st.ID, buf, st, bytes, elapsed)
+		}
 		c.emitState(st)
 	})
 	opts.Transport.OnStderr(func(chunk string) {
@@ -123,7 +159,9 @@ func (c *Client) ReplaceSessionState(state SessionState) {
 }
 
 // SetReplaying opens/closes the session/load replay window.
-// While open, state listeners are suppressed; closing flushes once.
+// While open, state listeners are suppressed and raw updates are buffered;
+// closing emits OnReplayEnd (with buffered updates) then one state flush.
+// Callers must always close the window they opened (including on RPC failure).
 func (c *Client) SetReplaying(on bool) {
 	c.mu.Lock()
 	if c.replaying == on {
@@ -133,15 +171,87 @@ func (c *Client) SetReplaying(on bool) {
 	c.replaying = on
 	st := c.state
 	if on {
+		c.replayBuf = nil
+		c.replayBytes = 0
+		c.replayStart = time.Now()
+		sid := st.ID
 		c.mu.Unlock()
+		if c.onReplayBegin != nil {
+			c.onReplayBegin(sid)
+		}
 		return
 	}
 	if c.settleTimer != nil {
 		c.settleTimer.Stop()
 		c.settleTimer = nil
 	}
+	buf, bytes, elapsed := c.takeReplayBufferLocked()
 	c.mu.Unlock()
+	c.emitReplayEnd(st.ID, buf, st, bytes, elapsed)
 	c.emitState(st)
+}
+
+// IsReplaying reports whether a session/load replay window is open.
+func (c *Client) IsReplaying() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.replaying
+}
+
+// takeReplayBufferLocked drains the replay buffer. Caller must hold c.mu.
+func (c *Client) takeReplayBufferLocked() (buf []ReplayBufferedUpdate, bytes int, elapsedMs int64) {
+	buf = c.replayBuf
+	bytes = c.replayBytes
+	if !c.replayStart.IsZero() {
+		elapsedMs = time.Since(c.replayStart).Milliseconds()
+	}
+	c.replayBuf = nil
+	c.replayBytes = 0
+	if len(buf) == 0 {
+		buf = []ReplayBufferedUpdate{}
+	}
+	return buf, bytes, elapsedMs
+}
+
+// emitReplayEnd invokes OnReplayEnd when configured.
+func (c *Client) emitReplayEnd(sessionID string, buf []ReplayBufferedUpdate, st SessionState, bytes int, elapsedMs int64) {
+	if c.onReplayEnd == nil {
+		return
+	}
+	c.onReplayEnd(sessionID, buf, st.Status, st.Model, st.Mode, len(buf), bytes, elapsedMs)
+}
+
+// appendReplayUpdateLocked buffers one update and flushes mid-window if caps hit.
+// Caller must hold c.mu. Returns true when a mid-window cap flush was performed
+// (caller should re-open begin after unlock).
+func (c *Client) appendReplayUpdateLocked(update map[string]any, eventID string) (
+	capFlush bool,
+	flushBuf []ReplayBufferedUpdate,
+	flushBytes int,
+	flushElapsed int64,
+	flushSessionID string,
+	flushStatus SessionStatus,
+	flushModel string,
+	flushMode string,
+) {
+	approx := 64
+	if b, err := json.Marshal(update); err == nil {
+		approx = len(b)
+	}
+	c.replayBuf = append(c.replayBuf, ReplayBufferedUpdate{Update: update, EventID: eventID})
+	c.replayBytes += approx
+	if len(c.replayBuf) < ReplayMaxUpdates && c.replayBytes < ReplayMaxBytes {
+		return false, nil, 0, 0, "", "", "", ""
+	}
+	// Cap hit: drain buffer for an intermediate replay_end; stay replaying.
+	flushBuf, flushBytes, flushElapsed = c.takeReplayBufferLocked()
+	flushSessionID = c.state.ID
+	flushStatus = c.state.Status
+	flushModel = c.state.Model
+	flushMode = c.state.Mode
+	// Restart timing for the next chunk of the same window.
+	c.replayStart = time.Now()
+	return true, flushBuf, flushBytes, flushElapsed, flushSessionID, flushStatus, flushModel, flushMode
 }
 
 // Request sends a JSON-RPC request and waits for the matching response.
@@ -365,14 +475,40 @@ func (c *Client) handleSessionUpdate(params any) {
 	st := c.state
 	replaying := c.replaying
 	promptInFlight := c.promptInFlight
+	var (
+		capFlush       bool
+		flushBuf       []ReplayBufferedUpdate
+		flushBytes     int
+		flushElapsed   int64
+		flushSessionID string
+		flushStatus    SessionStatus
+		flushModel     string
+		flushMode      string
+	)
+	if replaying {
+		capFlush, flushBuf, flushBytes, flushElapsed, flushSessionID, flushStatus, flushModel, flushMode =
+			c.appendReplayUpdateLocked(update, eventID)
+	}
 	c.mu.Unlock()
 
+	if replaying {
+		// No per-update fan-out during load; optional mid-window cap flush.
+		if capFlush {
+			if c.onReplayEnd != nil {
+				c.onReplayEnd(flushSessionID, flushBuf, flushStatus, flushModel, flushMode,
+					len(flushBuf), flushBytes, flushElapsed)
+			}
+			// Re-open the window so the frontend stays silent for the rest.
+			if c.onReplayBegin != nil {
+				c.onReplayBegin(flushSessionID)
+			}
+		}
+		return
+	}
 	if c.onSessionUpdate != nil {
 		c.onSessionUpdate(update, sessionID, eventID)
 	}
-	if !replaying {
-		c.emitState(st)
-	}
+	c.emitState(st)
 	if promptInFlight || st.Status == StatusStreaming {
 		c.scheduleSettle()
 	}
