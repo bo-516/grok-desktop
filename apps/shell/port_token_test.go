@@ -67,7 +67,7 @@ func TestBridgeWSURL_Format(t *testing.T) {
 
 // TestBridgeInjectJS_JSONSafe escapes quotes in the injected script.
 func TestBridgeInjectJS_JSONSafe(t *testing.T) {
-	js := bridgeInjectJS(`ws://127.0.0.1:1?token=a"b`)
+	js := bridgeInjectJS(`ws://127.0.0.1:1?token=a"b`, nil)
 	if !strings.HasPrefix(js, "window.__GROK_BRIDGE_URL__=") {
 		t.Fatalf("prefix: %q", js)
 	}
@@ -77,5 +77,20 @@ func TestBridgeInjectJS_JSONSafe(t *testing.T) {
 	if !strings.Contains(js, `\u0022`) && !strings.Contains(js, `\"`) {
 		// encoding/json uses \u0022 for " in recent Go, or \"
 		t.Fatalf("expected JSON-escaped quote in %q", js)
+	}
+}
+
+// TestBridgeInjectJS_WithLogDir sets optional log globals when session logging is on.
+func TestBridgeInjectJS_WithLogDir(t *testing.T) {
+	sl := &SessionLogger{Dir: "/tmp/grok-desktop-logs-test"}
+	js := bridgeInjectJS("ws://127.0.0.1:1?token=t", sl)
+	if !strings.Contains(js, "window.__GROK_LOG_DIR__=") {
+		t.Fatalf("log dir missing: %q", js)
+	}
+	if !strings.Contains(js, "window.__GROK_UI_LOG_PATH__=") {
+		t.Fatalf("ui log path missing: %q", js)
+	}
+	if !strings.Contains(js, UILogPath) {
+		t.Fatalf("expected path %q in %q", UILogPath, js)
 	}
 }

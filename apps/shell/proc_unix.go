@@ -15,6 +15,14 @@ func configureBridgeProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+// processAlive reports whether pid still exists (signal 0 probe; no signal sent).
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	return syscall.Kill(pid, 0) == nil
+}
+
 // stopBridgeProcess sends SIGTERM to the process group, then SIGKILL after grace.
 func stopBridgeProcess(cmd *exec.Cmd, grace time.Duration) {
 	if cmd == nil || cmd.Process == nil {

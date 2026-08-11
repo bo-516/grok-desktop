@@ -45,7 +45,13 @@ func TestBridgeEnv_Overrides(t *testing.T) {
 // TestDefaultAllowedOrigins_IncludesWailsAndNull covers shell packaging origins.
 func TestDefaultAllowedOrigins_IncludesWailsAndNull(t *testing.T) {
 	s := DefaultAllowedOrigins()
-	for _, need := range []string{"null", "file://", "wails://localhost"} {
+	for _, need := range []string{
+		"null",
+		"file://",
+		"wails://localhost",
+		"wails://wails.localhost",
+		"https://wails.localhost",
+	} {
 		if !strings.Contains(s, need) {
 			t.Fatalf("missing %q in %q", need, s)
 		}

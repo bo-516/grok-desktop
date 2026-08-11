@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -41,19 +42,23 @@ type BridgeProcess struct {
 }
 
 // DefaultAllowedOrigins for packaged Wails shell + common dev origins.
-// Includes null / file:// for file-origin webviews and wails://localhost (macOS).
+// Darwin page origin is wails://localhost; Windows uses https://wails.localhost;
+// Linux may use wails://wails. Also include extra host variants seen in the wild.
 func DefaultAllowedOrigins() string {
 	parts := []string{
 		"null",
 		"file://",
 		"wails://localhost",
 		"wails://wails",
+		"wails://wails.localhost",
 		"http://wails.localhost",
 		"https://wails.localhost",
 		"http://localhost:5173",
 		"http://127.0.0.1:5173",
 		"http://localhost:4173",
 		"http://127.0.0.1:4173",
+		"http://localhost:8172",
+		"http://127.0.0.1:8172",
 	}
 	return strings.Join(parts, ",")
 }
@@ -98,10 +103,12 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 		args := append(append([]string{}, prefix...), script)
 		cmd = exec.Command(tsx, args...)
 	case BridgeImplGo:
+		// Prefer monorepo build output (bin/bridge-go); fall back to legacy names.
 		bin := FindGoBridgeBinary(p.RepoRoot)
 		if bin == "" {
 			return nil, fmt.Errorf(
-				"go bridge selected but binary not found (looked under apps/bridge-go/bin/bridge, apps/bridge-go/bridge, bin/bridge-go); build it or set GROK_DESKTOP_BRIDGE=node",
+				"go bridge selected but binary not found (looked under %v); build with: (cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge) — or set GROK_DESKTOP_BRIDGE=node",
+				GoBridgeBinaryCandidates(p.RepoRoot),
 			)
 		}
 		cmd = exec.Command(bin)
@@ -120,7 +127,49 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 		return nil, fmt.Errorf("start bridge (%s): %w", p.Impl, err)
 	}
 	log.Printf("[shell] bridge %s started pid=%d port=%d", p.Impl, cmd.Process.Pid, p.Port)
-	return &BridgeProcess{cmd: cmd, impl: p.Impl}, nil
+	bp := &BridgeProcess{cmd: cmd, impl: p.Impl}
+	// Block until the child accepts TCP (or dies). UI auto-connects on first
+	// paint; without this race, WebSocket hits a closed port → Offline banner.
+	if err := bp.WaitUntilListening(p.Host, p.Port, 15*time.Second); err != nil {
+		bp.Stop()
+		return nil, err
+	}
+	log.Printf("[shell] bridge %s listening on %s:%d", p.Impl, p.Host, p.Port)
+	return bp, nil
+}
+
+// WaitUntilListening polls host:port until TCP connect succeeds, the child dies,
+// or timeout elapses. timeout should be generous for cold Node/tsx startup.
+// Returns an error when the process exits early or the deadline is hit.
+func (b *BridgeProcess) WaitUntilListening(host string, port int, timeout time.Duration) error {
+	if b == nil || b.cmd == nil || b.cmd.Process == nil {
+		return fmt.Errorf("WaitUntilListening: no bridge process")
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port <= 0 {
+		return fmt.Errorf("WaitUntilListening: invalid port %d", port)
+	}
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	deadline := time.Now().Add(timeout)
+	pid := b.cmd.Process.Pid
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 150*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		// Fail fast if the child already died (no silent hang until timeout).
+		if !processAlive(pid) {
+			return fmt.Errorf("bridge exited before listening on %s (pid=%d)", addr, pid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("bridge did not listen on %s within %s (pid=%d)", addr, timeout, pid)
 }
 
 // bridgeEnv merges parent env with bridge-required variables (overrides win).

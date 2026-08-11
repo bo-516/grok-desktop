@@ -39,6 +39,26 @@ Config file path:
 - Linux: `$XDG_CONFIG_HOME/grok-desktop/config.json` or `~/.config/...`
 - Windows: `%AppData%/grok-desktop/config.json`
 
+## Session logs (crash diagnosis)
+
+On every start the shell writes under:
+
+| OS | Directory |
+|---|---|
+| macOS | `~/Library/Logs/grok-desktop/` |
+| Linux | `$XDG_STATE_HOME/grok-desktop/logs` or `~/.local/state/grok-desktop/logs` |
+| Windows | `%LOCALAPPDATA%/grok-desktop/logs` |
+
+Per session:
+
+- `shell-YYYYMMDD-HHMMSS.log` — shell + mirrored bridge/UI lines
+- `bridge-….log` — bridge child stdout/stderr
+- `ui-….log` — frontend boot/crash POSTs (`src=boot`, `react.boundary`, …)
+
+**Retention:** files older than **12 hours** are deleted on the next start.
+
+Black WebView? Check `ui-*.log` first (boot missing ⇒ JS never ran; `react.boundary` ⇒ render throw).
+
 Example:
 
 ```json

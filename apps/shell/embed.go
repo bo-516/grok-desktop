@@ -28,17 +28,17 @@ func FrontendAssets() http.Handler {
 	return application.AssetFileServerFS(sub)
 }
 
-// BridgeURLInjectMiddleware rewrites HTML responses to set window.__GROK_BRIDGE_URL__
-// in <head> before any module scripts run.
+// BridgeURLInjectMiddleware rewrites HTML responses to inject boot JS
+// (bridge URL + log dir globals) in <head> before any module scripts run.
 //
 // Why not WebviewWindowOptions.JS alone? On darwin that runs after
 // WebViewDidFinishNavigation, which is too late for Vite modules that call
 // defaultBridgeUrl() at boot. Head injection is the reliable path.
 //
-// bridgeURL must already be a full ws://…?token=… string; it is JSON-encoded
-// into the script so quotes/backslashes cannot break out.
-func BridgeURLInjectMiddleware(bridgeURL string) application.Middleware {
-	inject := []byte("<script>" + bridgeInjectJS(bridgeURL) + "</script>")
+// injectJS must already be a complete script body (no <script> tags), typically
+// from bridgeInjectJS — quotes/backslashes must already be JSON-safe.
+func BridgeURLInjectMiddleware(injectJS string) application.Middleware {
+	inject := []byte("<script>" + injectJS + "</script>")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path

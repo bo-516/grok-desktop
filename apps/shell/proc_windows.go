@@ -15,6 +15,12 @@ func configureBridgeProcAttr(cmd *exec.Cmd) {
 	// Intentionally empty until Job Object wiring lands with bridge-go.
 }
 
+// processAlive is best-effort on Windows; always true so WaitUntilListening
+// falls back to its dial timeout instead of a PID probe.
+func processAlive(pid int) bool {
+	return pid > 0
+}
+
 // stopBridgeProcess terminates the bridge process; tree kill is best-effort.
 func stopBridgeProcess(cmd *exec.Cmd, grace time.Duration) {
 	if cmd == nil || cmd.Process == nil {
