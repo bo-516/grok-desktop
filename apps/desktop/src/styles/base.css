@@ -39,6 +39,18 @@ body,
   border-width: 0;
   border-style: solid;
   border-color: var(--color-border-default);
+  /*
+   * Same class of missing-preflight gap for shadows. Every `shadow-*` utility
+   * (named tokens and arbitrary `shadow-[…]` alike) emits
+   * `box-shadow: var(--un-ring-offset-shadow), var(--un-ring-shadow),
+   * var(--un-shadow)` and only sets the last one. The first two are defined by
+   * the preflight we skip, so the whole declaration was invalid and every
+   * shadow in the app computed to `none`. Transparent defaults make the
+   * composition valid without painting anything on their own.
+   */
+  --un-ring-offset-shadow: 0 0 #0000;
+  --un-ring-shadow: 0 0 #0000;
+  --un-shadow: 0 0 #0000;
 }
 
 button,
