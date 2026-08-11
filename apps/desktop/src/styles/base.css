@@ -145,39 +145,144 @@ code {
   }
 }
 
+/*
+ * Markdown hard breaks ("two spaces + newline", which Chinese agent answers use
+ * constantly) arrive twice: remark emits a <br>, and the newline stays in the
+ * following text node, which `md-p`'s white-space: pre-wrap renders as a break
+ * of its own. Two breaks put a blank line inside what should be one paragraph.
+ * pre-wrap is the one that has to stay — it is why single newlines survive at
+ * all — so the redundant element is dropped. Scoped to `md-p` because table
+ * cells and other blocks do not set pre-wrap and still need their <br>.
+ */
+.md-root .md-p br {
+  display: none;
+}
+
+/*
+ * KaTeX math inside agent Markdown (StreamingMarkdownView + @streamdown/math).
+ * katex.min.css already uses color:currentColor; we only fix layout so display
+ * equations fit the chat column and inherit the message text scale/color.
+ */
+.md-root .katex {
+  font-size: 1.06em;
+  color: var(--color-text-primary);
+  /*
+   * `md-p` sets white-space: pre-wrap so agent prose keeps its own line breaks.
+   * KaTeX lays out with explicit boxes and its own spacing glyphs; inheriting
+   * pre-wrap turns every source space between atoms into a visible gap and lets
+   * a formula break mid-symbol. Math opts back out of the paragraph's mode.
+   */
+  white-space: normal;
+}
+
+/*
+ * Display equations. Own row, centred, with a scroll gutter of its own:
+ *   - overflow-y must stay hidden next to overflow-x: auto (any scroll on one
+ *     axis makes the other a scrollport), so the padding is what keeps tall
+ *     content — \int limits, \frac stacks, \begin{aligned} — from being sheared
+ *     off at the top and bottom edges.
+ *   - the margin only tops up `md-streamdown`'s 0.7em flex gap, which already
+ *     separates blocks; katex.min.css ships 1em here, which stacked with the
+ *     gap and the padding into a hole around every formula.
+ */
+.md-root .katex-display {
+  margin: 0.25em 0;
+  padding: 0.45em 0.25em;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Wide matrices scroll inside the bubble instead of dragging the timeline. */
+  overscroll-behavior-x: contain;
+  text-align: center;
+}
+
+/* Nothing else in the answer column sits directly against a display block. */
+.md-root .katex-display:first-child {
+  margin-top: 0;
+}
+
+.md-root .katex-display:last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * A centred formula that overflows would otherwise start mid-equation with its
+ * left half already scrolled out of view. Left-align once it cannot fit, so the
+ * equation begins where the eye does and scrolls rightwards from there.
+ */
+.md-root .katex-display > .katex {
+  display: block;
+  width: fit-content;
+  min-width: 100%;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/*
+ * Parse / render errors from KaTeX. rehype-katex falls back to the raw LaTeX in
+ * `errorColor` (set inline, so colour is not ours to choose here) — bare red
+ * source in the middle of prose reads as a crash. Inline-code chrome plus a
+ * danger tint makes it read as "this snippet did not render" instead.
+ */
+.md-root .katex-error {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  background: var(--color-danger-muted);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Search cancel control is browser-specific */
 .side-nav-search::-webkit-search-cancel-button {
   display: none;
 }
 
 /*
- * Quiet auto-hide scrollbar (pseudo-elements not expressible as pure utilities).
- * Custom ::-webkit-scrollbar disables macOS overlay auto-hide, so we fake it:
- * thumb is transparent until the scroll container (or a descendant) is hovered.
+ * Scrollbars (pseudo-elements not expressible as pure utilities) — VS Code's
+ * slider: no track, no arrows, thumb inset from the edge so it reads as
+ * floating over the content rather than framing it.
+ *
+ * Both syntaxes are set on purpose, and must describe the same bar:
+ *   - Chromium and WebKit >= 18.2 honour `scrollbar-width` / `scrollbar-color`
+ *     and, once either is set, IGNORE the ::-webkit-scrollbar rules entirely.
+ *     On macOS this keeps the native overlay behaviour, so the bar auto-hides
+ *     and never takes layout width (no reflow when content starts to overflow).
+ *   - Older WebKit (the packaged shell's WKWebView on earlier macOS) ignores
+ *     the standard properties and falls back to the pseudo-elements, which do
+ *     reserve width — hence the inset thumb, which keeps that gutter readable.
+ * The thumb is no longer transparent-until-hover: an overlay scrollbar the OS
+ * already fades out does not need faking, it just made scroll position
+ * invisible.
  */
 * {
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-*:hover {
   scrollbar-color: var(--color-scrollbar-thumb) transparent;
 }
+*:hover {
+  scrollbar-color: var(--color-scrollbar-thumb-hover) transparent;
+}
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
+/* Transparent border + padding-box clip = a 4px thumb inset from the edge. */
 ::-webkit-scrollbar-thumb {
-  background: transparent;
+  background: var(--color-scrollbar-thumb);
+  background-clip: padding-box;
+  border: 3px solid transparent;
   border-radius: var(--radius-pill);
 }
-*:hover::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar-thumb);
-}
-*:hover::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: var(--color-scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 /* ── Mentions (@file / /command) ───────────────────────────────────────────

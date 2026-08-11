@@ -1,12 +1,28 @@
 /**
  * Stateless streaming Markdown view via Streamdown (GFM + incomplete-block tolerant).
  * Custom components map to app `md-*` Uno shortcuts so colors stay on defineColor tokens.
+ *
+ * Math pipeline (two stages — both required for agent textbook answers):
+ * 1. {@link normalizeAgentMath} — bare `(\sqrt{…})` / multi-line `[ … ]` /
+ *    even `\(...\)` / `\[…\]` → **only** `$…$` / `$$…$$`.
+ *    remark-math@6 (used by @streamdown/math) does not parse backslash
+ *    delimiters; CommonMark then eats `\` and leaves raw `[` soup on screen.
+ * 2. `@streamdown/math` (remark-math + KaTeX) renders `$…$` / `$$…$$`.
+ *
+ * Links open outside the shell via {@link openExternalUrl} (Wails system browser /
+ * Vite new tab) — bare target=_blank is a no-op inside the desktop webview.
  */
 
-import type { HTMLAttributes, ReactNode } from "react";
-import type { Components } from "streamdown";
-import { Streamdown } from "streamdown";
+import type { HTMLAttributes, MouseEvent, ReactNode } from "react";
+import { Streamdown, type Components } from "streamdown";
+import { createMathPlugin } from "@streamdown/math";
 import cs from "classnames";
+import { openExternalUrl } from "@/lib/openExternalUrl";
+import { normalizeAgentMath } from "@/lib/normalizeAgentMath";
+import { MarkdownCodeWidget } from "./MarkdownCodeWidget";
+// KaTeX layout metrics (fonts, spacing). Text color inherits `currentColor` from
+// `.md-root`; errorColor below maps parse failures to the app danger token.
+import "katex/dist/katex.min.css";
 
 export type StreamingMarkdownViewProps = {
   /** Full accumulated agent text (may be mid-stream / incomplete Markdown). */
@@ -14,6 +30,20 @@ export type StreamingMarkdownViewProps = {
   /** Whether to show a streaming caret after the last rendered content. */
   showCursor?: boolean;
 };
+
+/**
+ * Streamdown math plugin (KaTeX).
+ * singleDollarTextMath: LLMs almost always emit `$…$` for inline math; fenced
+ * code blocks stay out of remark-math so `$HOME` / shell dollars inside fences
+ * are not rewritten. errorColor must be a defineColor token (no hex in TSX).
+ */
+const streamdownMath = createMathPlugin({
+  singleDollarTextMath: true,
+  errorColor: "var(--color-danger)",
+});
+
+/** Stable plugins map — avoid reallocating on every StreamingMarkdownView render. */
+const streamdownPlugins = { math: streamdownMath };
 
 /**
  * Common props Streamdown passes into custom element renderers.
@@ -94,14 +124,30 @@ const mdComponents: Components = {
     return <li {...rest} className={className} />;
   },
   a: (props) => {
-    const { className, href, ...rest } = withoutNode(props as MdElementProps);
+    const { className, href, onClick, ...rest } = withoutNode(
+      props as MdElementProps,
+    );
+    /** Raw href from markdown; may be unsafe — open path re-validates. */
+    const rawHref = typeof href === "string" ? href : undefined;
     return (
       <a
         {...rest}
-        href={typeof href === "string" ? href : undefined}
+        href={rawHref}
         className={mdClass("md-link", className)}
         target="_blank"
         rel="noreferrer noopener"
+        onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+          if (typeof onClick === "function") {
+            onClick(event);
+          }
+          if (event.defaultPrevented || !rawHref) {
+            return;
+          }
+          // Always take over primary click: webview target=_blank does not open
+          // the system browser; keep href for a11y / copy-link context menu.
+          event.preventDefault();
+          void openExternalUrl(rawHref);
+        }}
       />
     );
   },
@@ -135,12 +181,12 @@ const mdComponents: Components = {
     const { className, ...rest } = withoutNode(props as MdElementProps);
     const isFenced =
       typeof className === "string" && className.includes("language-");
-    return (
-      <code
-        {...rest}
-        className={cs({ "md-inline-code": !isFenced }, className)}
-      />
-    );
+    // Only fences get highlighted: inline code is prose-sized chrome, and
+    // tokenizing a bare word out of context colors it wrong more often than right.
+    if (isFenced) {
+      return <MarkdownCodeWidget {...rest} className={className} />;
+    }
+    return <code {...rest} className={cs("md-inline-code", className)} />;
   },
   table: (props) => {
     const { className, children, ...rest } = withoutNode(
@@ -192,6 +238,9 @@ const mdComponents: Components = {
  */
 export function StreamingMarkdownView(props: StreamingMarkdownViewProps) {
   const { text, showCursor } = props;
+  // Bare () / [] / \( \) / \[ \] → $ / $$ only (remark-math v6). Then KaTeX.
+  // Incomplete stream ticks leave open wrappers alone.
+  const mathReady = normalizeAgentMath(text);
 
   return (
     /* data-streaming drives the caret (base.css): it is an ::after on the last
@@ -205,9 +254,10 @@ export function StreamingMarkdownView(props: StreamingMarkdownViewProps) {
         controls={false}
         lineNumbers={false}
         linkSafety={{ enabled: false }}
+        plugins={streamdownPlugins}
         components={mdComponents}
       >
-        {text}
+        {mathReady}
       </Streamdown>
     </div>
   );
