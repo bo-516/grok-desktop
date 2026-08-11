@@ -4,7 +4,7 @@
 
 import type { ChangeSet } from "@/lib/changeSet";
 import { buildFileDiff } from "@/lib/diffCore";
-import { PreviewDiffView } from "./PreviewDiffView";
+import { PreviewDiffWidget } from "./PreviewDiffWidget";
 
 export type PreviewChangeListViewProps = {
   /** Aggregated change set for a turn or session. */
@@ -69,7 +69,15 @@ export function PreviewChangeListView(props: PreviewChangeListViewProps) {
                 {file.degraded || fileDiff.degraded ? " · ≈" : ""}
               </span>
             </header>
-            <PreviewDiffView fileDiff={fileDiff} />
+            {/* path drives the grammar only — the sticky header above already
+              * shows it, so the diff's own path row is suppressed. */}
+            <PreviewDiffWidget
+              fileDiff={fileDiff}
+              path={file.path}
+              showPath={false}
+              oldText={file.baseText ?? ""}
+              newText={file.headText ?? ""}
+            />
           </section>
         );
       })}

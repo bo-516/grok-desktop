@@ -20,6 +20,7 @@ const colors = {
   "composer-suggestion": "var(--color-bg-composer-suggestion)",
   "composer-suggestion-hover": "var(--color-bg-composer-suggestion-hover)",
   sidebar: "var(--color-bg-sidebar)",
+  "sidebar-hover": "var(--color-bg-sidebar-hover)",
   titlebar: "var(--color-bg-titlebar)",
   user: "var(--color-bg-user)",
   tool: "var(--color-bg-tool)",
@@ -77,6 +78,21 @@ const colors = {
   "mention-command-bg": "var(--color-mention-command-bg)",
   "mention-skill": "var(--color-mention-skill)",
   "mention-skill-bg": "var(--color-mention-skill-bg)",
+  /* Syntax kinds emitted by the highlighter theme (see codeHighlight.ts) */
+  "code-keyword": "var(--color-code-keyword)",
+  "code-control": "var(--color-code-control)",
+  "code-type": "var(--color-code-type)",
+  "code-tag": "var(--color-code-tag)",
+  "code-string": "var(--color-code-string)",
+  "code-string-expression": "var(--color-code-string-expression)",
+  "code-comment": "var(--color-code-comment)",
+  "code-constant": "var(--color-code-constant)",
+  "code-number": "var(--color-code-number)",
+  "code-function": "var(--color-code-function)",
+  "code-punctuation": "var(--color-code-punctuation)",
+  "code-variable": "var(--color-code-variable)",
+  "code-parameter": "var(--color-code-parameter)",
+  "code-link": "var(--color-code-link)",
 } as const;
 
 export default defineConfig({
@@ -93,6 +109,7 @@ export default defineConfig({
     "uno/shortcuts.composer.ts",
     "uno/shortcuts.chrome.ts",
     "uno/shortcuts.preview.ts",
+    "uno/shortcuts.code.ts",
   ],
   /**
    * Colon only. UnoCSS also accepts `-` as a variant separator by default, so
@@ -189,6 +206,16 @@ export default defineConfig({
         /* Mic live indicator — soft opacity pulse, not a layout thrash. */
         "mic-pulse":
           "{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.45;transform:scale(0.85)}}",
+        /*
+         * Live-turn strip. The orb ping is a radar ring that scales out of an
+         * 8px box (transform inside keyframes is raw CSS, so it does not need
+         * presetUno's --un-translate plumbing); the strip entrance is a short
+         * rise so the dock growing by one row does not read as a jump cut.
+         */
+        "turn-orb-ping":
+          "{0%{transform:scale(0.9);opacity:0.5}70%,100%{transform:scale(2.4);opacity:0}}",
+        "turn-status-in":
+          "{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}",
       },
       durations: {
         "skeleton-pulse": "1.4s",
@@ -196,6 +223,8 @@ export default defineConfig({
         "overlay-in": "var(--duration-normal)",
         "modal-in": "var(--duration-slow)",
         "mic-pulse": "1.2s",
+        "turn-orb-ping": "1.8s",
+        "turn-status-in": "var(--duration-slow)",
       },
       timingFns: {
         "skeleton-pulse": "var(--ease-soft)",
@@ -203,11 +232,14 @@ export default defineConfig({
         "overlay-in": "var(--ease-soft)",
         "modal-in": "var(--ease-out)",
         "mic-pulse": "var(--ease-soft)",
+        "turn-orb-ping": "var(--ease-out)",
+        "turn-status-in": "var(--ease-out)",
       },
       counts: {
         "skeleton-pulse": "infinite",
         "cursor-blink": "infinite",
         "mic-pulse": "infinite",
+        "turn-orb-ping": "infinite",
       },
     },
   },

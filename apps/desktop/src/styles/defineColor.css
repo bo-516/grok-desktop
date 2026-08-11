@@ -46,9 +46,10 @@
   --scheme-elevate-4: 18%;
   --scheme-elevate-5: 22%;
   --scheme-fg-strength: 100%;
-  --scheme-muted: 38%;
-  --scheme-faint: 28%;
-  --scheme-secondary: 62%;
+  /* Muted/faint raised for helper chrome contrast on dark canvas (UI audit). */
+  --scheme-muted: 52%;
+  --scheme-faint: 40%;
+  --scheme-secondary: 68%;
   --scheme-border: 8%;
   --scheme-border-strong: 14%;
   --scheme-overlay: 55%;
@@ -116,6 +117,16 @@
     transparent
   );
   --color-bg-sidebar: var(--color-surface-low);
+  /*
+   * Opaque sidebar hover: same ink strength as white-faint, but mixed into the
+   * solid sidebar surface (not transparent). Sticky folder headers must stay
+   * opaque so scrolled session titles never bleed through on hover.
+   */
+  --color-bg-sidebar-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 3%,
+    var(--color-bg-sidebar)
+  );
   --color-bg-titlebar: color-mix(
     in oklch,
     var(--color-surface-lowest) 88%,
@@ -264,6 +275,35 @@
     transparent
   );
 
+  /*
+   * Syntax highlighting (dark) — literals transplanted from VS Code's default
+   * dark theme (Dark+ / Dark Modern), mapped onto the semantic kinds the
+   * highlighter emits (see src/lib/codeHighlight.ts).
+   *
+   * Literals, not formulas, on purpose: these are a borrowed theme's palette,
+   * so they must NOT retint with --seed-brand — a per-palette hue shift would
+   * desaturate keyword/string apart from each other and break code legibility.
+   * Consumers use the `code-tok-*` shortcuts only; never these vars directly.
+   *
+   * Swapping themes = replace these values here (and the light block below)
+   * with another VS Code theme's; no TS/TSX change is needed.
+   */
+  --color-code-keyword: #569cd6;
+  --color-code-control: #c586c0;
+  --color-code-type: #4ec9b0;
+  --color-code-tag: #569cd6;
+  --color-code-string: #ce9178;
+  --color-code-string-expression: #ce9178;
+  --color-code-comment: #6a9955;
+  --color-code-constant: #4fc1ff;
+  --color-code-number: #b5cea8;
+  --color-code-function: #dcdcaa;
+  --color-code-variable: #9cdcfe;
+  --color-code-parameter: #9cdcfe;
+  --color-code-link: #6796e6;
+  /* VS Code leaves separators at editor foreground; body text is our stand-in. */
+  --color-code-punctuation: var(--color-text-primary);
+
   /* Modes follow brand ink */
   --color-mode-ask: color-mix(in oklch, var(--seed-ink) 72%, transparent);
   --color-mode-plan: color-mix(in oklch, var(--seed-ink) 72%, transparent);
@@ -336,11 +376,14 @@
     transparent
   );
 
-  /* Scrollbar */
-  --color-scrollbar-thumb: color-mix(in oklch, var(--seed-ink) 10%, transparent);
+  /*
+   * Scrollbar — sits over content, so the thumb needs enough weight to be
+   * findable at 4px wide (VS Code's slider is ~40% ink over the editor).
+   */
+  --color-scrollbar-thumb: color-mix(in oklch, var(--seed-ink) 24%, transparent);
   --color-scrollbar-thumb-hover: color-mix(
     in oklch,
-    var(--seed-ink) 18%,
+    var(--seed-ink) 40%,
     transparent
   );
 
@@ -460,9 +503,9 @@ html[data-theme="light"] {
   --scheme-elevate-3: 0%;
   --scheme-elevate-4: 0%;
   --scheme-elevate-5: 0%;
-  --scheme-muted: 48%;
-  --scheme-faint: 38%;
-  --scheme-secondary: 68%;
+  --scheme-muted: 55%;
+  --scheme-faint: 42%;
+  --scheme-secondary: 70%;
   --scheme-border: 9%;
   --scheme-border-strong: 15%;
   --scheme-overlay: 32%;
@@ -507,6 +550,12 @@ html[data-theme="light"] {
   );
   --color-bg-user: #ffffff;
   --color-bg-sidebar: var(--color-surface-low);
+  /* Opaque sticky-header hover (matches white-faint strength on solid sidebar). */
+  --color-bg-sidebar-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 2.75%,
+    var(--color-bg-sidebar)
+  );
   --color-bg-secondary-container: color-mix(
     in oklch,
     var(--seed-ink) 4%,
@@ -540,6 +589,30 @@ html[data-theme="light"] {
   );
   --color-outline: color-mix(in oklch, var(--seed-ink) 16%, transparent);
   --color-outline-variant: color-mix(in oklch, var(--seed-ink) 9%, transparent);
+
+  /*
+   * Syntax highlighting (light) — VS Code's default light theme (Light+ /
+   * Light Modern), the counterpart of every dark kind above. Kept as a full
+   * override set, not a lightening formula: the theme's light ramp is
+   * hand-tuned for a white canvas, and deriving it from the dark hexes would
+   * wash out comment/punctuation below readable contrast. Note tags flip hue
+   * between the two themes (blue in dark, dark red in light) — that is VS
+   * Code's own choice, not a mapping slip.
+   */
+  --color-code-keyword: #0000ff;
+  --color-code-control: #af00db;
+  --color-code-type: #267f99;
+  --color-code-tag: #800000;
+  --color-code-string: #a31515;
+  --color-code-string-expression: #a31515;
+  --color-code-comment: #008000;
+  --color-code-constant: #0070c1;
+  --color-code-number: #098658;
+  --color-code-function: #795e26;
+  --color-code-variable: #001080;
+  --color-code-parameter: #001080;
+  --color-code-link: #0451a5;
+  --color-code-punctuation: var(--color-text-primary);
 
   /*
    * Shadows: soft drop on bordered panels (menus already draw a hairline).

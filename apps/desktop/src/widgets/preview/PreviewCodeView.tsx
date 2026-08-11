@@ -3,6 +3,9 @@
  * Virtualization is deferred (S2); large files are already truncated on bridge.
  */
 
+import type { CodeLine } from "@/lib/codeHighlight";
+import { CodeLineView } from "@/widgets/shared";
+
 export type PreviewCodeViewProps = {
   /** File text to display (may already be truncated). */
   content: string;
@@ -10,6 +13,12 @@ export type PreviewCodeViewProps = {
   focusLine?: number;
   /** When true, show a truncation banner above the body. */
   truncated?: boolean;
+  /**
+   * Syntax tokens for `content`, indexed by 0-based line. Undefined (or a short
+   * array) renders the affected rows as plain text, which is the correct state
+   * while tokenizing, for unknown file types, and past the size guard.
+   */
+  lines?: CodeLine[];
 };
 
 /**
@@ -54,7 +63,9 @@ export function PreviewCodeView(props: PreviewCodeViewProps) {
                   data-line={lineNo}
                 >
                   <td className="preview-gutter">{lineNo}</td>
-                  <td className="preview-code-text">{line}</td>
+                  <td className="preview-code-text">
+                    <CodeLineView text={line} tokens={props.lines?.[i]} />
+                  </td>
                 </tr>
               );
             })}

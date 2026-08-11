@@ -42,8 +42,7 @@ export const previewShortcuts: Record<string, string> = {
   "preview-code-row-focus": "bg-white-soft",
   "preview-gutter":
     "align-top text-right pr-2 pl-2 py-0.25 text-fg-muted select-none w-10 border-r border-line-subtle",
-  "preview-code-text":
-    "align-top pl-2.5 pr-3 py-0.25 text-fg whitespace-pre-wrap break-words",
+  "preview-code-text": "align-top pl-2.5 pr-3 py-0.25 text-fg code-wrap",
   "preview-diff": "flex flex-col min-h-0",
   "preview-diff-stack": "flex flex-col gap-3 min-h-0 overflow-auto p-0",
   "preview-diff-path":
@@ -63,8 +62,7 @@ export const previewShortcuts: Record<string, string> = {
     "text-right pr-1.5 pl-0.5 py-0.25 text-[var(--color-diff-gutter)] select-none tabular-nums border-r border-line-subtle",
   "preview-diff-mark":
     "text-center py-0.25 text-fg-muted select-none",
-  "preview-diff-text":
-    "pl-1.5 pr-3 py-0.25 text-fg whitespace-pre-wrap break-words",
+  "preview-diff-text": "pl-1.5 pr-3 py-0.25 text-fg code-wrap",
   "preview-change-list": "flex flex-col min-h-0 overflow-auto",
   "preview-change-summary":
     "sticky top-0 z-1 px-3.5 py-2 text-12px text-fg-secondary bg-surface border-b border-line-subtle flex items-center gap-2",
@@ -103,7 +101,7 @@ export const previewShortcuts: Record<string, string> = {
   "diff-line-del": "bg-diff-del-bg",
   "diff-gutter":
     "shrink-0 w-5 text-center select-none text-fg-muted",
-  "diff-text": "flex-1 whitespace-pre-wrap break-words px-2 py-0.25",
+  "diff-text": "flex-1 code-wrap px-2 py-0.25",
   "diff-review-footer":
     "flex items-center gap-2 px-2.5 py-2 border-t border-line-subtle",
   "mini-diff-summary": "text-fg-muted tabular-nums",

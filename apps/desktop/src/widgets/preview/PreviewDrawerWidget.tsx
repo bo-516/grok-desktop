@@ -24,8 +24,8 @@ import { useSessionStore } from "@/store/sessionStore";
 import { useCopyFeedback } from "@/widgets/shared";
 import { DiffReviewView } from "./DiffReviewView";
 import { PreviewChangeListView } from "./PreviewChangeListView";
-import { PreviewCodeView } from "./PreviewCodeView";
-import { PreviewDiffView } from "./PreviewDiffView";
+import { PreviewCodeWidget } from "./PreviewCodeWidget";
+import { PreviewDiffWidget } from "./PreviewDiffWidget";
 import { PreviewHeadView } from "./PreviewHeadView";
 import { usePreviewSource } from "./usePreviewSource";
 
@@ -191,7 +191,8 @@ function PreviewBody(props: {
   }
   if (source.status === "file") {
     return (
-      <PreviewCodeView
+      <PreviewCodeWidget
+        path={source.path}
         content={source.content}
         truncated={source.truncated}
         focusLine={source.focusLine}
@@ -201,7 +202,12 @@ function PreviewBody(props: {
   if (source.status === "diff") {
     return (
       <div className="preview-diff-stack">
-        <PreviewDiffView fileDiff={source.fileDiff} path={source.path} />
+        <PreviewDiffWidget
+          fileDiff={source.fileDiff}
+          path={source.path}
+          oldText={source.oldText}
+          newText={source.newText}
+        />
         <DiffReviewView
           key={`${source.toolCallId}:${source.path}`}
           path={source.path}

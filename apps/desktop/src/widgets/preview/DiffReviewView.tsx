@@ -13,6 +13,9 @@ import {
   setHunkDecision,
   type ReviewableHunk,
 } from "../../lib/diffHunkApply";
+import { languageForPath } from "../../lib/codeHighlightLanguages";
+import { diffRowTokens } from "../../lib/diffLineTokens";
+import { CodeLineView, useCodeHighlight } from "../shared";
 
 export type DiffReviewViewProps = {
   path: string;
@@ -28,6 +31,8 @@ export type DiffReviewViewProps = {
  */
 export function DiffReviewView(props: DiffReviewViewProps) {
   const live = useSessionStore((s) => s.live);
+  /** Canvas session workspace — required so Apply does not hit the last-started pool cwd. */
+  const workspace = useSessionStore((s) => s.session.workspace);
   const initial = useMemo(
     () => createDiffReview(props.oldText, props.newText),
     [props.oldText, props.newText],
@@ -35,6 +40,15 @@ export function DiffReviewView(props: DiffReviewViewProps) {
   const [hunks, setHunks] = useState<ReviewableHunk[]>(initial.hunks);
   const [status, setStatus] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  /*
+   * Highlight both sides whole, then index per row — hunk lines alone lack the
+   * surrounding context TextMate needs. Accept/reject only changes what is
+   * written on Apply, never the rendered text, so decisions do not invalidate
+   * these tokens.
+   */
+  const language = useMemo(() => languageForPath(props.path), [props.path]);
+  const oldLines = useCodeHighlight(props.oldText ?? "", language);
+  const newLines = useCodeHighlight(props.newText ?? "", language);
 
   // Sync when the preview target / texts change without a full remount.
   useEffect(() => {
@@ -56,7 +70,12 @@ export function DiffReviewView(props: DiffReviewViewProps) {
     setStatus(null);
     try {
       const content = applyHunkDecisions(props.oldText, props.newText, hunks);
-      const result = await live.writeWorkspaceFile(props.path, content);
+      const writeCwd = workspace?.trim() || undefined;
+      const result = await live.writeWorkspaceFile(
+        props.path,
+        content,
+        writeCwd,
+      );
       if (!result.ok) {
         setStatus(result.error ?? "write failed");
       } else {
@@ -117,7 +136,16 @@ export function DiffReviewView(props: DiffReviewViewProps) {
               })}
             >
               <span className="diff-gutter">{diffGutterMark(line.type)}</span>
-              <span className="diff-text">{line.text}</span>
+              <span className="diff-text">
+                <CodeLineView
+                  text={line.text}
+                  tokens={diffRowTokens(
+                    line,
+                    oldLines ?? undefined,
+                    newLines ?? undefined,
+                  )}
+                />
+              </span>
             </div>
           ))}
         </div>

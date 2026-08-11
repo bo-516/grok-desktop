@@ -17,5 +17,8 @@ export type { MentionIconKind } from "./stateless/MentionIconView";
 export { MentionTextView } from "./stateless/MentionTextView";
 export { PathLabelView } from "./stateless/PathLabelView";
 export type { PathLabelViewProps } from "./stateless/PathLabelView";
+export { useCodeHighlight } from "./useCodeHighlight";
+export { CodeLineView } from "./stateless/CodeLineView";
+export type { CodeLineViewProps } from "./stateless/CodeLineView";
 export { useCopyFeedback } from "./useCopyFeedback";
 export type { CopyFeedback } from "./useCopyFeedback";
