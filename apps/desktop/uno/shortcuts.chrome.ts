@@ -90,13 +90,14 @@ export const chromeShortcuts: Record<string, string> = {
       "fixed inset-0 bg-overlay flex items-center justify-center z-100 animate-overlay-in",
     "modal-backdrop":
       "fixed inset-0 bg-overlay flex items-center justify-center z-100 animate-overlay-in",
-    /* Full-viewport image preview (composer attach + timeline history). */
+    /* Full-page image preview dialog (composer attach + timeline history).
+     * Portaled to body; light backdrop-blur so the page is still faintly readable. */
     "image-lightbox":
-      "fixed inset-0 z-100 flex items-center justify-center p-6 bg-overlay animate-overlay-in cursor-zoom-out",
+      "fixed inset-0 z-110 flex items-center justify-center p-6 bg-overlay backdrop-blur-8px animate-overlay-in cursor-zoom-out",
     "image-lightbox-img":
       "max-w-[min(96vw,1200px)] max-h-[min(90vh,900px)] w-auto h-auto object-contain rounded-12px shadow-modal cursor-default select-none",
     "image-lightbox-close":
-      "absolute top-4 right-4 flex items-center justify-center w-9 h-9 p-0 m-0 border border-line-subtle rounded-full bg-elevated text-fg-secondary cursor-pointer transition-colors duration-fast ease-soft hover:(bg-high text-fg)",
+      "absolute top-4 right-4 z-1 flex items-center justify-center w-9 h-9 p-0 m-0 border border-line-subtle rounded-full bg-elevated text-fg-secondary cursor-pointer transition-colors duration-fast ease-soft hover:(bg-high text-fg)",
     "image-lightbox-close-icon": "w-4.5 h-4.5",
     modal:
       "w-[min(420px,92vw)] bg-container border border-line-subtle rounded-modal shadow-modal p-5 animate-modal-in",

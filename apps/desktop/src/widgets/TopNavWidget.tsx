@@ -10,7 +10,7 @@ import { SessionMenuWidget } from "./SessionMenuWidget";
 export type TopNavWidgetProps = {
   /** Session display title. */
   title: string;
-  /** Compact sync chip label (Synced / Generating / Offline). */
+  /** Compact connection chip label (Synced / Awaiting / Offline). */
   syncLabel: string;
   /** Live bridge connected. */
   live: boolean;
@@ -30,11 +30,11 @@ export type TopNavWidgetProps = {
   /** Request delete confirm for a session. */
   onRequestDelete: (id: string, title: string) => void;
   /**
-   * Open/close session rail overlay on narrow viewports (max-sm).
+   * Open/close session rail overlay on narrow viewports (≤900px).
    * Missing handler hides the rail toggle (desktop dock always visible).
    */
   onToggleRail?: () => void;
-  /** Whether the mobile rail overlay is open (aria-expanded). */
+  /** Whether the narrow rail overlay is open (aria-expanded). */
   railOpen?: boolean;
 };
 

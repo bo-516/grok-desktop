@@ -41,6 +41,9 @@ describe("UI surface presence", () => {
     assert.match(userMsg, /ImageLightboxView|handleOpenImage|lightboxIndex/);
     const lightbox = readSrc("widgets/shared/stateless/ImageLightboxView.tsx");
     assert.match(lightbox, /image-lightbox/);
+    // Full-page dialog: portal out of overflow ancestors + backdrop dismiss.
+    assert.match(lightbox, /createPortal/);
+    assert.match(lightbox, /aria-modal/);
     assert.doesNotMatch(
       userMsg,
       /b\.type === ["']text["'] \? b\.text : b\.type/,
@@ -394,13 +397,17 @@ describe("UI surface presence", () => {
     const shortcuts = readAllUnoShortcuts();
     const sideNav = readDesktopRoot("uno/shortcuts.sidenav.ts");
     const base = readSrc("styles/base.css");
-    assert.match(shortcuts, /"main-column":[\s\S]*?max-sm:ml-0/);
-    assert.match(shortcuts, /"top-nav":[\s\S]*?max-sm:left-0/);
+    // ≤900px: rail overlays so tablet/narrow laptop keep chat width.
+    assert.match(shortcuts, /"main-column":[\s\S]*?max-\[900px\]:ml-0/);
+    assert.match(shortcuts, /"top-nav":[\s\S]*?max-\[900px\]:left-0/);
     assert.match(shortcuts, /"top-nav-rail-btn":/);
-    // Narrow shell lives only in Uno max-sm (no duplicate base.css media query).
+    // Narrow shell lives only in Uno (no duplicate base.css media query).
     assert.doesNotMatch(base, /@media \(max-width:\s*639px\)/);
-    assert.match(sideNav, /"side-nav":[\s\S]*?max-sm:translate-x-\[-100%\]/);
-    assert.match(sideNav, /max-sm:data-\[open=true\]:translate-x-0/);
+    assert.match(
+      sideNav,
+      /"side-nav":[\s\S]*?max-\[900px\]:translate-x-\[-100%\]/,
+    );
+    assert.match(sideNav, /max-\[900px\]:data-\[open=true\]:translate-x-0/);
     const top = readSrc("widgets/TopNavWidget.tsx");
     assert.match(top, /onToggleRail|top-nav-rail-btn/);
     const rail = readSrc("widgets/sessionRail/SessionRailView.tsx");
@@ -672,6 +679,8 @@ describe("UI surface presence", () => {
     // Pin is per-session, not per folder.
     assert.match(railHook, /orderGroupsBySessionPin/);
     assert.match(railHook, /toggleCollapsedWorkspace|onToggleCollapse/);
+    assert.match(railHook, /loadSessionRailPrefs|saveSessionRailPrefs/);
+    assert.match(railHook, /expandWorkspacePreview|onExpandPreview/);
     assert.match(railHook, /togglePinnedSession|onTogglePin/);
     assert.doesNotMatch(railHook, /togglePinnedWorkspace|pinnedWorkspaces/);
     assert.match(rail, /New chat/);
@@ -681,6 +690,30 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(rail, /backgroundColor|color:\s*['"`]#|rgb\(/);
     assert.match(rail, /project-section-label/);
     assert.match(rail, /project-section-head/);
+    // PROJECTS is outside the scrollport (no sticky bleed); workspace names sticky.
+    assert.match(
+      rail,
+      /project-section-head[\s\S]*?side-nav-scroll/,
+    );
+    const sideNavShortcuts = readDesktopRoot("uno/shortcuts.sidenav.ts");
+    assert.match(
+      sideNavShortcuts,
+      /"project-group-header":\s*"sticky top-0/,
+    );
+    assert.match(
+      sideNavShortcuts,
+      /"project-group-header":[\s\S]*?bg-sidebar/,
+    );
+    // Sticky folder hover must stay opaque (sidebar-hover), not white-faint —
+    // translucent hover lets scrolled session titles bleed through the name.
+    {
+      const header =
+        sideNavShortcuts.match(
+          /"project-group-header":\s*"([^"]+)"/,
+        )?.[1] ?? "";
+      assert.match(header, /hover:bg-sidebar-hover/);
+      assert.doesNotMatch(header, /hover:bg-white-/);
+    }
     const composer = readSrc("widgets/composer/ComposerWidget.tsx");
     assert.match(composer, /ProjectSwitcherWidget/);
     // Project switcher + create dialog (Codex-style); lock when session has content.
@@ -723,13 +756,18 @@ describe("UI surface presence", () => {
     assert.match(groupView, /Show .+ more|Show more/);
     assert.match(groupView, /PROJECT_SESSION_PREVIEW/);
     assert.match(groupView, /onToggleCollapse/);
-    // Title + pin + meta stay on separate grid tracks.
+    // Collapse / "Show more" are controlled from rail prefs (not local useState).
+    assert.match(groupView, /previewExpanded/);
+    assert.match(groupView, /onExpandPreview/);
+    assert.doesNotMatch(groupView, /useState/);
+    // Title | trailing actions (pin + meta). No leading status dot.
     const sessionRow = readSrc("widgets/SessionRailSessionRowView.tsx");
+    assert.match(sessionRow, /sess-actions/);
     assert.match(sessionRow, /sess-meta/);
-    assert.match(sessionRow, /sess-status/);
+    assert.doesNotMatch(sessionRow, /sess-status/);
     assert.match(sessionRow, /sess-pin/);
     assert.match(sessionRow, /onTogglePin/);
-    // Drag reorder within a project (user order > title auto-sort).
+    // Drag reorder within a project (user order > recency auto-sort).
     assert.match(sessionRow, /draggable/);
     assert.match(sessionRow, /onReorder/);
     assert.match(railHook, /applyWorkspaceSessionOrder|moveSessionIdInOrder/);
@@ -740,15 +778,49 @@ describe("UI surface presence", () => {
     assert.match(appShortcuts, /shellShortcuts|timelineShortcuts|composerShortcuts|chromeShortcuts/);
     assert.match(
       shortcuts,
-      /"sess-row":[\s\S]*?grid-cols-\[auto_minmax\(0,1fr\)_auto_auto\]/,
+      /"sess-row":[\s\S]*?grid-cols-\[minmax\(0,1fr\)_auto\]/,
     );
+    assert.match(shortcuts, /"sess-actions":/);
+    assert.doesNotMatch(shortcuts, /"sess-status"/);
     assert.match(
       shortcuts,
       /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-medium[\s\S]*?leading-snug/,
     );
     assert.match(shortcuts, /"project-section-label":/);
     assert.match(shortcuts, /"project-group-sessions":/);
-    assert.match(shortcuts, /"sess-row-active":[\s\S]*?inset_2px/);
+    // Active selection is elevated fill + medium title only (no border ring /
+    // left accent bar / inset crescent — those fight rounded-7px and read
+    // loud on the rail).
+    {
+      const active =
+        shortcuts.match(/"sess-row-active":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.match(active, /bg-high/);
+      assert.doesNotMatch(active, /shadow-\[inset_0_0_0_1px_/);
+      assert.match(active, /sess-title.*font-medium|font-medium.*sess-title/);
+      assert.doesNotMatch(active, /inset_2px|before:\(content-/);
+    }
+    // Folder of the selected chat is marked so the current project reads when
+    // its row scrolls off / the group collapses: idle names sit at secondary
+    // ink, active lifts name + folder glyph + tree guide. Parent selectors
+    // only — same-element overrides lose on Uno emit order.
+    {
+      const groupActive =
+        shortcuts.match(/"project-group-active":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.match(groupActive, /\[&_\.project-group-name\]:text-fg\b/);
+      assert.match(groupActive, /\[&_\.project-group-folder\]:/);
+      assert.match(
+        groupActive,
+        /\[&_\.project-group-sessions\]:before:bg-line-/,
+      );
+      assert.doesNotMatch(groupActive, /bg-white-|bg-sidebar/);
+      assert.match(
+        shortcuts,
+        /"project-group-name":[\s\S]*?text-fg-secondary/,
+      );
+      assert.match(groupView, /project-group-active/);
+      assert.match(railHook, /selectedWorkspace/);
+      assert.match(rail, /selectedWorkspace/);
+    }
     // Folder count stays visible (no hover-hide); session pin + time/remove own their slots.
     const countShortcut = shortcuts.match(
       /"project-group-count":\s*"([^"]+)"/,
@@ -764,10 +836,20 @@ describe("UI surface presence", () => {
       /"sess-row-pinned":[\s\S]*?\[&_\.sess-pin\]:\(opacity-100/,
     );
     assert.match(shortcuts, /"sess-time":[\s\S]*?group-hover:opacity-0/);
-    assert.match(shortcuts, /"sess-meta":[\s\S]*?w-\[26px\]/);
-    // Close control must zero native button padding or it drifts left of the time column.
+    assert.match(shortcuts, /"sess-meta":[\s\S]*?w-\[32px\]/);
+    // Remove is a narrow right-aligned control, not a full-slot inset fill.
+    assert.match(
+      shortcuts,
+      /"sess-remove":[\s\S]*?absolute right-0[\s\S]*?w-5\.5/,
+    );
+    assert.doesNotMatch(
+      shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "",
+      /inset-0/,
+    );
+    // Close control must zero native button padding; ≥28px hit target is centered.
     assert.match(shortcuts, /"sess-remove":[\s\S]*?p-0/);
-    assert.match(shortcuts, /"sess-remove":[\s\S]*?justify-end/);
+    assert.match(shortcuts, /"sess-remove":[\s\S]*?justify-center/);
+    assert.match(shortcuts, /"sess-pin":[\s\S]*?w-7 h-7/);
   });
 
   it("tool card normalizes array content and plan empty is en-US", () => {
@@ -776,6 +858,8 @@ describe("UI surface presence", () => {
     // Timeline no longer embeds full interactive review; summary + openPreview only
     assert.match(tool, /EditSummaryRowView/);
     assert.match(tool, /openPreview/);
+    // Large tool dumps collapse by default (Show full output).
+    assert.match(tool, /Show full output|tool-content-collapsed|shouldCollapseToolText/);
     assert.doesNotMatch(tool, /DiffReviewView/);
     assert.doesNotMatch(tool, /window\.open\(`file:\/\//);
     const diff = readSrc("widgets/preview/DiffReviewView.tsx");

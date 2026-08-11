@@ -1,8 +1,12 @@
 /**
- * Full-viewport image preview overlay (composer attach + timeline history).
- * Pure presentation: parent owns open/close and Escape; click backdrop to dismiss.
+ * Full-page image preview dialog (composer attach + timeline history).
+ * Pure presentation: parent owns open/close and Escape; click backdrop to
+ * dismiss. Portals to document.body so overflow ancestors cannot clip the
+ * stage, and applies a light backdrop blur over the dimmed page.
  */
 
+import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 export type ImageLightboxViewProps = {
@@ -15,13 +19,25 @@ export type ImageLightboxViewProps = {
 };
 
 /**
- * Fixed dimmed stage with a contained image and a corner close control.
+ * Fixed full-viewport dialog with a contained, centered image and a corner
+ * close control. Backdrop is dimmed + lightly blurred so the page remains
+ * faintly visible underneath.
  * @param props Non-empty src required; parent should unmount when closed.
- * @returns Dialog markup; never returns null (caller gates mount).
+ * @returns Portal dialog markup; never returns null (caller gates mount).
  */
 export function ImageLightboxView(props: ImageLightboxViewProps) {
   const { src, alt, onClose } = props;
-  return (
+
+  // Lock page scroll while the full-page stage is open.
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  const dialog = (
     <div
       className="image-lightbox"
       role="dialog"
@@ -47,4 +63,6 @@ export function ImageLightboxView(props: ImageLightboxViewProps) {
       />
     </div>
   );
+
+  return createPortal(dialog, document.body);
 }

@@ -11,6 +11,7 @@ import { timelineShortcuts } from "./shortcuts.timeline";
 import { composerShortcuts } from "./shortcuts.composer";
 import { chromeShortcuts } from "./shortcuts.chrome";
 import { previewShortcuts } from "./shortcuts.preview";
+import { codeShortcuts } from "./shortcuts.code";
 
 export const appShortcuts: Record<string, string> = {
   ...sideNavShortcuts,
@@ -19,4 +20,5 @@ export const appShortcuts: Record<string, string> = {
   ...composerShortcuts,
   ...chromeShortcuts,
   ...previewShortcuts,
+  ...codeShortcuts,
 };

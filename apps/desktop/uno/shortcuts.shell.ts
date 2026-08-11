@@ -6,9 +6,9 @@
 export const shellShortcuts: Record<string, string> = {
     /* ── Shell ── */
     "app-shell": "flex h-full w-full overflow-hidden bg-app text-fg",
-    /* max-sm: full-bleed main (sidebar overlays) so ≥320 top-nav stays usable */
+    /* ≤900px: full-bleed main (sidebar overlays) so chat keeps usable width */
     "main-column":
-      "flex flex-1 flex-col ml-sidebar h-full min-w-0 relative max-sm:ml-0",
+      "flex flex-1 flex-col ml-sidebar h-full min-w-0 relative max-[900px]:ml-0",
     /*
      * right transition lives on top-nav (not top-nav-railed): on close the railed
      * class is removed in the same frame as the drawer slide; if transition only
@@ -16,7 +16,7 @@ export const shellShortcuts: Record<string, string> = {
      * Match context-drawer: duration-slow + ease-out.
      */
     "top-nav":
-      "fixed top-0 right-0 left-sidebar z-40 flex items-center justify-between gap-2 sm:gap-3 h-topnav px-2 sm:px-container border-b border-transparent bg-titlebar backdrop-blur-20px max-sm:left-0 transition-[right] duration-slow ease-out",
+      "fixed top-0 right-0 left-sidebar z-40 flex items-center justify-between gap-2 sm:gap-3 h-topnav px-2 sm:px-container border-b border-transparent bg-titlebar backdrop-blur-20px max-[900px]:left-0 transition-[right] duration-slow ease-out",
     /* flex-1 claims space vs shrink-0 right; overflow-hidden clips so chips never paint over nav */
     "top-nav-left":
       "flex flex-1 items-center gap-1.5 sm:gap-2.5 min-w-0 overflow-hidden",
@@ -40,9 +40,9 @@ export const shellShortcuts: Record<string, string> = {
     "top-nav-context-btn": "relative",
     "top-nav-context-badge":
       "absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.75 flex items-center justify-center rounded-pill bg-primary text-on-primary text-9px font-semibold leading-none",
-    /* Opens session rail overlay below sm (rail is off-canvas by default) */
+    /* Opens session rail overlay ≤900px (rail is off-canvas by default) */
     "top-nav-rail-btn":
-      "hidden max-sm:flex items-center justify-center w-7.5 h-7.5 shrink-0 border-none rounded-8px bg-transparent text-fg-muted text-16px leading-none transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-surface)])",
+      "hidden max-[900px]:flex items-center justify-center w-7.5 h-7.5 shrink-0 border-none rounded-8px bg-transparent text-fg-muted text-16px leading-none transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-surface)])",
     /* Session ⋯ overflow menu (fork/rewind/media slash) */
     "top-nav-menu": "relative shrink-0",
     "top-nav-menu-list":

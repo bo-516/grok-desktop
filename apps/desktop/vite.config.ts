@@ -6,6 +6,9 @@
  *
  * Boundary: production `vite build` does not get inspector injection (plugin
  * `apply: 'serve'`). Missing vendor file only drops that plugin.
+ * Sourcemaps are off for both serve and build — we debug via source paths /
+ * inspector chips, not browser source maps (avoids multi-MB inline maps and
+ * Babel deopt noise after inspector injects long data-insp-path attrs).
  */
 
 import path from "node:path";
@@ -33,6 +36,22 @@ export default defineConfig(async () => {
           "../../packages/acp-core/src/index.ts",
         ),
       },
+    },
+    /**
+     * Dev environment (Vite 6): default is `{ js: true }`, which appends huge
+     * inline sourceMappingURL blobs on every transformed module. Off for both
+     * JS and CSS — inspector already carries source locations.
+     */
+    dev: {
+      sourcemap: false,
+    },
+    /** Production: keep default false explicit so maps never ship in dist. */
+    build: {
+      sourcemap: false,
+    },
+    css: {
+      /** CSS pipeline sourcemaps in serve (independent of `dev.sourcemap`). */
+      devSourcemap: false,
     },
     server: {
       port: 8172,
