@@ -12,7 +12,32 @@
     />
   </head>
   <body>
-    <div id="root"></div>
+    <!--
+      Boot shell: visible until React paints so a slow/failed module load is
+      never a pure white page. React replaces #root on first mount.
+    -->
+    <div id="root">
+      <div
+        id="grok-boot"
+        style="
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          margin: 0;
+          font-family: Inter, system-ui, sans-serif;
+          background: #08090a;
+          color: #c4c6ca;
+        "
+      >
+        <p style="margin: 0; font-size: 15px; font-weight: 500; color: #e8e9eb">
+          Grok Desktop
+        </p>
+        <p style="margin: 0; font-size: 12px; opacity: 0.75">Starting…</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
