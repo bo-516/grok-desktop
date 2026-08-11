@@ -185,6 +185,17 @@ export function abandonUnconfirmedSeedContent(
   return changed ? next : timeline;
 }
 
+/** Result of applying one agent_message_chunk to the timeline. */
+export type AgentTextMergeResult = {
+  /** Updated timeline (immutable). */
+  timeline: TimelineItem[];
+  /**
+   * True when a live (non-seed) agent row was created or extended.
+   * Seed claim during session/load must not grow lastAgentText.
+   */
+  liveApplied: boolean;
+};
+
 /**
  * Merge agent text blocks (user path uses {@link applyUserMessageChunk}).
  * Claims unconfirmed seed agent rows on session/load replay instead of double-appending.
@@ -201,7 +212,7 @@ export function appendOrMergeText(
   if (kind === "user") {
     return applyUserMessageChunk(timeline, text);
   }
-  return appendOrMergeAgentText(timeline, text);
+  return appendOrMergeAgentText(timeline, text).timeline;
 }
 
 /**
@@ -211,12 +222,12 @@ export function appendOrMergeText(
  * claim a later seed agent or append a live agent row — never silent-drop.
  * @param timeline Current ordered timeline.
  * @param text Non-empty agent chunk.
- * @returns Updated timeline without double-appending a full seed turn.
+ * @returns Timeline plus whether a live agent row was written (for lastAgentText).
  */
 export function appendOrMergeAgentText(
   timeline: TimelineItem[],
   text: string,
-): TimelineItem[] {
+): AgentTextMergeResult {
   let current = timeline;
   for (;;) {
     const pendingIdx = current.findIndex(
@@ -231,24 +242,30 @@ export function appendOrMergeAgentText(
     const result = tryAbsorbEchoIntoSeedTextRow(current, pendingIdx, text);
     current = result.timeline;
     if (result.absorbed) {
-      return current;
+      return { timeline: current, liveApplied: false };
     }
     // Slot abandoned (mismatch); try the next unconfirmed seed agent.
   }
 
   const last = current[current.length - 1];
   if (last && last.kind === "agent" && last.origin !== "seed") {
-    return [...current.slice(0, -1), { ...last, text: last.text + text }];
+    return {
+      timeline: [...current.slice(0, -1), { ...last, text: last.text + text }],
+      liveApplied: true,
+    };
   }
-  return [
-    ...current,
-    {
-      kind: "agent",
-      id: nextTimelineId("agent"),
-      text,
-      origin: "agent",
-    },
-  ];
+  return {
+    timeline: [
+      ...current,
+      {
+        kind: "agent",
+        id: nextTimelineId("agent"),
+        text,
+        origin: "agent",
+      },
+    ],
+    liveApplied: true,
+  };
 }
 
 /**

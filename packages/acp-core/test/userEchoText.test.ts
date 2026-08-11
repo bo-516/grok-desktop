@@ -106,6 +106,44 @@ describe("agent user-echo sanitizing", () => {
     if (users[0]?.kind === "user") {
       assert.equal(userTextFromBlocks(users[0].blocks), sent);
       assert.equal(users[0].agentConfirmed, true);
+      // Binary image must survive echo absorb — agent only sends [Image #N] text.
+      const images = users[0].blocks.filter((b) => b.type === "image");
+      assert.equal(images.length, 1);
+      if (images[0]?.type === "image") {
+        assert.equal(images[0].data, "AAAA");
+        assert.equal(images[0].mimeType, "image/webp");
+      }
+    }
+  });
+
+  it("image-only local prompt keeps binary blocks when agent echoes [Image #N]", () => {
+    let state = createSessionState({ id: "s-image-only" });
+    state = appendUserPrompt(state, [
+      { type: "image", mimeType: "image/png", data: "iVBORw0KGgo" },
+    ]);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "[Image #1]" },
+    });
+
+    const users = userRows(state);
+    assert.equal(users.length, 1);
+    assert.ok(users[0] && users[0].kind === "user");
+    if (users[0]?.kind === "user") {
+      assert.equal(userTextFromBlocks(users[0].blocks), "");
+      assert.equal(users[0].agentConfirmed, true);
+      const images = users[0].blocks.filter((b) => b.type === "image");
+      assert.equal(images.length, 1);
+      if (images[0]?.type === "image") {
+        assert.equal(images[0].data, "iVBORw0KGgo");
+      }
+      // Placeholder must not be written as a second text body on the row.
+      assert.equal(
+        users[0].blocks.some(
+          (b) => b.type === "text" && /\[Image/i.test(b.text),
+        ),
+        false,
+      );
     }
   });
 

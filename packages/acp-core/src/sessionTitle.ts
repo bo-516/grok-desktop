@@ -9,6 +9,9 @@ export function isWeakSessionTitle(title: string | undefined | null): boolean {
   if (!title || !title.trim()) {return true;}
   const t = title.trim();
   if (t === "New session" || t === "Current chat") {return true;}
+  // Agent / disk summary placeholders that look like real titles but are not.
+  if (/^\(?no summary\)?$/i.test(t)) {return true;}
+  if (/^untitled( session)?$/i.test(t)) {return true;}
   // "Session 019fd6…" / "session 019…" / "Chat 019…"
   if (/^(session|chat)\s+[0-9a-f-]{6,}$/i.test(t)) {return true;}
   // bare uuid-ish / short id
@@ -27,14 +30,24 @@ export function extractTitleFromTimeline(timeline: TimelineItem[]): string {
       const text = item.blocks
         .map((b) => (b.type === "text" ? b.text : ""))
         .join("")
+        // Agent echoes images as `[Image #N]` — never use that as a title slug.
+        .replace(/\[Image\s*#\d+\]/gi, " ")
         .trim()
         .replace(/\s+/g, " ");
-      if (text) {return clipTitle(text);}
+      if (text && !isWeakSessionTitle(text)) {
+        return clipTitle(text);
+      }
     }
   }
   for (const item of timeline) {
     if (item.kind === "agent" && item.text.trim()) {
-      return clipTitle(item.text.trim().replace(/\s+/g, " "));
+      const text = item.text
+        .trim()
+        .replace(/\[Image\s*#\d+\]/gi, " ")
+        .replace(/\s+/g, " ");
+      if (text && !isWeakSessionTitle(text)) {
+        return clipTitle(text);
+      }
     }
   }
   return "";
@@ -52,15 +65,23 @@ export function titleFromSessionState(state: SessionState): string {
   return extractTitleFromTimeline(state.timeline);
 }
 
-/** Short id label only when no real title exists. */
-export function fallbackSessionLabel(id: string): string {
-  if (!id) {return "New session";}
-  const short = id.length > 12 ? id.slice(0, 8) : id;
-  return `Chat ${short}`;
+/**
+ * Friendly label when no real conversation title exists.
+ * Avoids id-shaped "Chat 019fe…" / agent "(no summary)" in the rail.
+ * @param _id Session id (kept for call-site stability; not shown).
+ */
+export function fallbackSessionLabel(_id: string): string {
+  return "Untitled chat";
 }
 
+/**
+ * Clip a conversation title for the rail / top-nav.
+ * Keeps more of the first sentence so long task titles stay distinguishable
+ * before CSS ellipsis; still bounded so catalog storage stays small.
+ * @param text Full candidate title (already whitespace-normalized).
+ */
 function clipTitle(text: string): string {
-  return text.length > 56 ? `${text.slice(0, 56)}…` : text;
+  return text.length > 72 ? `${text.slice(0, 72)}…` : text;
 }
 
 /**

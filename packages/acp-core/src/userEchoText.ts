@@ -28,7 +28,39 @@ const REMINDER_CLOSE_HEAD = /^[\s\S]*?<\/system-reminder>/;
 const REMINDER_OPEN_TAIL = /<system-reminder>[\s\S]*$/;
 
 /** Agent stand-in for an image ContentBlock in the echoed prompt. */
-const IMAGE_PLACEHOLDER = /\[Image\s*#\d+\]/g;
+export const IMAGE_PLACEHOLDER = /\[Image\s*#\d+\]/gi;
+
+/**
+ * Count `[Image #N]` placeholders in agent-echoed user text.
+ * Used when history only has the placeholder and no binary image block.
+ * @param text User bubble body that may contain image stand-ins.
+ * @returns Number of placeholders (0 when none).
+ */
+export function countImagePlaceholders(text: string): number {
+  if (!text) {
+    return 0;
+  }
+  const matches = text.match(IMAGE_PLACEHOLDER);
+  return matches?.length ?? 0;
+}
+
+/**
+ * Remove `[Image #N]` stand-ins for display or title extraction.
+ * Collapses leftover whitespace so the bubble does not keep a gap where the
+ * thumbnail already shows the attachment.
+ * @param text Raw user text (may include placeholders).
+ * @returns Text with placeholders stripped; may be empty.
+ */
+export function stripImagePlaceholders(text: string): string {
+  if (!text) {
+    return text;
+  }
+  return text
+    .replace(IMAGE_PLACEHOLDER, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 /**
  * Read a nested `_meta` record without asserting the whole update shape.
@@ -97,8 +129,7 @@ export function stripSystemReminders(text: string): string {
  * @returns Normalized body for prefix / equality checks.
  */
 export function normalizeEchoBody(text: string): string {
-  return stripSystemReminders(text)
-    .replace(IMAGE_PLACEHOLDER, " ")
+  return stripImagePlaceholders(stripSystemReminders(text))
     .replace(/\s+/g, " ")
     .trim();
 }

@@ -100,7 +100,14 @@ export function applyUserMessageChunk(
       ? timeline
       : replaceTimelineItem(timeline, pendingIdx, itemClean);
 
-  if (authoritative && userTextFromBlocks(itemClean.blocks).length > 0) {
+  // Local/seed rows with text and/or image blocks own the body. Image-only
+  // prompts (empty text) must still absorb `[Image #N]` echoes here — otherwise
+  // the agent-stream path appends placeholder text and the thumb can look "gone"
+  // when the bubble reflows around raw stand-ins.
+  const hasAuthoritativeBody =
+    userTextFromBlocks(itemClean.blocks).length > 0 ||
+    userImagesFromBlocks(itemClean.blocks).length > 0;
+  if (authoritative && hasAuthoritativeBody) {
     return absorbEchoIntoAuthoritativeUser(
       timelineClean,
       pendingIdx,
@@ -179,6 +186,7 @@ function absorbEchoIntoAuthoritativeUser(
   text: string,
 ): TimelineItem[] {
   const existing = userTextFromBlocks(item.blocks);
+  const hasImages = userImagesFromBlocks(item.blocks).length > 0;
   // Normalized twins of both sides: the agent echoes its own rewrite of the
   // prompt (image blocks become `[Image #N]`, whitespace reflows), so every
   // "is this the same message" decision below runs on the flattened form while
@@ -187,13 +195,31 @@ function absorbEchoIntoAuthoritativeUser(
   const normText = normalizeEchoBody(text);
   let acc = item.agentEchoAcc ?? "";
 
-  // Agent has a longer complete sentence than optimistic local — adopt it.
-  // Placeholder-only growth is not "longer", so a re-echo can never overwrite
-  // the local body with the agent's placeholder spelling.
-  if (normText.startsWith(normExisting) && normText.length > normExisting.length) {
+  // Image-only local prompt: agent echo is often only `[Image #N]` (normText
+  // empty). Confirm without writing stand-ins into blocks.
+  if (hasImages && normExisting.length === 0 && normText.length === 0) {
     const next: TimelineItem = {
       ...item,
-      blocks: replaceTextBlocks(item.blocks, text),
+      agentEchoAcc: text,
+      agentConfirmed: true,
+    };
+    return replaceTimelineItem(timeline, idx, next);
+  }
+
+  // Agent has a longer complete sentence than optimistic local — adopt the
+  // extra *normalized* wording only. Never store the raw echo: it carries
+  // `[Image #N]` stand-ins that would replace a clean local body, and
+  // replaceTextBlocks must keep image / resource blocks already on the row.
+  if (
+    normExisting.length > 0 &&
+    normText.startsWith(normExisting) &&
+    normText.length > normExisting.length
+  ) {
+    const next: TimelineItem = {
+      ...item,
+      // Extend with the normalized body (no image stand-ins) so binary image
+      // blocks stay attached to the same user row.
+      blocks: replaceTextBlocks(item.blocks, normText),
       agentEchoAcc: text,
       agentConfirmed: true,
     };
@@ -205,8 +231,9 @@ function absorbEchoIntoAuthoritativeUser(
     acc = text;
   } else if (existing.startsWith(acc + text) || acc + text === existing) {
     acc = acc + text;
-  } else if (normExisting.startsWith(normText)) {
+  } else if (normExisting.startsWith(normText) || (hasImages && !normText)) {
     // Full-message or progressive prefix replay of the authoritative body.
+    // Empty normText with local images is the placeholder-only echo.
     if (text.length >= acc.length) {
       acc = text;
     }
@@ -218,7 +245,9 @@ function absorbEchoIntoAuthoritativeUser(
 
   const normAcc = normalizeEchoBody(acc);
   const confirmed =
-    normAcc.length >= normExisting.length && normAcc.startsWith(normExisting);
+    (normExisting.length === 0 && hasImages && normAcc.length === 0) ||
+    (normAcc.length >= normExisting.length &&
+      (normExisting.length === 0 || normAcc.startsWith(normExisting)));
 
   const next: TimelineItem = {
     ...item,

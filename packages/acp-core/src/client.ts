@@ -30,6 +30,7 @@ import type {
 } from "./types.js";
 import { runAcpHandshake } from "./clientHandshake.js";
 import { dispatchAcpMessage } from "./clientDispatch.js";
+import { EventIdDedupe } from "./eventIdDedupe.js";
 
 export type { AcpTransport } from "./transport.js";
 
@@ -43,12 +44,21 @@ export type AcpClientOptions = {
   /**
    * Raw session/update callback for thin-bridge relay (fires even during
    * session/load replay so UIs can reduce without full-state broadcasts).
+   * Bridges that batch load windows should gate fan-out via onReplayChange
+   * rather than dropping this callback.
    */
   onSessionUpdate?: (
     update: SessionUpdate,
     sessionId: string,
     eventId: string | null,
   ) => void;
+  /**
+   * Fired when the session/load replay window opens (`on=true`) or closes
+   * (`on=false`). sessionId is the current snapshot id (resume id). Bridges
+   * use this to emit replay_begin / replay_end and suppress per-update WS
+   * fan-out for that session only.
+   */
+  onReplayChange?: (on: boolean, sessionId: string) => void;
   onStderr?: (line: string) => void;
   /** Called when agent issues reverse requests other than permission (fs/terminal). */
   onAgentRequest?: (
@@ -67,6 +77,7 @@ export class AcpClient {
   private readonly autoPermissionOptionId: string | null;
   private readonly onStateChange?: (state: SessionState) => void;
   private readonly onSessionUpdate?: AcpClientOptions["onSessionUpdate"];
+  private readonly onReplayChange?: AcpClientOptions["onReplayChange"];
   private readonly onStderr?: (line: string) => void;
   private readonly onAgentRequest?: AcpClientOptions["onAgentRequest"];
 
@@ -82,6 +93,8 @@ export class AcpClient {
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private promptInFlight = false;
   private disposed = false;
+  /** Set-based eventId ring so redelivered session/update does not double-apply. */
+  private readonly eventDedupe = new EventIdDedupe();
   /**
    * True while a `session/load` replay is in flight. The snapshot still absorbs
    * every replayed chunk, but listeners are not notified until the window
@@ -99,6 +112,7 @@ export class AcpClient {
         : opts.autoPermissionOptionId;
     this.onStateChange = opts.onStateChange;
     this.onSessionUpdate = opts.onSessionUpdate;
+    this.onReplayChange = opts.onReplayChange;
     this.onStderr = opts.onStderr;
     this.onAgentRequest = opts.onAgentRequest;
     this.state = createSessionState({ id: "", workspace: "" });
@@ -107,7 +121,12 @@ export class AcpClient {
     this.transport.onClose?.(() => {
       // A transport death during replay must reach listeners; the pending
       // session/load can never flush, so drop the gate before the paint.
+      const wasReplaying = this.replaying;
+      const sid = this.state.id;
       this.replaying = false;
+      if (wasReplaying) {
+        this.onReplayChange?.(false, sid);
+      }
       this.setState(markDisconnected(this.state));
       for (const [, p] of this.pending) {
         p.reject(new Error("ACP transport closed"));
@@ -157,23 +176,29 @@ export class AcpClient {
    * @param state Next SessionState (not mutated in place by the client).
    */
   replaceSessionState(state: SessionState): void {
+    // New session id → drop prior stream's eventIds so load replay can re-apply.
+    if (state.id && state.id !== this.state.id) {
+      this.eventDedupe.clear();
+    }
     this.setState(state);
   }
 
   /**
    * Open or close the `session/load` replay window.
    * While open, replayed chunks mutate the snapshot silently; closing emits
-   * exactly one state carrying the finished transcript. Callers must always
-   * close the window they opened (including on RPC failure), otherwise the
-   * session goes mute and no later live update ever reaches the UI.
-   * @param on True to suppress per-chunk fan-out, false to close and flush once.
+   * onReplayChange(false) then one onStateChange with the finished transcript.
+   * Callers must always close the window they opened (including on RPC failure),
+   * otherwise the session goes mute and no later live update ever reaches the UI.
+   * @param on True to suppress per-chunk state fan-out, false to close and flush once.
    */
   setReplaying(on: boolean): void {
     if (this.replaying === on) {
       return;
     }
     this.replaying = on;
+    const sessionId = this.state.id;
     if (on) {
+      this.onReplayChange?.(true, sessionId);
       return;
     }
     // Replay leaves no live turn behind: drop the pending settle so it cannot
@@ -182,7 +207,14 @@ export class AcpClient {
       clearTimeout(this.settleTimer);
       this.settleTimer = null;
     }
+    // Notify bridges first so they can emit replay_end before the state paint.
+    this.onReplayChange?.(false, sessionId);
     this.onStateChange?.(this.state);
+  }
+
+  /** Whether a session/load replay window is currently open. */
+  isReplaying(): boolean {
+    return this.replaying;
   }
 
   /**
@@ -320,6 +352,7 @@ export class AcpClient {
         autoPermissionOptionId: this.autoPermissionOptionId,
         respondPermission: (optionId) => this.respondPermission(optionId),
         onSessionUpdate: this.onSessionUpdate,
+        acceptEventId: (eventId) => this.eventDedupe.accept(eventId),
         onAgentRequest: this.onAgentRequest,
       },
       message,

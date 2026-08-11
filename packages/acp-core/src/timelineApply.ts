@@ -18,7 +18,7 @@ import {
 } from "./userEchoText.js";
 import { patchToolCard } from "./timelineToolCard.js";
 import {
-  appendOrMergeText,
+  appendOrMergeAgentText,
   appendOrMergeThought,
   finalizeLatestThought,
 } from "./timelineTextMerge.js";
@@ -153,11 +153,14 @@ export function applySessionUpdate(
         return state;
       }
       const base = withFinalizedThoughtIfVisible(state, kind);
-      const timeline = appendOrMergeText(base.timeline, "agent", text);
+      const merged = appendOrMergeAgentText(base.timeline, text);
+      // Wire/seed state may omit lastAgentText; never concat onto undefined.
+      const prevAgent = base.lastAgentText ?? "";
       return {
         ...base,
-        timeline,
-        lastAgentText: base.lastAgentText + text,
+        timeline: merged.timeline,
+        // Seed claim on session/load must not dump history into lastAgentText.
+        lastAgentText: merged.liveApplied ? prevAgent + text : prevAgent,
         status:
           base.status === "waiting_permission" ? base.status : "streaming",
       };

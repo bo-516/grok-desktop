@@ -212,7 +212,14 @@ export function applyOrchestrationUpdate(
       return state;
     }
     const spawned = kind === "subagent_spawned";
-    const card = patchSubagentCard(state.subagents?.[subagentId], {
+    const existing = state.subagents?.[subagentId];
+    // Monotonic: a reordered/replayed spawn must not reopen a finished card.
+    const existingTerminal =
+      existing?.status === "completed" || existing?.status === "failed";
+    if (spawned && existingTerminal) {
+      return state;
+    }
+    const card = patchSubagentCard(existing, {
       subagentId,
       childSessionId: readString(update, "child_session_id"),
       parentPromptId: readString(update, "parent_prompt_id"),

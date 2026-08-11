@@ -8,8 +8,12 @@
  * recently seen ids does not.
  */
 
-/** Default ring size: covers reordering windows and reconnect catch-up. */
-export const DEFAULT_EVENT_ID_RING = 64;
+/**
+ * Default ring size: covers reordering windows, long tool-dense turns, and
+ * reconnect catch-up. 64 was too small for a single heavy turn (false re-accept
+ * after eviction → double-applied agent chunks).
+ */
+export const DEFAULT_EVENT_ID_RING = 512;
 
 /**
  * Read eventId from notification params or an update object.

@@ -16,9 +16,11 @@ export {
   type UserImageBlock,
 } from "./userMessageChunk.js";
 export {
+  countImagePlaceholders,
   echoRepeatsBody,
   isHiddenFromScrollback,
   normalizeEchoBody,
+  stripImagePlaceholders,
   stripSystemReminders,
 } from "./userEchoText.js";
 export { patchToolCard } from "./timelineToolCard.js";

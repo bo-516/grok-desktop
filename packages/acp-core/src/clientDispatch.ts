@@ -71,6 +71,12 @@ export type DispatchHost = {
     sessionId: string,
     eventId: string | null,
   ) => void;
+  /**
+   * Optional eventId set-dedupe gate (bridge AcpClient).
+   * Return false to skip apply + relay for a redelivered id.
+   * When omitted, every update is applied (tests / bare hosts).
+   */
+  acceptEventId?: (eventId: string | null) => boolean;
   /** Reverse fs/terminal handlers from the bridge. */
   onAgentRequest?: (
     method: string,
@@ -114,6 +120,12 @@ export function dispatchAcpMessage(
       const update = extractSessionUpdate(kind.params);
       if (update) {
         const eventId = extractEventId(kind.params);
+        // Bridge source of truth must not double-apply redelivered eventIds;
+        // desktop reduce has its own ring, but hydrate can re-import a corrupt
+        // bridge snapshot if we skip dedupe here.
+        if (host.acceptEventId && !host.acceptEventId(eventId)) {
+          return;
+        }
         const sessionId =
           kind.params &&
           typeof kind.params === "object" &&
