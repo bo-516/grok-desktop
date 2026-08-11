@@ -115,6 +115,29 @@ export type BridgeServerMsg =
       model?: string;
       mode?: AgentMode;
     }
+  /**
+   * session/load replay opened; freeze per-update store notify for this session.
+   */
+  | {
+      type: "replay_begin";
+      sessionId: string;
+    }
+  /**
+   * session/load replay closed. Node sends `session`; Go sends ordered `updates`.
+   * Multiple ends per session are legal when the bridge hits buffer caps.
+   */
+  | {
+      type: "replay_end";
+      sessionId: string;
+      session?: SessionState;
+      updates?: { update: SessionUpdate; eventId?: string }[];
+      status: SessionStatus;
+      model?: string;
+      mode?: AgentMode;
+      count: number;
+      bytes: number;
+      elapsedMs: number;
+    }
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
   | { type: "stderr"; text: string; sessionId?: string }

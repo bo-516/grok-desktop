@@ -9,8 +9,10 @@ import {
   userTextFromBlocks,
   type ContentBlock,
   type SessionState,
+  type SessionStatus,
   type TimelineItem,
 } from "@grok-desktop/acp-core";
+import { preserveLocalUserMedia } from "./sessionStoreLiveFollow";
 import type { SessionRecord } from "./sessionCatalogTypes";
 
 /**
@@ -43,6 +45,26 @@ function nonTextBlockActivityKey(blocks: ContentBlock[]): string {
 }
 
 /**
+ * Ordered user/agent message fingerprints for one timeline (no lastAgentText).
+ * Used to distinguish live tip appends from bulk session/load history fills.
+ * @param timeline Session timeline (seed-tagged ok).
+ * @returns One entry per user or agent row in order.
+ */
+function conversationMessageParts(timeline: TimelineItem[]): string[] {
+  const parts: string[] = [];
+  for (const item of timeline) {
+    if (item.kind === "user") {
+      const text = userTextFromBlocks(item.blocks);
+      const extras = nonTextBlockActivityKey(item.blocks);
+      parts.push(extras ? `u:${text}\u001f${extras}` : `u:${text}`);
+    } else if (item.kind === "agent") {
+      parts.push(`a:${item.text}`);
+    }
+  }
+  return parts;
+}
+
+/**
  * Fingerprint of user + agent conversation content used to detect real
  * message activity (not select / status / handshake-only upserts).
  * User text uses {@link userTextFromBlocks} only — never concatenates block
@@ -55,18 +77,79 @@ function conversationActivityKey(
   timeline: TimelineItem[],
   lastAgentText: string,
 ): string {
-  const parts: string[] = [];
-  for (const item of timeline) {
-    if (item.kind === "user") {
-      const text = userTextFromBlocks(item.blocks);
-      const extras = nonTextBlockActivityKey(item.blocks);
-      parts.push(extras ? `u:${text}\u001f${extras}` : `u:${text}`);
-    } else if (item.kind === "agent") {
-      parts.push(`a:${item.text}`);
-    }
-  }
+  const parts = conversationMessageParts(timeline);
   parts.push(`lat:${lastAgentText}`);
   return parts.join("\0");
+}
+
+/**
+ * Whether a content delta looks like a live tip update (one-turn append or
+ * in-place agent / attachment growth) rather than a bulk session/load fill.
+ * Cold empty → full history is passive; small prefix appends stay live so an
+ * idle settle that missed streaming ticks still advances recency.
+ * @param existingTimeline Prior catalog timeline.
+ * @param existingLat Prior lastAgentText.
+ * @param timeline Merged timeline after upsert.
+ * @param lastAgentText Merged last agent text.
+ * @returns True when wall-clock recency should advance even if status is idle.
+ */
+function isSmallLiveAppend(
+  existingTimeline: TimelineItem[],
+  existingLat: string,
+  timeline: TimelineItem[],
+  lastAgentText: string,
+): boolean {
+  const oldParts = conversationMessageParts(existingTimeline);
+  const newParts = conversationMessageParts(timeline);
+
+  // Empty cache filled by session/load — keep remote-list / prior recency.
+  if (oldParts.length === 0) {
+    if (newParts.length === 0) {
+      return (
+        lastAgentText.length > existingLat.length &&
+        (existingLat.length === 0 || lastAgentText.startsWith(existingLat))
+      );
+    }
+    return false;
+  }
+
+  // Exact prefix: prior messages unchanged, 1–2 new user/agent rows at the tip.
+  const isPrefix =
+    oldParts.length <= newParts.length &&
+    oldParts.every((p, i) => p === newParts[i]);
+  if (isPrefix) {
+    const added = newParts.length - oldParts.length;
+    if (added >= 1 && added <= 2) {
+      return true;
+    }
+    if (added === 0) {
+      return (
+        lastAgentText.length > existingLat.length &&
+        (existingLat.length === 0 || lastAgentText.startsWith(existingLat))
+      );
+    }
+    // added > 2: bulk historical hydrate (select → session/load).
+    return false;
+  }
+
+  // In-place growth of the last message part (streaming agent text, attach).
+  if (oldParts.length === newParts.length) {
+    const last = oldParts.length - 1;
+    const headMatch = oldParts
+      .slice(0, last)
+      .every((p, i) => p === newParts[i]);
+    const oldTail = oldParts[last] ?? "";
+    const newTail = newParts[last] ?? "";
+    if (
+      headMatch &&
+      newTail !== oldTail &&
+      newTail.startsWith(oldTail)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -74,12 +157,14 @@ function conversationActivityKey(
  * Select / reconnect / status-only upserts must not advance the clock
  * (clicking a session must not jump it to the top).
  * Prefer a newer parseable agent `session_info_update.updatedAt` when content
- * is unchanged; when content changes use wall clock (and agent time if later).
+ * is unchanged. When content changes, wall clock advances only for live turns
+ * (streaming / waiting_permission) or small tip appends — not bulk session/load.
  * @param existing Prior catalog row, if any.
  * @param timeline Merged timeline after upsert.
  * @param lastAgentText Merged last agent text.
  * @param agentUpdatedAt Optional ISO string from SessionState.updatedAt.
  * @param now Wall-clock ms (injectable for tests).
+ * @param status Live session status; idle load hydrates stay passive.
  * @returns Epoch ms for SessionRecord.updatedAt.
  */
 export function resolveCatalogUpdatedAt(
@@ -88,6 +173,7 @@ export function resolveCatalogUpdatedAt(
   lastAgentText: string,
   agentUpdatedAt: string | undefined,
   now = Date.now(),
+  status?: SessionStatus,
 ): number {
   const agentMs = (() => {
     if (!agentUpdatedAt?.trim()) {
@@ -105,28 +191,45 @@ export function resolveCatalogUpdatedAt(
     conversationActivityKey(timeline, lastAgentText) !==
     conversationActivityKey(existing.timeline, existing.lastAgentText);
 
-  if (contentChanged) {
+  if (!contentChanged) {
+    if (agentMs !== undefined && agentMs > existing.updatedAt) {
+      return agentMs;
+    }
+    return existing.updatedAt;
+  }
+
+  // Live turn in flight: wall clock is honest for rail recency.
+  const liveTurn =
+    status === "streaming" || status === "waiting_permission";
+  if (
+    liveTurn ||
+    isSmallLiveAppend(
+      existing.timeline,
+      existing.lastAgentText,
+      timeline,
+      lastAgentText,
+    )
+  ) {
     return Math.max(now, agentMs ?? 0);
   }
 
-  if (agentMs !== undefined && agentMs > existing.updatedAt) {
-    return agentMs;
-  }
+  // Passive hydrate (session/load bulk fill, seed rewrite, idle snapshot):
+  // never jump the row to "now" — select must not reorder the rail.
   return existing.updatedAt;
 }
 
 /**
  * Merge live ACP state into a catalog record (upsert by session id).
  * Preserves good titles; never replaces them with Session/Chat id labels.
- * `updatedAt` advances only on user/agent message activity (or a newer
- * agent-reported activity time), not on every select/resume upsert.
+ * `updatedAt` advances only on live user/agent message activity (or a newer
+ * agent-reported activity time), not on select/resume bulk hydrates.
  * Role fields (`sessionKind` / `parentSessionId`) come only from disk/list
  * merge — live SessionState has no equivalent — so they are always kept from
  * the existing catalog row when present. Wiping them would re-show harness
  * subagent chats in the rail after drill-down `session/load`.
  * @param catalog Current catalog array (not mutated).
  * @param state Live or seeded SessionState; empty id is a no-op.
- * @param now Wall-clock ms for createdAt / content-change updatedAt.
+ * @param now Wall-clock ms for createdAt / live content-change updatedAt.
  * @returns New catalog sorted by updatedAt desc.
  */
 export function upsertFromLiveState(
@@ -148,6 +251,13 @@ export function upsertFromLiveState(
   let timeline = state.timeline;
   if (!useIncomingTimeline && existing) {
     timeline = existing.timeline;
+  } else if (existing && existing.timeline.length > 0) {
+    // Incoming won on length but may be text-only agent echoes — keep catalog
+    // image / embed blocks from the prior row for matching user prompts.
+    timeline = preserveLocalUserMedia(
+      { ...state, timeline: state.timeline },
+      { ...state, timeline: existing.timeline },
+    ).timeline;
   }
   // Heal pre-fix exact X+X user bodies whenever we persist a catalog row.
   timeline = tagSeedUserMessages(timeline);
@@ -188,6 +298,7 @@ export function upsertFromLiveState(
       lastAgentText,
       state.updatedAt,
       now,
+      state.status,
     ),
     timeline,
     toolCalls,

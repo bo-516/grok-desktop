@@ -9,9 +9,12 @@ import {
   type SessionState,
 } from "@grok-desktop/acp-core";
 import {
+  enqueueCatalogPersist,
+  flushCatalogNow,
+} from "./catalogPersistQueue";
+import {
   normalizeCatalog,
   recordToSessionState,
-  saveCatalogToStorage,
   type SessionRecord,
 } from "./sessionCatalog";
 
@@ -23,6 +26,12 @@ export type StartOpts = {
   resumeId?: string;
   seed?: SessionState;
   forceNew?: boolean;
+  /**
+   * Post-await guard for async start. When provided, startLiveBridgeSession
+   * skips every canvas `set` after an await when this returns false (stale
+   * select while a later selection is already in flight).
+   */
+  guard?: () => boolean;
 };
 
 /** Minimal store view read by resolveResumeTarget; keeps helpers free of Zustand implementation details. */
@@ -42,13 +51,31 @@ export const INITIAL_SESSION = createSessionState({
 });
 
 /**
- * Normalize and persist the session catalog.
+ * Persist an already-normalized catalog without running normalizeCatalog again.
+ * Hot path (inbound updates) must use this after a single normalize at the call site.
+ * @param catalog Catalog that has already been through normalizeCatalog (or is known clean).
+ */
+export function persistNormalizedCatalog(catalog: SessionRecord[]): void {
+  enqueueCatalogPersist(catalog);
+}
+
+/**
+ * Normalize then persist the session catalog (cold paths: hydrate, filter-only, remote merge).
  * @param catalog Latest catalog; weak-titled empty sessions are pruned first.
- *   Storage failures (e.g. private mode) are safely ignored by the lower layer.
+ *   Storage failures (e.g. private mode) are warned by the lower layer.
  * @returns void; callers should still write the same normalized result into Zustand.
  */
 export function persistCatalog(catalog: SessionRecord[]): void {
-  saveCatalogToStorage(normalizeCatalog(catalog));
+  const normalized = normalizeCatalog(catalog);
+  enqueueCatalogPersist(normalized);
+}
+
+/**
+ * Force any pending throttled catalog write to disk immediately.
+ * Call on session switch / disconnect so the latest rail snapshot is not lost.
+ */
+export function flushCatalogPersist(): void {
+  flushCatalogNow();
 }
 
 /**

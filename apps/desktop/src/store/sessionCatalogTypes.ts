@@ -24,10 +24,11 @@ export type SessionRecord = {
   createdAt: number;
   /**
    * Last user or agent message activity (epoch ms). Shown as relative time
-   * on session rows; rail list order uses title first-char ASCII + user drag
-   * (not this field). Must not advance on select / reconnect alone — only
-   * when conversation content changes or agent reports a newer
-   * `session_info_update.updatedAt`.
+   * on session rows and used as the default within-project rail order
+   * (newest first), overridden by pin / user drag. Must not advance on
+   * select / reconnect / session/load bulk hydrate — only on live message
+   * activity (streaming tip, small append) or a newer agent
+   * `session_info_update.updatedAt` when content is unchanged.
    */
   updatedAt: number;
   timeline: TimelineItem[];

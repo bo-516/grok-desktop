@@ -1,10 +1,170 @@
 /**
  * Pure canvas-follow rules for live bridge inbound state.
  * Keeps sessionStoreLive under the line budget and unit-testable without WS.
+ *
+ * Also owns {@link preserveLocalUserMedia}: live reduce only sees text
+ * `user_message_chunk` echoes (`[Image #N]` placeholders), while optimistic
+ * paint already holds binary image ContentBlocks. Without a merge step every
+ * inbound session_update would replace the canvas and the message-list thumb
+ * would vanish mid-turn (and catalog would persist text-only).
  */
 
-import type { SessionState, TimelineItem } from "@grok-desktop/acp-core";
+import type {
+  ContentBlock,
+  SessionState,
+  TimelineItem,
+} from "@grok-desktop/acp-core";
+import {
+  countImagePlaceholders,
+  echoRepeatsBody,
+  normalizeEchoBody,
+  stripImagePlaceholders,
+  userImagesFromBlocks,
+  userTextFromBlocks,
+} from "@grok-desktop/acp-core";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
+
+/** User timeline row (narrowed for media merge). */
+type UserTimelineItem = Extract<TimelineItem, { kind: "user" }>;
+
+/**
+ * Non-text ContentBlocks on a user row (images / resource / resource_link).
+ * @param blocks User prompt blocks.
+ * @returns Blocks that must not be dropped when an agent text-echo overwrites the row.
+ */
+function nonTextBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  return blocks.filter((block) => block.type !== "text");
+}
+
+/**
+ * Whether inbound and local user bodies refer to the same prompt for media merge.
+ * Tolerates agent rewrites (`[Image #N]`, whitespace) and image-only locals.
+ * @param inboundText Text of the reduced / echoed user row.
+ * @param localText Text of the painted optimistic / catalog user row.
+ * @param localHasImages True when local already holds binary image blocks.
+ * @returns True when media from local may be copied onto inbound.
+ */
+function userBodiesCompatible(
+  inboundText: string,
+  localText: string,
+  localHasImages: boolean,
+): boolean {
+  if (
+    echoRepeatsBody(inboundText, localText) ||
+    echoRepeatsBody(localText, inboundText)
+  ) {
+    return true;
+  }
+  // Image-only local: agent echo is often only `[Image #N]` (normalized empty).
+  if (localHasImages && normalizeEchoBody(localText).length === 0) {
+    return (
+      normalizeEchoBody(inboundText).length === 0 ||
+      countImagePlaceholders(inboundText) > 0
+    );
+  }
+  return false;
+}
+
+/**
+ * Restore binary image / embed blocks from the painted local canvas onto
+ * inbound user rows that only carry agent text echoes.
+ *
+ * Live reduce never receives image payloads in `user_message_chunk` — only
+ * placeholder text. Optimistic `appendUserPrompt` already painted thumbs; this
+ * merge keeps them across every subsequent session_update and catalog upsert.
+ *
+ * @param inbound Fresh reduced/hydrated session from the bridge.
+ * @param local Currently painted canvas (or catalog seed for the same id).
+ * @returns Inbound with non-text user blocks restored where texts match; same
+ *   reference when nothing changes or sessions differ.
+ */
+export function preserveLocalUserMedia(
+  inbound: SessionState,
+  local: SessionState,
+): SessionState {
+  // Same-id, or draft→forceNew handoff (local still has empty id).
+  const sameSession =
+    Boolean(inbound.id) && Boolean(local.id) && inbound.id === local.id;
+  const draftHandoff = !local.id.trim() && Boolean(inbound.id);
+  if (!sameSession && !draftHandoff) {
+    return inbound;
+  }
+
+  const localUsers = local.timeline.filter(
+    (item): item is UserTimelineItem => item.kind === "user",
+  );
+  if (localUsers.length === 0) {
+    return inbound;
+  }
+  /** Local users that still have media to donate (each used at most once). */
+  const mediaPool = localUsers.filter(
+    (user) => nonTextBlocks(user.blocks).length > 0,
+  );
+  if (mediaPool.length === 0) {
+    return inbound;
+  }
+
+  /**
+   * Find a local media-bearing user whose body matches this inbound echo.
+   * Prefer exact/prefix text match over pure order — the live reduce bucket
+   * often holds only the latest turn while the canvas still has full history,
+   * so index pairing would attach media to the wrong (or no) row.
+   * @param inboundText Text of the inbound user row (may include `[Image #N]`).
+   * @returns Matching local user, or undefined when none left.
+   */
+  const takeMatchingLocal = (
+    inboundText: string,
+  ): UserTimelineItem | undefined => {
+    const idx = mediaPool.findIndex((localUser) => {
+      const localText = userTextFromBlocks(localUser.blocks);
+      const localHasImages =
+        userImagesFromBlocks(localUser.blocks).length > 0;
+      return userBodiesCompatible(inboundText, localText, localHasImages);
+    });
+    if (idx < 0) {
+      return undefined;
+    }
+    const [match] = mediaPool.splice(idx, 1);
+    return match;
+  };
+
+  let changed = false;
+  const timeline = inbound.timeline.map((item) => {
+    if (item.kind !== "user") {
+      return item;
+    }
+    // Inbound already has media — do not clobber wire-authoritative embeds.
+    if (nonTextBlocks(item.blocks).length > 0) {
+      return item;
+    }
+    const inboundText = userTextFromBlocks(item.blocks);
+    const localUser = takeMatchingLocal(inboundText);
+    if (!localUser) {
+      return item;
+    }
+    const localMedia = nonTextBlocks(localUser.blocks);
+    // Prefer cleaned inbound wording (agent confirm) without `[Image #N]` noise.
+    const cleanText = stripImagePlaceholders(inboundText).trim();
+    const textBlocks: ContentBlock[] =
+      cleanText.length > 0
+        ? [{ type: "text", text: cleanText }]
+        : localUser.blocks.filter((block) => block.type === "text");
+    changed = true;
+    return {
+      ...item,
+      blocks: [...textBlocks, ...localMedia],
+      // Keep local identity so later absorbs still treat this as authoritative.
+      origin: localUser.origin ?? item.origin,
+      clientPromptId: localUser.clientPromptId ?? item.clientPromptId,
+      agentConfirmed: Boolean(item.agentConfirmed || localUser.agentConfirmed),
+    };
+  });
+
+  if (!changed) {
+    return inbound;
+  }
+  return { ...inbound, timeline };
+}
 
 /**
  * Decide whether one inbound session snapshot owns the main canvas.
@@ -102,4 +262,59 @@ export function mergeOptimisticLocalUsers(
     timeline: [...inbound.timeline, ...pending],
     status: "streaming",
   };
+}
+
+/**
+ * Merge one inbound live snapshot onto the painted canvas without blanking
+ * a richer same-session cache.
+ *
+ * Go bridge never holds timeline body text. Pool hit / post-handshake `state`
+ * and empty-bucket `session_lifecycle` therefore arrive with `timeline: []`.
+ * Catalog/select already painted the full history — replacing it makes
+ * refresh look like "content flashes then vanishes".
+ *
+ * Only empty (no user/agent) same-id inbound is preserved over local body.
+ * Partial live reduces must still paint so new turns are not dropped; callers
+ * seed the reduce bucket from catalog so live updates append to history.
+ *
+ * Content-rich inbound still runs {@link preserveLocalUserMedia} so image
+ * thumbs from optimistic paint survive text-only agent echoes.
+ * @param inbound Fresh session from bridge reduce / hydrate.
+ * @param local Currently painted canvas (often catalog-seeded on select).
+ * @returns Canvas SessionState safe to write into the store.
+ */
+export function mergeCanvasInbound(
+  inbound: SessionState,
+  local: SessionState,
+): SessionState {
+  // Restore image/embed blocks before any empty-vs-rich branch so both
+  // paths (keep local body / take inbound) keep message-list thumbs.
+  const withMedia = preserveLocalUserMedia(inbound, local);
+
+  const sameSession =
+    Boolean(withMedia.id) && Boolean(local.id) && withMedia.id === local.id;
+  const localHasBody = sessionHasConversationContent(local.timeline);
+  const inboundHasBody = sessionHasConversationContent(withMedia.timeline);
+
+  // Empty same-id hydrate (Go pool / post-handshake): keep painted transcript.
+  if (sameSession && localHasBody && !inboundHasBody) {
+    const inboundTools = withMedia.toolCalls ?? {};
+    const localTools = local.toolCalls ?? {};
+    return {
+      ...withMedia,
+      timeline: local.timeline,
+      toolCalls:
+        Object.keys(inboundTools).length > 0
+          ? { ...localTools, ...inboundTools }
+          : localTools,
+      lastAgentText: withMedia.lastAgentText || local.lastAgentText || "",
+      plan:
+        withMedia.plan && withMedia.plan.length > 0 ? withMedia.plan : local.plan,
+      title: withMedia.title || local.title,
+    };
+  }
+
+  // forceNew empty handshake: keep unconfirmed local user bubbles only.
+  // Content-rich withMedia already carries restored image blocks.
+  return mergeOptimisticLocalUsers(withMedia, local);
 }

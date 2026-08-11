@@ -36,6 +36,8 @@ describe("sessionCatalog", () => {
     assert.equal(isWeakSessionTitle("session 019fd68e"), true);
     assert.equal(isWeakSessionTitle("Chat 019fd68e"), true);
     assert.equal(isWeakSessionTitle("Chat 019fd6c4"), true);
+    assert.equal(isWeakSessionTitle("(no summary)"), true);
+    assert.equal(isWeakSessionTitle("no summary"), true);
     assert.equal(
       isWeakSessionTitle("UI UX Design Agent Style Codex Claude"),
       false,
@@ -218,7 +220,7 @@ describe("sessionCatalog", () => {
     cat = upsertFromLiveState(cat, same, 5000);
     assert.equal(cat[0]?.updatedAt, 1000);
 
-    // New agent reply advances recency.
+    // New agent reply advances recency (live tip append, even if idle settle).
     const replied = createSessionState({
       id: "s-recency",
       workspace: "/proj/demo",
@@ -228,6 +230,7 @@ describe("sessionCatalog", () => {
       { kind: "agent", id: "a1", text: "agent answer" },
     ];
     replied.lastAgentText = "agent answer";
+    replied.status = "streaming";
     cat = upsertFromLiveState(cat, replied, 9000);
     assert.equal(cat[0]?.updatedAt, 9000);
 
@@ -245,8 +248,105 @@ describe("sessionCatalog", () => {
       },
     ];
     userAgain.lastAgentText = "agent answer";
+    userAgain.status = "streaming";
     cat = upsertFromLiveState(cat, userAgain, 12_000);
     assert.equal(cat[0]?.updatedAt, 12_000);
+  });
+
+  it("session/load bulk hydrate does not advance updatedAt (select must not reorder)", () => {
+    // Catalog row already has a stable recency from list / prior live use.
+    const partial = createSessionState({
+      id: "s-load",
+      workspace: "/proj/demo",
+    });
+    partial.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "old prompt" }],
+      },
+      { kind: "agent", id: "a1", text: "old reply" },
+    ];
+    partial.lastAgentText = "old reply";
+    partial.status = "idle";
+    let cat = upsertFromLiveState([], partial, 1000);
+    assert.equal(cat[0]?.updatedAt, 1000);
+
+    // Select → session/load returns a much longer historical timeline while idle.
+    const loaded = createSessionState({
+      id: "s-load",
+      workspace: "/proj/demo",
+    });
+    loaded.timeline = [
+      ...partial.timeline,
+      {
+        kind: "user",
+        id: "u2",
+        blocks: [{ type: "text", text: "turn 2" }],
+      },
+      { kind: "agent", id: "a2", text: "reply 2" },
+      {
+        kind: "user",
+        id: "u3",
+        blocks: [{ type: "text", text: "turn 3" }],
+      },
+      { kind: "agent", id: "a3", text: "reply 3" },
+      {
+        kind: "user",
+        id: "u4",
+        blocks: [{ type: "text", text: "turn 4" }],
+      },
+      { kind: "agent", id: "a4", text: "reply 4" },
+    ];
+    loaded.lastAgentText = "reply 4";
+    loaded.status = "idle";
+    cat = upsertFromLiveState(cat, loaded, 99_000);
+    assert.equal(cat[0]?.timeline.length, 8);
+    // Wall clock must not win — clicking the row must not jump it to the top.
+    assert.equal(cat[0]?.updatedAt, 1000);
+  });
+
+  it("cold session/load fill keeps remote-list recency instead of now", () => {
+    // Row from sessions_list with empty timeline and remote updatedAt epoch.
+    const listed = mergeRemoteSessionsIntoCatalog(
+      [],
+      [
+        {
+          id: "s-cold",
+          title: "Listed chat",
+          workspace: "/proj/demo",
+          updatedAt: "2026-08-01T12:00:00.000Z",
+        },
+      ],
+      50_000,
+    );
+    const listedAt = Date.parse("2026-08-01T12:00:00.000Z");
+    assert.equal(listed[0]?.updatedAt, listedAt);
+
+    // First open fills history while idle — must keep list recency, not Date.now().
+    const loaded = createSessionState({
+      id: "s-cold",
+      workspace: "/proj/demo",
+    });
+    loaded.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "hello from history" }],
+      },
+      { kind: "agent", id: "a1", text: "hi back" },
+      {
+        kind: "user",
+        id: "u2",
+        blocks: [{ type: "text", text: "second" }],
+      },
+      { kind: "agent", id: "a2", text: "ok" },
+    ];
+    loaded.lastAgentText = "ok";
+    loaded.status = "idle";
+    const cat = upsertFromLiveState(listed, loaded, 99_000);
+    assert.equal(cat[0]?.timeline.length, 4);
+    assert.equal(cat[0]?.updatedAt, listedAt);
   });
 
   it("resolveCatalogUpdatedAt prefers newer agent session_info time without content change", () => {
@@ -277,6 +377,53 @@ describe("sessionCatalog", () => {
       50_000,
     );
     assert.equal(next, Date.parse("2026-08-07T12:00:00.000Z"));
+  });
+
+  it("resolveCatalogUpdatedAt does not wall-clock jump on idle bulk content change", () => {
+    const existing = {
+      id: "s1",
+      workspace: "/p",
+      title: "T",
+      mode: "build" as const,
+      model: "m",
+      status: "idle" as const,
+      createdAt: 1,
+      updatedAt: 1000,
+      timeline: [
+        {
+          kind: "user" as const,
+          id: "u1",
+          blocks: [{ type: "text" as const, text: "a" }],
+        },
+        { kind: "agent" as const, id: "a1", text: "b" },
+      ],
+      toolCalls: {},
+      lastAgentText: "b",
+    };
+    const bulkTimeline = [
+      ...existing.timeline,
+      {
+        kind: "user" as const,
+        id: "u2",
+        blocks: [{ type: "text" as const, text: "c" }],
+      },
+      { kind: "agent" as const, id: "a2", text: "d" },
+      {
+        kind: "user" as const,
+        id: "u3",
+        blocks: [{ type: "text" as const, text: "e" }],
+      },
+      { kind: "agent" as const, id: "a3", text: "f" },
+    ];
+    const next = resolveCatalogUpdatedAt(
+      existing,
+      bulkTimeline,
+      "f",
+      undefined,
+      99_000,
+      "idle",
+    );
+    assert.equal(next, 1000);
   });
 
   it("rehydrateCatalogTitles fixes Chat id titles from timeline", () => {
@@ -390,7 +537,7 @@ describe("sessionCatalog", () => {
     assert.equal(empties[0]?.id, "ghost2");
   });
 
-  it("groupSessionsByProject clusters by workspace and sorts by first-char ASCII", () => {
+  it("groupSessionsByProject clusters by workspace and sorts by updatedAt desc", () => {
     const groups = groupSessionsByProject([
       {
         id: "a",
@@ -435,10 +582,10 @@ describe("sessionCatalog", () => {
     // Project names: "demo" before "other" by first-char ASCII (d < o).
     assert.equal(groups[0]?.projectName, "demo");
     assert.equal(groups[1]?.projectName, "other");
-    // Within demo: Alpha before Zeta (not by updatedAt recency).
+    // Within demo: Zeta (300) before Alpha (100) by last-message recency.
     assert.deepEqual(
       groups[0]?.sessions.map((s) => s.id),
-      ["a2", "a"],
+      ["a", "a2"],
     );
   });
 
@@ -502,12 +649,13 @@ describe("sessionCatalog", () => {
     assert.equal(groups[0]?.label, "Today");
   });
 
-  it("formatRelativeTime uses compact Framer-style labels", () => {
+  it("formatRelativeTime uses compact labels with short now window", () => {
     const now = 1_000_000;
     assert.equal(formatRelativeTime(now - 10_000, now), "now");
+    assert.equal(formatRelativeTime(now - 45_000, now), "45s");
     assert.equal(formatRelativeTime(now - 5 * 60_000, now), "5m");
     assert.equal(formatRelativeTime(now - 3 * 3600_000, now), "3h");
-    assert.equal(formatRelativeTime(now - 24 * 3600_000, now), "yesterday");
+    assert.equal(formatRelativeTime(now - 24 * 3600_000, now), "1d");
     assert.equal(formatRelativeTime(now - 3 * 24 * 3600_000, now), "3d");
   });
 });

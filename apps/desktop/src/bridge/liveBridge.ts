@@ -7,14 +7,8 @@
  * via applySessionUpdate + eventId set dedupe and surfaces SessionState to handlers.
  */
 
-import type { ContentBlock } from "@grok-desktop/acp-core";
-import {
-  applySessionLifecycle,
-  createSessionReduceBucket,
-  hydrateSessionBucket,
-  reduceSessionUpdate,
-  type SessionReduceBucket,
-} from "../lib/sessionReduce";
+import type { ContentBlock, SessionState } from "@grok-desktop/acp-core";
+import { createLiveBridgeDispatch } from "./liveBridgeDispatch";
 import { createLiveBridgeFs } from "./liveBridgeFs";
 import type {
   BridgeServerMsg,
@@ -40,6 +34,12 @@ export type {
   StartOpts,
   WorkspaceEntry,
 };
+
+export {
+  createLiveBridgeDispatch,
+  makeAgentChunkUpdates,
+  REPLAY_TIMEOUT_MS,
+} from "./liveBridgeDispatch";
 
 type PendingCli = {
   resolve: (result: CliChannelResult) => void;
@@ -82,6 +82,7 @@ export function connectLiveBridge(
   writeWorkspaceFile: (
     path: string,
     content: string,
+    cwd?: string,
   ) => Promise<{ ok: boolean; error?: string }>;
   /**
    * Read a workspace-relative file for @mention embedding.
@@ -118,8 +119,8 @@ export function connectLiveBridge(
 } {
   const ws = new WebSocket(url);
   const pendingCli = new Map<string, PendingCli>();
-  /** Per-session reduce state for the relay path (raw updates → SessionState). */
-  const reduceBuckets = new Map<string, SessionReduceBucket>();
+  /** Relay reduce + load-replay batching (shipped path; unit-tested via createLiveBridgeDispatch). */
+  const dispatch = createLiveBridgeDispatch({ handlers });
   const readyCallbacks: {
     resolve?: () => void;
     reject?: (error: Error) => void;
@@ -140,20 +141,6 @@ export function connectLiveBridge(
 
   const fsApi = createLiveBridgeFs(send);
 
-  /**
-   * Resolve or create the reduce bucket for a session id.
-   * @param sessionId ACP session id (empty ids share one provisional bucket).
-   */
-  function bucketFor(sessionId: string): SessionReduceBucket {
-    const key = sessionId || "__pending__";
-    let bucket = reduceBuckets.get(key);
-    if (!bucket) {
-      bucket = createSessionReduceBucket();
-      reduceBuckets.set(key, bucket);
-    }
-    return bucket;
-  }
-
   function rejectCliRequests(error: Error): void {
     for (const pending of pendingCli.values()) {
       clearTimeout(pending.timeout);
@@ -168,13 +155,17 @@ export function connectLiveBridge(
   ws.onerror = () => {
     fsApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
+    // I4: do not leave sessions muted if error aborts a load window.
+    dispatch.flushAllReplays();
     readyCallbacks.reject?.(new Error(`WebSocket error connecting to ${url}`));
     handlers.onError?.(`WebSocket error: ${url}`);
   };
   ws.onclose = () => {
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
-    reduceBuckets.clear();
+    // I4: force-close any open replay windows before clearing buckets.
+    dispatch.flushAllReplays();
+    dispatch.clearBuckets();
     handlers.onClose?.();
   };
   ws.onmessage = (ev) => {
@@ -187,73 +178,10 @@ export function connectLiveBridge(
     if (fsApi.handleServerMsg(msg)) {
       return;
     }
-    if (msg.type === "state") {
-      // Authoritative hydrate: replace client reduce bucket then notify store.
-      const sid = msg.session.id || "__pending__";
-      const bucket = bucketFor(sid);
-      hydrateSessionBucket(bucket, msg.session, true);
-      // If we had provisional empty-id bucket, re-key under real id.
-      if (msg.session.id && reduceBuckets.has("__pending__")) {
-        reduceBuckets.delete("__pending__");
-        reduceBuckets.set(msg.session.id, bucket);
-      }
-      handlers.onState(msg.session);
-    } else if (msg.type === "session_update") {
-      const bucket = bucketFor(msg.sessionId);
-      // Ensure id is stamped before reduce so catalog upserts key correctly.
-      if (msg.sessionId && !bucket.state.id) {
-        bucket.state = { ...bucket.state, id: msg.sessionId };
-      }
-      const before = bucket.state;
-      const next = reduceSessionUpdate(bucket, msg.update, msg.eventId);
-      const applied = next !== before;
-      if (handlers.onSessionUpdate) {
-        handlers.onSessionUpdate(next, {
-          sessionId: msg.sessionId,
-          eventId: msg.eventId,
-          applied,
-        });
-      } else if (applied) {
-        // Default: same paint path as full state when store did not wire relay.
-        handlers.onState(next);
-      }
-    } else if (msg.type === "session_lifecycle") {
-      const bucket = bucketFor(msg.sessionId);
-      if (msg.sessionId && !bucket.state.id) {
-        bucket.state = { ...bucket.state, id: msg.sessionId };
-      }
-      const next = applySessionLifecycle(bucket, {
-        status: msg.status,
-        pendingPermission: msg.pendingPermission,
-        model: msg.model,
-        mode: msg.mode,
-      });
-      if (handlers.onSessionUpdate) {
-        handlers.onSessionUpdate(next, {
-          sessionId: msg.sessionId,
-          applied: true,
-        });
-      } else {
-        handlers.onState(next);
-      }
-    } else if (msg.type === "pool") {
-      handlers.onPool?.(msg.entries);
-    } else if (msg.type === "environment") {
-      handlers.onEnvironment?.(msg.env);
-    } else if (msg.type === "info") {
-      handlers.onInfo?.(msg.message, msg.sessionId);
-    } else if (msg.type === "error") {
-      handlers.onError?.(msg.message, msg.sessionId);
-    } else if (msg.type === "stderr") {
-      handlers.onStderr?.(msg.text, msg.sessionId);
-    } else if (msg.type === "hello") {
-      handlers.onHello?.(msg.cwd, msg.poolCapacity, {
-        impl: msg.impl,
-        version: msg.version,
-      });
-    } else if (msg.type === "restart_required") {
-      handlers.onRestartRequired?.(msg);
-    } else if (msg.type === "cli_result") {
+    if (dispatch.handleServerMsg(msg)) {
+      return;
+    }
+    if (msg.type === "cli_result") {
       const pending = pendingCli.get(msg.result.requestId);
       if (!pending) {
         return;
@@ -294,8 +222,13 @@ export function connectLiveBridge(
 
   return {
     ready,
-    start: (opts) =>
-      send({
+    start: (opts) => {
+      // Prefill client reduce from catalog seed so Go pool-hit (empty timeline)
+      // + later live chunks append instead of replacing painted history.
+      if (opts?.seed?.id) {
+        dispatch.seedSession(opts.seed);
+      }
+      return send({
         type: "start",
         cwd: opts?.cwd,
         alwaysApprove: opts?.alwaysApprove ?? false,
@@ -303,7 +236,17 @@ export function connectLiveBridge(
         seed: opts?.seed,
         forceNew: opts?.forceNew,
         spawnConfig: opts?.spawnConfig,
-      }),
+      });
+    },
+    /**
+     * Prefill the client reduce bucket (e.g. optimistic user row with image
+     * ContentBlocks) so `user_message_chunk` absorbs into that row instead of
+     * creating a text-only agent bubble that drops thumbs mid-turn.
+     * @param session Canvas session snapshot; must carry a non-empty id.
+     */
+    seedSession: (session: SessionState) => {
+      dispatch.seedSession(session);
+    },
     prompt: (text, sessionId, blocks) =>
       send({ type: "prompt", text, sessionId, blocks }),
     cancel: (sessionId) => {

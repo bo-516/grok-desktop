@@ -22,8 +22,10 @@ import {
   stopPoolPoll,
 } from "./sessionStoreLive";
 import {
+  flushCatalogPersist,
   INITIAL_SESSION,
   persistCatalog,
+  persistNormalizedCatalog,
   resolveResumeTarget,
 } from "./sessionStoreSupport";
 import type {
@@ -78,6 +80,7 @@ export async function newSessionAction(
   }
   // Cancel in-flight select/resume so a late resume cannot repaint over the draft.
   selectSeq += 1;
+  get().clearPendingMode();
   const prev = get().session;
   // Persist the previous live canvas into the rail before blanking the UI.
   // No bridge spawn here — avoids empty "Chat xxxx" ghosts until the user sends.
@@ -85,7 +88,8 @@ export async function newSessionAction(
     const catalog = normalizeCatalog(
       upsertFromLiveState(get().catalog, prev),
     );
-    persistCatalog(catalog);
+    persistNormalizedCatalog(catalog);
+    flushCatalogPersist();
     set({
       catalog,
       viewingSessionId: null,
@@ -184,14 +188,20 @@ export function selectSessionAction(
   }
 
   const seq = ++selectSeq;
-  const seeded = recordToSessionState(rec);
-  const inPool = get().poolEntries.some((e) => e.sessionId === id && e.live);
+  const poolEntry = get().poolEntries.find((e) => e.sessionId === id && e.live);
+  const seeded = recordToSessionState(rec, poolEntry?.status);
+  const inPool = Boolean(poolEntry);
   /**
    * Nothing cached to paint: session/load replay is the only source of body,
    * and it stays silent until it completes, so the canvas needs a restore hint
    * instead of the New chat empty state.
    */
   const coldRestore = seeded.timeline.length === 0 && !inPool;
+
+  // Mode switch timers / pending belong to the previous canvas only.
+  get().clearPendingMode();
+  // Session switch: force any pending catalog write so the prior chat is durable.
+  flushCatalogPersist();
 
   set({
     viewingSessionId: id,
@@ -225,6 +235,8 @@ export function selectSessionAction(
         cwd: rec.workspace || undefined,
         resumeId: id,
         seed: seeded,
+        // Skip post-await canvas writes when a later select superseded us.
+        guard: () => seq === selectSeq,
       });
       if (seq !== selectSeq) {
         return;
@@ -257,30 +269,37 @@ export function removeSessionAction(
 ): void {
   // Reclaim child process (if in pool)
   get().live?.closeSession(id);
+  // Filter-only: still normalize so ghost prune / sort stay consistent.
   const catalog = get().catalog.filter((s) => s.id !== id);
   persistCatalog(catalog);
+  flushCatalogPersist();
   const poolEntries = get().poolEntries.filter((e) => e.sessionId !== id);
   const patch: Partial<SessionStore> = { catalog, poolEntries };
   if (get().restoringSessionId === id) {
     patch.restoringSessionId = null;
   }
-  if (get().viewingSessionId === id) {
-    const next = catalog[0];
-    if (next) {
-      patch.viewingSessionId = next.id;
-      patch.session = recordToSessionState(next);
-      patch.localDraft = false;
-      patch.creatingSession = false;
-    } else {
-      patch.viewingSessionId = null;
-      patch.session = INITIAL_SESSION;
-      // Empty rail: blank canvas is not a deliberate New chat draft.
-      patch.localDraft = false;
-      patch.creatingSession = false;
-    }
-  }
   if (get().activeSessionId === id) {
     patch.activeSessionId = null;
+  }
+  // Drop queue items that targeted the deleted session.
+  patch.promptQueue = get().promptQueue.filter((item) => item.sessionId !== id);
+
+  if (get().viewingSessionId === id) {
+    get().clearPendingMode();
+    const next = catalog[0];
+    set(patch);
+    if (next) {
+      // Full select path resumes live + seeds pool status correctly.
+      selectSessionAction(set, get, next.id);
+    } else {
+      set({
+        viewingSessionId: null,
+        session: INITIAL_SESSION,
+        localDraft: false,
+        creatingSession: false,
+      });
+    }
+    return;
   }
   set(patch);
 }
@@ -302,7 +321,8 @@ export function disconnectAction(
         status: "disconnected",
       }),
     );
-    persistCatalog(catalog);
+    persistNormalizedCatalog(catalog);
+    flushCatalogPersist();
     set({ catalog });
   }
   // stopPoolPoll is also called from onClose; clear here so a close that

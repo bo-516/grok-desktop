@@ -27,8 +27,8 @@ export function projectNameFromWorkspace(workspace: string): string {
 /**
  * Compare display labels by first-character code unit (ascending), then full
  * string, then a stable id when provided. Empty labels sort last so untitled
- * rows do not jump ahead of named ones. Used for rail auto-order: select /
- * recency must not reshuffle the list.
+ * rows do not jump ahead of named ones. Used for project-folder order on the
+ * rail (not for in-project session order, which uses `updatedAt` recency).
  * @param aLabel Left title or project name.
  * @param bLabel Right title or project name.
  * @param aId Optional stable tiebreaker (session id / workspace path).
@@ -59,9 +59,10 @@ export function compareByFirstCharAscii(
 
 /**
  * Group sessions by workspace folder path. Within each group, sessions sort
- * by title first-character code unit (asc). Groups sort by project display
- * name the same way. Select / message recency never changes this order;
- * user drag order is applied later via rail prefs.
+ * by last message activity (`updatedAt` desc — user or agent, not select
+ * focus). Groups sort by project display name first-character ASCII.
+ * User drag order / pin are applied later via rail prefs and outrank this
+ * default recency order inside a project.
  * @param catalog Full session catalog.
  * @returns Project groups with sorted sessions.
  */
@@ -77,9 +78,15 @@ export function groupSessionsByProject(
   }
   const groups: ProjectGroup[] = [];
   for (const [workspace, sessions] of map) {
-    const sorted = [...sessions].sort((a, b) =>
-      compareByFirstCharAscii(a.title, b.title, a.id, b.id),
-    );
+    const sorted = [...sessions].sort((a, b) => {
+      if (b.updatedAt !== a.updatedAt) {
+        return b.updatedAt - a.updatedAt;
+      }
+      if (a.id !== b.id) {
+        return a.id < b.id ? -1 : 1;
+      }
+      return 0;
+    });
     groups.push({
       workspace,
       projectName: projectNameFromWorkspace(workspace),
@@ -172,15 +179,22 @@ export function groupSessionsByTime(
 }
 
 /**
- * Compact relative time for session rows (Framer: now / 12m / 1h / yesterday / 3d / 1w).
+ * Compact relative time for session rows.
+ * Uses a short "now" window then seconds / minutes so several active chats
+ * do not all read as identical "now" labels.
+ * Shape: now / 45s / 12m / 1h / 1d / 3d / 1w / 2mo.
  * @param ts Event epoch ms.
  * @param now Reference now (injectable for tests).
  * @returns Short human string for the rail row.
  */
 export function formatRelativeTime(ts: number, now = Date.now()): string {
   const sec = Math.max(0, Math.floor((now - ts) / 1000));
-  if (sec < 60) {
+  // Keep "now" only for the freshest updates so peer rows can differ.
+  if (sec < 20) {
     return "now";
+  }
+  if (sec < 60) {
+    return `${sec}s`;
   }
   const min = Math.floor(sec / 60);
   if (min < 60) {
@@ -191,9 +205,7 @@ export function formatRelativeTime(ts: number, now = Date.now()): string {
     return `${hr}h`;
   }
   const day = Math.floor(hr / 24);
-  if (day === 1) {
-    return "yesterday";
-  }
+  // Prefer "1d" over "yesterday" so the fixed meta slot never overflows.
   if (day < 7) {
     return `${day}d`;
   }

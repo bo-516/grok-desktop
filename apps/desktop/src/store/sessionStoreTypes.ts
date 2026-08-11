@@ -15,9 +15,11 @@ import type {
   LiveHandle,
 } from "./sessionStoreLive";
 import type { StartOpts } from "./sessionStoreSupport";
+import type { PromptQueueItem } from "@/lib/promptQueue";
 
 export type { ConnectionMode, EnvironmentInfo, PoolEntry };
 export type { ContentBlock, SessionState, SessionRecord };
+export type { PromptQueueItem };
 
 /** Result of {@link SessionStore.setWorkspace} (empty-session project switch). */
 export type SetWorkspaceResult =
@@ -104,8 +106,11 @@ export type SessionStore = {
    * On ACP unsupported, bridge emits restart_required (J-06).
    */
   setModel: (model: string) => void;
-  /** Queue of prompts waiting while turn is streaming (F-STREAM-09). */
-  promptQueue: string[];
+  /**
+   * Prompts waiting while a turn streams (F-STREAM-09), each bound to a sessionId
+   * so switching rails cannot drain another chat's queue into the wrong process.
+   */
+  promptQueue: PromptQueueItem[];
   enqueuePrompt: (text: string) => void;
   dequeuePrompt: () => string | null;
   clearPromptQueue: () => void;

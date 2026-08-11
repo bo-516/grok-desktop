@@ -113,7 +113,9 @@ export function loadCatalogFromStorage(): SessionRecord[] {
 
 /**
  * Persist catalog to localStorage.
- * @param catalog Records to serialize; quota / private mode failures are ignored.
+ * @param catalog Records to serialize. Quota / private mode failures are
+ *   observable via console.warn (once per failure) rather than silent swallow;
+ *   eviction strategy is out of scope for this path.
  */
 export function saveCatalogToStorage(catalog: SessionRecord[]): void {
   if (typeof localStorage === "undefined") {
@@ -121,8 +123,16 @@ export function saveCatalogToStorage(catalog: SessionRecord[]): void {
   }
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(catalog));
-  } catch {
-    // quota / private mode — ignore
+  } catch (err) {
+    // QuotaExceededError / private mode — surface once so operators notice.
+    const name =
+      err && typeof err === "object" && "name" in err
+        ? String((err as { name: unknown }).name)
+        : "Error";
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[session-catalog] localStorage.setItem failed (${name}): ${message}`,
+    );
   }
 }
 
@@ -130,16 +140,32 @@ export function saveCatalogToStorage(catalog: SessionRecord[]): void {
  * Convert a catalog record back into SessionState for the main pane.
  * Runs seed-user tagging so exact X+X bodies from the pre-fix resume bug
  * are collapsed before the timeline paints (handshake will re-apply the same).
+ * When the session is still live in the pool, prefer pool status so the
+ * composer queues instead of double-prompting a streaming process.
  * @param rec Catalog row to project onto the canvas.
- * @returns SessionState with streaming status normalized to idle.
+ * @param poolStatus Optional live pool status for this session id.
+ * @returns SessionState ready for the canvas.
  */
-export function recordToSessionState(rec: SessionRecord): SessionState {
+export function recordToSessionState(
+  rec: SessionRecord,
+  poolStatus?: SessionState["status"],
+): SessionState {
+  let status: SessionState["status"];
+  if (poolStatus === "streaming" || poolStatus === "waiting_permission") {
+    // Live pool process still busy — keep canvas honest so send queues.
+    status = poolStatus;
+  } else if (rec.status === "streaming") {
+    // Stale catalog streaming without a live process → idle so send is allowed.
+    status = "idle";
+  } else {
+    status = rec.status;
+  }
   return {
     id: rec.id,
     workspace: rec.workspace,
     model: rec.model,
     mode: rec.mode,
-    status: rec.status === "streaming" ? "idle" : rec.status,
+    status,
     timeline: tagSeedUserMessages(rec.timeline ?? []),
     toolCalls: rec.toolCalls ?? {},
     plan: rec.plan,

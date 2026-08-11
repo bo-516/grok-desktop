@@ -16,10 +16,18 @@ import {
 } from "./sessionStoreLive";
 import { recordToSessionState } from "./sessionCatalog";
 import {
+  countQueueForSession,
+  dequeuePromptForSession,
+  enqueuePromptText,
+} from "@/lib/promptQueue";
+import {
   appendUserPrompt,
   type ContentBlock,
   type TimelineItem,
 } from "@grok-desktop/acp-core";
+
+/** Guard concurrent sendPromptAction on the same idle canvas (double Enter). */
+let sendInFlight = false;
 
 /** Poll interval while waiting for forceNew canvas id (ms). */
 const WAIT_SESSION_ID_POLL_MS = 40;
@@ -52,25 +60,37 @@ export async function waitForCanvasSessionId(
 }
 
 /**
- * Enqueue a non-empty prompt while a turn is in flight.
+ * Enqueue a non-empty prompt for the canvas session while a turn is in flight.
+ * Binds the item to the current session id so a later drain on another chat
+ * cannot deliver this text to the wrong process.
  * @param set Zustand set.
  * @param get Zustand get.
  * @param text Raw user text; trimmed; empty is ignored.
  */
 export function enqueuePromptAction(
   set: SessionStoreSet,
-  _get: SessionStoreGet,
+  get: SessionStoreGet,
   text: string,
 ): void {
   const t = text.trim();
   if (!t) {
     return;
   }
-  set((s) => ({ promptQueue: [...s.promptQueue, t] }));
+  const sessionId =
+    get().session.id.trim() ||
+    get().viewingSessionId?.trim() ||
+    get().activeSessionId?.trim() ||
+    "";
+  if (!sessionId) {
+    return;
+  }
+  set((s) => ({
+    promptQueue: enqueuePromptText(s.promptQueue, sessionId, t),
+  }));
 }
 
 /**
- * Pop the head of the prompt queue, or null when empty.
+ * Pop the next queued prompt for the current canvas session, or null.
  * @param set Zustand set.
  * @param get Zustand get.
  * @returns Dequeued text or null.
@@ -79,13 +99,14 @@ export function dequeuePromptAction(
   set: SessionStoreSet,
   get: SessionStoreGet,
 ): string | null {
-  const q = get().promptQueue;
-  if (q.length === 0) {
+  const sessionId =
+    get().session.id.trim() || get().viewingSessionId?.trim() || "";
+  const { head, rest } = dequeuePromptForSession(get().promptQueue, sessionId);
+  if (head === null) {
     return null;
   }
-  const [head, ...rest] = q;
   set({ promptQueue: rest });
-  return head ?? null;
+  return head;
 }
 
 /**
@@ -244,7 +265,7 @@ export async function sendPromptAction(
   draft: string,
   blocks?: ContentBlock[],
 ): Promise<boolean> {
-  const { connectionMode, live, session, viewingSessionId, lastError } = get();
+  const { connectionMode, live, session, viewingSessionId } = get();
   const text = draft.trim();
   // Allow image-only sends (blocks with image, empty text).
   const hasBlocks = Array.isArray(blocks) && blocks.length > 0;
@@ -252,17 +273,23 @@ export async function sendPromptAction(
     return false;
   }
 
+  // Also gate on pool status: catalog seed can paint idle while the process is still streaming.
+  const canvasId = session.id.trim() || viewingSessionId?.trim() || "";
+  const poolStatus = canvasId
+    ? get().poolEntries.find((e) => e.sessionId === canvasId)?.status
+    : undefined;
+  const turnBusy =
+    session.status === "streaming" ||
+    session.status === "waiting_permission" ||
+    poolStatus === "streaming" ||
+    poolStatus === "waiting_permission";
+
   // Queue while turn is in flight (F-STREAM-09) — never drop user text.
   // Queued items are text-only; multi-block must wait for idle (J-06 honesty).
   // Draft canvas has status idle even if another pool session is streaming.
   // Optimistic status is "streaming" after a local paint; only queue when the
   // canvas already has a real session id (otherwise first-send create path).
-  if (
-    connectionMode === "live-bridge" &&
-    live &&
-    session.id &&
-    (session.status === "streaming" || session.status === "waiting_permission")
-  ) {
+  if (connectionMode === "live-bridge" && live && session.id && turnBusy) {
     if (hasBlocks && !text) {
       set({
         bridgeInfo:
@@ -271,11 +298,45 @@ export async function sendPromptAction(
       return false;
     }
     enqueuePromptAction(set, get, text || "(attachment pending)");
+    const qLen = countQueueForSession(get().promptQueue, session.id);
     set({
-      bridgeInfo: `Queued (${get().promptQueue.length}) — will send after turn`,
+      bridgeInfo: `Queued (${qLen}) — will send after turn`,
     });
     return true;
   }
+
+  // Double-Enter / concurrent first-send: serialize idle sends on one canvas.
+  if (sendInFlight) {
+    if (session.id && text) {
+      enqueuePromptAction(set, get, text);
+      const qLen = countQueueForSession(get().promptQueue, session.id);
+      set({
+        bridgeInfo: `Queued (${qLen}) — will send after turn`,
+      });
+      return true;
+    }
+    return false;
+  }
+  sendInFlight = true;
+  try {
+    return await sendPromptActionBody(set, get, text, hasBlocks, blocks);
+  } finally {
+    sendInFlight = false;
+  }
+}
+
+/**
+ * Body of send after queue / in-flight gates (extracted for the sendInFlight lock).
+ * @returns True when accepted.
+ */
+async function sendPromptActionBody(
+  set: SessionStoreSet,
+  get: SessionStoreGet,
+  text: string,
+  hasBlocks: boolean,
+  blocks?: ContentBlock[],
+): Promise<boolean> {
+  const { connectionMode, live, session, viewingSessionId } = get();
 
   // Show the user message before any connect / forceNew await (snappy UX).
   paintOptimisticUserPrompt(set, get, text, hasBlocks ? blocks : undefined);
@@ -348,6 +409,17 @@ export async function sendPromptAction(
     return false;
   }
 
+  // Seed the live reduce bucket with the optimistic canvas (including image
+  // ContentBlocks) so agent `user_message_chunk` text echoes absorb into that
+  // row instead of opening a text-only bubble that wipes message-list thumbs.
+  const paintedSession = get().session;
+  if (paintedSession.timeline.length > 0) {
+    handle.seedSession?.({
+      ...paintedSession,
+      id: paintedSession.id.trim() || sid,
+    });
+  }
+
   // Slash commands route as prompt text; multi-block path carries images (F-STREAM-07).
   const ok = handle.prompt(text, sid, hasBlocks ? blocks : undefined);
   if (!ok) {
@@ -356,7 +428,7 @@ export async function sendPromptAction(
     }
     set({
       bridgeInfo: "Send failed: bridge not connected. Run npm run bridge",
-      lastError: lastError ?? "bridge not connected",
+      lastError: get().lastError ?? "bridge not connected",
     });
     return false;
   }

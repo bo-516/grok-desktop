@@ -107,9 +107,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       live.setMode(mode, sid);
     }
     // If agent never emits current_mode_update, settle optimistically after timeout.
+    const modeSessionId =
+      get().session.id || get().activeSessionId || get().viewingSessionId;
     armPendingModeTimeout(() => {
       const pending = get().pendingMode;
       if (pending === null) {
+        return;
+      }
+      // Only stamp mode on the canvas that requested the switch.
+      const currentId =
+        get().session.id || get().activeSessionId || get().viewingSessionId;
+      if (modeSessionId && currentId && modeSessionId !== currentId) {
+        set({ pendingMode: null });
         return;
       }
       set((s) => ({

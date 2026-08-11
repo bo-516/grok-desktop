@@ -24,6 +24,7 @@ export type LiveBridgeFsApi = {
   writeWorkspaceFile: (
     path: string,
     content: string,
+    cwd?: string,
   ) => Promise<{ ok: boolean; error?: string }>;
   readWorkspaceFile: (
     path: string,
@@ -98,6 +99,7 @@ export function createLiveBridgeFs(
   const writeWorkspaceFile = (
     filePath: string,
     content: string,
+    cwd?: string,
   ): Promise<{ ok: boolean; error?: string }> => {
     writeRequestState.sequence += 1;
     const requestId = `write-${writeRequestState.sequence}`;
@@ -113,6 +115,8 @@ export function createLiveBridgeFs(
           requestId,
           path: filePath,
           content,
+          // Bind write to the session workspace, not bridge defaultListCwd.
+          cwd,
         })
       ) {
         return;
