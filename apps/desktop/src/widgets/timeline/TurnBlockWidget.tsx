@@ -1,7 +1,8 @@
 /**
  * Stateful turn shell: one activity rail + optional final answer for a prompt span.
- * Owns isOpen / durationMs; auto-collapses on live→done when an answer exists
- * and the user has not toggled (tool-only turns stay open / readable).
+ * Owns isOpen / durationMs. History rails stay collapsed on open; only the live
+ * streaming turn expands by default. Auto-collapses on live→done when the user
+ * has not toggled (so reopening a session never re-expands finished work).
  */
 
 import cs from "classnames";
@@ -17,6 +18,7 @@ import {
 } from "@/lib/turnGrouping";
 import {
   currentStepPreview,
+  formatDoneActivitySummary,
   formatTurnLabel,
   shouldAutoCollapseTurn,
 } from "@/lib/turnLabel";
@@ -63,12 +65,12 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
   const openPreview = usePreviewStore((s) => s.openPreview);
   const changeSet = buildTurnChangeSet(unit, toolCalls);
   const hasRail = unit.activity.length > 0;
-  const hasAnswer = unit.answer !== undefined;
   /**
-   * Expanded while live; completed history with an answer defaults collapsed.
-   * Tool-only / no-answer turns stay open so the rail remains readable.
+   * Expanded only while this turn is the live streaming span.
+   * Opening a session keeps every finished Worked rail collapsed until the
+   * user expands it (body remounts nested Thought/tool steps open by default).
    */
-  const [isOpen, setIsOpen] = useState(live || !hasAnswer);
+  const [isOpen, setIsOpen] = useState(live);
   /**
    * Display duration: thought wall span, optionally extended to Date.now()
    * when a live block finishes after long tool work.
@@ -81,12 +83,17 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
   const preview = live
     ? currentStepPreview(unit.activity, sessionStatus)
     : "";
+  /** Done rails keep a kind mix on the header so collapse is scannable. */
+  const activitySummary = live
+    ? ""
+    : formatDoneActivitySummary(unit.activity);
   const label = formatTurnLabel({
     live,
     totalMs: durationMs,
     steps: unit.steps,
     cancelled: cancelled && !live,
     currentStepPreview: preview,
+    activitySummary,
   });
   const className = cs("turn-block", {
     "turn-block-open": isOpen,
@@ -105,14 +112,19 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
         prevLive,
         live,
         userToggled: userToggledRef.current,
-        hasAnswer,
       })
     ) {
       setIsOpen(false);
       const startMs = turnEarliestStartMs(unit.activity);
       if (startMs !== undefined) {
         const wall = Date.now() - startMs;
-        if (wall > 0) {
+        /**
+         * Extend only when nested thought clocks under-count long tool work.
+         * Multi-day reconnect deltas (e.g. 2224m) are not "worked" time — the
+         * duration formatter also handles hours/days, but prefer sane capture.
+         */
+        const maxSane = Math.max(unit.totalMs * 2, 6 * 3600_000);
+        if (wall > 0 && wall <= maxSane) {
           setDurationMs((prev) => Math.max(prev, wall));
         }
       }
@@ -121,11 +133,7 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
     if (live && !userToggledRef.current) {
       setIsOpen(true);
     }
-    // Tool-only ends: keep rail open when settling if user never toggled.
-    if (!live && !hasAnswer && !userToggledRef.current) {
-      setIsOpen(true);
-    }
-  }, [live, unit.activity, hasAnswer]);
+  }, [live, unit.activity]);
 
   return (
     <div

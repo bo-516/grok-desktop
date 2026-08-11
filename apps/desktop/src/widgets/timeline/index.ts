@@ -5,6 +5,7 @@ export { TimelineView } from "./TimelineView";
 export type { TimelineViewProps } from "./TimelineView";
 export { useTimelineWidget } from "./useTimelineWidget";
 export type { TimelineWidgetModel } from "./useTimelineWidget";
+export { useTimelineEntranceBaseline } from "./useTimelineEntranceBaseline";
 export { ThoughtWidget } from "./ThoughtWidget";
 export { ThoughtGroupView } from "./ThoughtGroupView";
 export { TurnBlockWidget } from "./TurnBlockWidget";

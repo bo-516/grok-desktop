@@ -1,6 +1,8 @@
 /**
  * Stateless activity rail: ordered turn steps under a quiet left guide line.
  * Expand/collapse of the rail itself lives in TurnBlockWidget.
+ * Height is capped via `.turn-rail` (viewport-adaptive, min 280px) so long
+ * activity lists scroll inside the rail instead of stretching the timeline.
  */
 
 import type { SessionStatus, ToolCallCard } from "@grok-desktop/acp-core";

@@ -4,39 +4,15 @@
  * derived render units. Presentation lives in TimelineView (pure).
  */
 
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import type { TimelineItem, ToolCallCard } from "@grok-desktop/acp-core";
+import { useEffect, useMemo, useState } from "react";
+import type { ToolCallCard } from "@grok-desktop/acp-core";
+import { timelineContentKey } from "@/lib/timelineContentKey";
 import { buildTimelineRenderUnits } from "@/lib/timelinePipeline";
 import { searchTimeline } from "@/lib/timelineSearch";
 import { isTurnLive } from "@/lib/turnGrouping";
 import { useSessionStore } from "@/store/sessionStore";
+import { useTimelineEntranceBaseline } from "./useTimelineEntranceBaseline";
 import { useTimelineStickToBottom } from "./useTimelineStickToBottom";
-
-/**
- * Fingerprint timeline growth so stick-to-bottom can follow streams without
- * deep-comparing the whole item list.
- * @param timeline Ordered session items (may be empty).
- * @param status Session run status (affects generating row).
- * @param lastAgentText Latest agent buffer (grows on each chunk while streaming).
- * @param toolStatusSig Compact tool status map so in-place tool updates still pin-follow.
- * @returns Stable-enough string key; empty timeline → status-only key.
- */
-function timelineContentKey(
-  timeline: TimelineItem[],
-  status: string,
-  lastAgentText: string,
-  toolStatusSig: string,
-): string {
-  const last = timeline[timeline.length - 1];
-  if (!last) {
-    return `0:${status}`;
-  }
-  let tail: string | number = last.id;
-  if (last.kind === "agent" || last.kind === "thought") {
-    tail = last.text.length;
-  }
-  return `${timeline.length}:${last.kind}:${tail}:${status}:${lastAgentText.length}:${toolStatusSig}`;
-}
 
 /**
  * Timeline orchestration: store + find + scroll + grouped units.
@@ -75,10 +51,17 @@ export function useTimelineWidget() {
     () => timelineContentKey(timeline, status, lastAgentText, toolStatusSig),
     [timeline, status, lastAgentText, toolStatusSig],
   );
-  const { scrollRef, handleScroll, scrollToBottom } = useTimelineStickToBottom({
+  // Stick-to-bottom only on session switch / live content growth — not on click.
+  const { scrollRef, handleScroll } = useTimelineStickToBottom({
     sessionId,
     contentKey,
   });
+  // Restored history renders instantly; only live arrivals keep the entrance.
+  const seededUnitKeys = useTimelineEntranceBaseline(
+    sessionId,
+    units,
+    restoringSessionId,
+  );
 
   // ⌘F conversation search (F-STREAM-14)
   useEffect(() => {
@@ -92,30 +75,6 @@ export function useTimelineWidget() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /**
-   * Clicking a message re-pins and scrolls to the latest turn.
-   * Ignores interactive controls (buttons, links, inputs) so Copy / expand still work.
-   * @param event bubble-phase click from the timeline surface.
-   */
-  const handleMessageClick = (event: MouseEvent<HTMLDivElement>) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    if (target.closest("button, a, input, textarea, select, [role='button']")) {
-      return;
-    }
-    // Only when the click landed on a message row, not empty padding / find bar.
-    if (
-      !target.closest(
-        "[data-kind], .msg-user-wrap, .msg-agent-wrap, .item-user, .item-agent, .item-error, .turn-block",
-      )
-    ) {
-      return;
-    }
-    scrollToBottom("smooth");
-  };
-
   const activeHit = hits[findIndex];
   const isRestoring =
     timeline.length === 0 && restoringSessionId === sessionId;
@@ -126,6 +85,7 @@ export function useTimelineWidget() {
     toolCalls: toolCalls as Record<string, ToolCallCard | undefined>,
     status,
     units,
+    seededUnitKeys,
     isRestoring,
     isEmpty,
     findOpen,
@@ -135,7 +95,6 @@ export function useTimelineWidget() {
     activeHit,
     scrollRef,
     handleScroll,
-    handleMessageClick,
     setFindOpen,
     setFindQuery,
     setFindIndex,

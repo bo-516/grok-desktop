@@ -25,7 +25,7 @@ type TurnStepViewProps = {
 };
 
 /**
- * Renders one rail step with turn-step geometry (no nested shell-toggle pills
+ * Renders one rail step with turn-step geometry (no nested shell-toggle header
  * for narration; thought/tool widgets keep their own expand chrome).
  * @param props Child unit plus session/tool context and optional active flag.
  * @returns listitem row for the activity rail.
@@ -78,7 +78,7 @@ export function TurnStepView(props: TurnStepViewProps) {
 }
 
 /**
- * Mid-turn agent narration: plain text, clamp 2 lines, expand on click.
+ * Mid-turn agent narration: plain text, clamp 4 lines, expand on click.
  * Never Markdown and never Copy — answer zone owns those.
  * @param props text Narration body; active highlights the live current step.
  */

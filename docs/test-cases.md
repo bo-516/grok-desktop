@@ -250,7 +250,7 @@
 | TC-UI-03 | Chat / Plan tabs | P1 | M | Manual | when plan present | auto-open plan; can close; count shown |
 | TC-UI-04 | mode chip styles ask/plan/build | P1 | M | Manual | switch mode | matching class / copy |
 | TC-UI-05 | Offline banner | P0 | M | Manual | stop bridge | hints `npm run bridge` + can connect; history still visible |
-| TC-UI-06 | streaming banner | P1 | M | Manual | generating | “Generating answer…”; Stop available |
+| TC-UI-06 | streaming strip above composer | P1 | M | Manual | generating | pulse orb + shimmering verb + current step + elapsed clock; Stop available (button or Esc) |
 | TC-UI-07 | waiting_permission banner + modal | P0 | M | Manual | permission request | warning bar + modal |
 | TC-UI-08 | no mock entry copy | P0 | S | Covered | source scan | no Mock agent / fixture buttons |
 | TC-UI-09 | colors only defineColor tokens | P0 | S | Covered | layout css | no hex; has `--color-bg-app` etc. |

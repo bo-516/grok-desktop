@@ -10,6 +10,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  countImagePlaceholders,
+  stripImagePlaceholders,
   userImagesFromBlocks,
   userTextFromBlocks,
   type ContentBlock,
@@ -51,10 +53,20 @@ function toAttachment(img: UserImageBlock, index: number): ImageAttachment {
  */
 export function UserMessageView(props: UserMessageViewProps) {
   const { blocks, highlight = false } = props;
-  const text = userTextFromBlocks(blocks);
+  const rawText = userTextFromBlocks(blocks);
+  /**
+   * Agent history may keep only `[Image #N]` stand-ins when binary blocks were
+   * not persisted — strip those for the bubble body and surface chip counts.
+   */
+  const placeholderCount = countImagePlaceholders(rawText);
+  const text = stripImagePlaceholders(rawText);
   const images = userImagesFromBlocks(blocks);
   const hasText = text.trim().length > 0;
   const hasImages = images.length > 0;
+  /** Placeholders with no binary payload — show chips so the message is not bare. */
+  const missingImageCount = hasImages
+    ? 0
+    : placeholderCount;
   /** Index into `images` currently shown full-size; null when closed. */
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   /**
@@ -140,7 +152,7 @@ export function UserMessageView(props: UserMessageViewProps) {
     });
   };
 
-  if (!hasText && !hasImages) {
+  if (!hasText && !hasImages && missingImageCount === 0) {
     return null;
   }
 
@@ -188,6 +200,20 @@ export function UserMessageView(props: UserMessageViewProps) {
           })}
         </ul>
       ) : null}
+      {missingImageCount > 0 ? (
+        <ul className="msg-user-attachments" aria-label="Referenced images">
+          {Array.from({ length: missingImageCount }, (_, index) => (
+            <li key={`missing-img-${index}`} className="msg-user-attachment">
+              <span
+                className="msg-user-attachment-fallback"
+                title="Image was not kept in history (agent echo placeholder)"
+              >
+                {`image ${index + 1}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {hasText ? (
         <div
           className="item-user"
@@ -195,7 +221,7 @@ export function UserMessageView(props: UserMessageViewProps) {
           data-find-hit={highlight ? "1" : undefined}
         >
           {/* Sent text uses the same accent spans as the composer mirror so
-              history matches the draft (no icon pill). */}
+              history matches the draft (no icon pill). Placeholders stripped. */}
           <MentionTextView text={text} />
         </div>
       ) : null}

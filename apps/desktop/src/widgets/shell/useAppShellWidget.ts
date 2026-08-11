@@ -65,6 +65,8 @@ export function useAppShellWidget() {
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
   const newSession = useSessionStore((s) => s.newSession);
   const promptQueue = useSessionStore((s) => s.promptQueue);
+  const viewingSessionId = useSessionStore((s) => s.viewingSessionId);
+  const sessionId = useSessionStore((s) => s.session.id);
   const previewTarget = usePreviewStore((s) => s.target);
   const previewWidth = usePreviewStore((s) => s.width);
   const closePreview = usePreviewStore((s) => s.closePreview);
@@ -115,11 +117,16 @@ export function useAppShellWidget() {
     onNewSession,
   });
 
+  const canvasQueueId = sessionId.trim() || viewingSessionId?.trim() || "";
+  const canvasQueueLength = canvasQueueId
+    ? promptQueue.filter((item) => item.sessionId === canvasQueueId).length
+    : 0;
+
   useShellSessionLifecycle({
     status: session.status,
     title: session.title,
     sessionId: session.id,
-    queueLength: promptQueue.length,
+    queueLength: canvasQueueLength,
     connectionMode,
   });
 
@@ -186,8 +193,17 @@ export function useAppShellWidget() {
   const contextRailOpen = contextRail === "plan" || contextRail === "preview";
   const planRailOpen = contextRail === "plan";
   const previewRailOpen = contextRail === "preview";
+  /**
+   * Push only when the open rail has real content. An empty Plan (or empty
+   * Preview) uses overlay so the transcript is not squeezed for "No plan yet".
+   */
+  const railHasContent =
+    (planRailOpen && planCount > 0) ||
+    (previewRailOpen && previewTarget != null);
   const pushMode =
-    contextRailOpen && drawerEffectiveLayout === "push";
+    contextRailOpen &&
+    railHasContent &&
+    drawerEffectiveLayout === "push";
   const railWidthPx = contextRailWidthPx(contextRail, previewWidth);
 
   const togglePanel = useCallback((which: PanelId) => {
@@ -222,6 +238,7 @@ export function useAppShellWidget() {
 
   return {
     session,
+    viewingSessionId,
     environment,
     restartNotice,
     clearRestartNotice,
@@ -265,15 +282,18 @@ export function useAppShellWidget() {
 }
 
 /**
- * Compact top-bar sync label (Synced / Generating / Offline / Awaiting).
+ * Compact top-bar sync label (Synced / Offline / Awaiting).
+ *
+ * Connection state only. Turn activity moved to the live strip above the
+ * composer (TurnStatusWidget) — a "Generating" word in the far corner was the
+ * weakest possible place to report it, and duplicating it here would make the
+ * two indicators disagree the moment one lags behind the other.
+ *
  * @param args Live flag and session status.
  */
 function syncChipLabel(args: { live: boolean; status: string }): string {
   if (!args.live) {
     return "Offline";
-  }
-  if (args.status === "streaming") {
-    return "Generating";
   }
   if (args.status === "waiting_permission") {
     return "Awaiting";

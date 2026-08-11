@@ -8,6 +8,7 @@ import {
   formatThoughtGroupLabel,
   formatThoughtLabel,
   shouldAutoCollapseThought,
+  THOUGHT_LIVE_LABEL,
 } from "@/lib/thoughtLabel";
 import type { TimelineItem } from "@grok-desktop/acp-core";
 
@@ -25,23 +26,20 @@ function thought(partial: Partial<ThoughtItem> & { text: string }): ThoughtItem 
 }
 
 describe("formatThoughtLabel", () => {
-  it("streaming label may include a short live body preview", () => {
+  it("streaming label is the bare live word, never a body preview", () => {
     const item = thought({
       text: "The user wants a one-sentence demo intro that is quite long",
       startedAt: 1000,
       completedAt: undefined,
     });
-    const label = formatThoughtLabel(item, "streaming");
-    assert.match(label, /^Thinking…/);
-    assert.match(label, / · /);
-    assert.match(label, /The user wants/);
-    // Cap preview length so the pill stays short.
-    assert.ok(label.length < 80);
+    // The body renders under the row and the rail header carries the preview;
+    // the label itself stays one shimmering word.
+    assert.equal(formatThoughtLabel(item, "streaming"), THOUGHT_LIVE_LABEL);
   });
 
-  it("streaming without body text is bare Thinking…", () => {
+  it("streaming without body text is the same live word", () => {
     const item = thought({ text: "", startedAt: 1000 });
-    assert.equal(formatThoughtLabel(item, "streaming"), "Thinking…");
+    assert.equal(formatThoughtLabel(item, "streaming"), THOUGHT_LIVE_LABEL);
   });
 
   it("completed label is duration-only with no English body preview", () => {
@@ -61,7 +59,7 @@ describe("formatThoughtLabel", () => {
       startedAt: 0,
       completedAt: undefined,
     });
-    // Not streaming → no Thinking…; missing completedAt + non-streaming → Thought.
+    // Not streaming → no live word; missing completedAt + non-streaming → Thought.
     assert.equal(formatThoughtLabel(item, "idle"), "Thought");
   });
 

@@ -1,14 +1,17 @@
 /**
  * Soft collapsible Thinking step inside a turn activity rail.
- * Uses turn-step geometry (not shell-toggle pills) so only the rail header
- * carries filled chrome. Expanded state is local to this mount; completed rows
- * auto-collapse unless the user already toggled expand.
- * Presentation chrome is {@link CollapsibleStepView}; this widget owns policy.
+ * While the row is live its label is a single shimmering word (Codex-style);
+ * once it completes the label is plain `Thought for Ns` text.
+ * Uses turn-step geometry (chevron-left rows) so only the rail header uses the
+ * Codex-style shell-toggle. Defaults open on mount (parent Worked body only
+ * mounts when the rail is expanded or live); completed rows auto-collapse
+ * unless the user already toggled expand. Chrome is {@link CollapsibleStepView}.
  */
 
 import cs from "classnames";
 import { useEffect, useRef, useState } from "react";
 import type { SessionStatus, TimelineItem } from "@grok-desktop/acp-core";
+import { ShinyText } from "@/components/react-bits";
 import {
   formatThoughtLabel,
   shouldAutoCollapseThought,
@@ -29,15 +32,30 @@ type ThoughtWidgetProps = {
  */
 export function ThoughtWidget(props: ThoughtWidgetProps) {
   const { item, sessionStatus } = props;
-  /** Local expand switch; refresh or history replay resets to the agent-provided collapsed default. */
-  const [isOpen, setIsOpen] = useState(!item.collapsed);
+  /**
+   * Local expand switch. Defaults open so expanding a Worked rail reveals
+   * every Thought body; remount (session reopen / re-expand) resets policy.
+   */
+  const [isOpen, setIsOpen] = useState(true);
   /** Once true, completedAt landing must not force-collapse (user owns expand state). */
   const userToggledRef = useRef(false);
   /** Previous completedAt so we only auto-collapse on the streaming → done edge. */
   const prevCompletedAtRef = useRef(item.completedAt);
   const label = formatThoughtLabel(item, sessionStatus);
   const isDone = item.completedAt !== undefined;
+  const isLive = !isDone && sessionStatus === "streaming";
   const className = cs("item-thought", { "item-thought-open": isOpen });
+  /**
+   * Live rows read as a single shimmering word (Codex-style); finished rows are
+   * plain text so a long transcript is not a wall of moving labels.
+   */
+  const labelNode = isLive ? (
+    // Same sweep rate as the composer strip verb so the two live surfaces read
+    // as one motion language rather than two unrelated animations.
+    <ShinyText className="thought-live-label" text={label} speed="fast" />
+  ) : (
+    label
+  );
 
   useEffect(() => {
     const prevCompletedAt = prevCompletedAtRef.current;
@@ -60,7 +78,7 @@ export function ThoughtWidget(props: ThoughtWidgetProps) {
         userToggledRef.current = true;
         setIsOpen((open) => !open);
       }}
-      label={label}
+      label={labelNode}
       body={
         item.text ? <div className="turn-step-body">{item.text}</div> : null
       }

@@ -1,7 +1,8 @@
 /**
- * Collapsed consecutive read/search/list tool cards (F-TOOL-06) inside a turn rail.
- * Uses turn-step geometry; shell-toggle is reserved for the turn rail header only.
- * Expand chrome is {@link CollapsibleStepView}; local open state only.
+ * Consecutive read/search/list tool cards (F-TOOL-06) inside a turn rail.
+ * Defaults open on mount so expanding a Worked rail reveals each tool card;
+ * user can still collapse. Shell-toggle is reserved for the turn rail header.
+ * Expand chrome is {@link CollapsibleStepView}.
  */
 
 import { useState } from "react";
@@ -25,7 +26,8 @@ type ToolGroupViewProps = {
  * @returns Collapsed turn-step toggle, or expanded list of tool cards under it.
  */
 export function ToolGroupView(props: ToolGroupViewProps) {
-  const [open, setOpen] = useState(false);
+  /** Open by default when the parent Worked rail mounts this body. */
+  const [open, setOpen] = useState(true);
   const summary = toolGroupSummary(props.kinds, props.toolCallIds.length);
 
   return (

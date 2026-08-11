@@ -1,8 +1,8 @@
 /**
- * Collapsed consecutive Thought segments inside a turn activity rail.
- * Expand shows each segment body separated so multi-step reasoning stays readable.
- * Uses turn-step geometry (shell-toggle only on the turn rail header).
- * Expand chrome is {@link CollapsibleStepView}; local open state only.
+ * Consecutive Thought segments inside a turn activity rail.
+ * Defaults open on mount so expanding a Worked rail reveals segment bodies;
+ * user can still collapse. Uses turn-step geometry (shell-toggle only on the
+ * Codex-style turn rail header). Expand chrome is {@link CollapsibleStepView}.
  */
 
 import { useState } from "react";
@@ -25,7 +25,8 @@ type ThoughtGroupViewProps = {
  */
 export function ThoughtGroupView(props: ThoughtGroupViewProps) {
   const { unit } = props;
-  const [isOpen, setIsOpen] = useState(false);
+  /** Open by default when the parent Worked rail mounts this body. */
+  const [isOpen, setIsOpen] = useState(true);
   const label = formatThoughtGroupLabel(unit.totalMs, unit.count);
 
   return (

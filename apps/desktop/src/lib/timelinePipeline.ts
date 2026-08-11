@@ -26,3 +26,19 @@ export function buildTimelineRenderUnits(
     groupTimelineThoughts(groupTimelineTools(timeline, toolCalls)),
   );
 }
+
+/**
+ * Stable React key / identity for one top-level render unit.
+ * Single source for the canvas `key` and for entrance-animation bookkeeping:
+ * if the two ever disagreed, a row could remount without being recognised as
+ * already-seen history and would replay its fade-in.
+ * @param unit Top-level unit from {@link buildTimelineRenderUnits}; grouped
+ *   units carry their own synthesised id, bare items key off the ACP item id.
+ * @returns Key unique within one session's unit list (ids are session-scoped,
+ *   so keys from two different sessions never collide in practice).
+ */
+export function timelineRenderUnitKey(
+  unit: TimelineRenderUnitWithTurns,
+): string {
+  return unit.type === "item" ? unit.item.id : unit.id;
+}

@@ -49,7 +49,7 @@ export type UseTimelineStickToBottomResult = {
 /**
  * Hook: pin/follow the timeline bottom across session switches and live updates.
  * @param args sessionId + contentKey; wrong/stale keys only affect follow timing, not safety.
- * @returns ref + scroll handler + imperative scrollToBottom for message clicks / chrome.
+ * @returns ref + scroll handler + imperative scrollToBottom for session switch / follow.
  */
 export function useTimelineStickToBottom(
   args: UseTimelineStickToBottomArgs,
@@ -64,7 +64,7 @@ export function useTimelineStickToBottom(
   /**
    * Move the timeline flush to its content bottom.
    * Instant path writes scrollTop directly (does not go through scrollTo + CSS
-   * scroll-behavior). Smooth is only for explicit UX (e.g. message click).
+   * scroll-behavior). Smooth is reserved for explicit UX jumps when needed.
    * @param behavior `smooth` animates; default / other values jump immediately.
    */
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {

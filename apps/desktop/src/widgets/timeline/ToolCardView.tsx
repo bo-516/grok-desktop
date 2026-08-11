@@ -5,9 +5,11 @@
  *
  * Paths are shown workspace-relative (then `~`, then absolute) while every
  * click / copy / preview read keeps using the real absolute path.
+ * Large raw text / JSON dumps collapse by default so the rail stays scannable.
  */
 
 import cs from "classnames";
+import { useState } from "react";
 import type { ToolCallCard } from "@grok-desktop/acp-core";
 import { parseMcpToolName } from "../../lib/diffReview";
 import { toPathDisplay } from "../../lib/pathDisplay";
@@ -28,6 +30,76 @@ type ToolCardViewProps = {
   toolCallId: string;
   card: ToolCallCard | undefined;
 };
+
+/** Collapse tool body when it exceeds this many characters (JSON dumps). */
+const TOOL_CONTENT_COLLAPSE_CHARS = 480;
+/** Collapse when the body has more than this many lines. */
+const TOOL_CONTENT_COLLAPSE_LINES = 12;
+
+/**
+ * Format unknown tool content into a readable string for the fallback pre.
+ * @param content Raw card content or meta.
+ * @returns Pretty JSON when object-like; string as-is.
+ */
+function formatToolFallback(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  try {
+    return JSON.stringify(content ?? {}, null, 2);
+  } catch {
+    return String(content);
+  }
+}
+
+/**
+ * Whether a tool body is large enough to start collapsed.
+ * @param text Full body text.
+ */
+function shouldCollapseToolText(text: string): boolean {
+  if (text.length > TOOL_CONTENT_COLLAPSE_CHARS) {
+    return true;
+  }
+  let lines = 1;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 10) {
+      lines += 1;
+      if (lines > TOOL_CONTENT_COLLAPSE_LINES) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Collapsible tool body: short dumps stay open; large JSON starts collapsed.
+ * @param props Body text and optional error styling.
+ */
+function ToolContentBody(props: { text: string; error?: boolean }) {
+  const { text, error = false } = props;
+  const large = shouldCollapseToolText(text);
+  const [expanded, setExpanded] = useState(!large);
+  const className = cs("tool-content", {
+    "tool-error": error,
+    "tool-content-collapsed": large && !expanded,
+  });
+  return (
+    <div className="tool-content-wrap">
+      <pre className={className}>{text}</pre>
+      {large ? (
+        <button
+          type="button"
+          className="tool-content-toggle"
+          onClick={() => setExpanded((open) => !open)}
+          aria-expanded={expanded}
+        >
+          {expanded ? "Show less" : "Show full output"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Displays one ACP tool_call including status, title, kind-specific layout,
@@ -63,6 +135,18 @@ export function ToolCardView(props: ToolCardViewProps) {
     .filter((t): t is string => Boolean(t));
   const locations = normalizeLocations(card?.rawLocations);
   const hasDiffSummaries = editSummaries.length > 0;
+  const joinedText = textParts.length > 0 ? textParts.join("\n\n") : "";
+  const failedFallback =
+    status === "failed" && !hasDiffSummaries && textParts.length === 0
+      ? formatToolFallback(card?.content ?? card?.meta ?? {})
+      : "";
+  const rawFallback =
+    !hasDiffSummaries &&
+    textParts.length === 0 &&
+    status !== "failed" &&
+    card?.content != null
+      ? formatToolFallback(card.content)
+      : "";
 
   return (
     <div className={cs("item-tool", kindClass)}>
@@ -115,28 +199,11 @@ export function ToolCardView(props: ToolCardViewProps) {
             />
           );
         })}
-        {textParts.length > 0 ? (
-          <pre className="tool-content">{textParts.join("\n\n")}</pre>
+        {joinedText ? <ToolContentBody text={joinedText} /> : null}
+        {failedFallback ? (
+          <ToolContentBody text={failedFallback} error />
         ) : null}
-        {status === "failed" &&
-        !hasDiffSummaries &&
-        textParts.length === 0 ? (
-          <pre className="tool-content tool-error">
-            {typeof card?.content === "string"
-              ? card.content
-              : JSON.stringify(card?.content ?? card?.meta ?? {}, null, 2)}
-          </pre>
-        ) : null}
-        {!hasDiffSummaries &&
-        textParts.length === 0 &&
-        status !== "failed" &&
-        card?.content != null ? (
-          <pre className="tool-content">
-            {typeof card.content === "string"
-              ? card.content
-              : JSON.stringify(card.content, null, 2)}
-          </pre>
-        ) : null}
+        {rawFallback ? <ToolContentBody text={rawFallback} /> : null}
       </div>
     </div>
   );
