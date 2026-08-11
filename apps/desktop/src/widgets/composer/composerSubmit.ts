@@ -19,8 +19,8 @@ export type ComposerSubmitContext = {
   bridgeInfo: string;
   /**
    * Resolve outgoing blocks (mentions + images). Async because bridge read.
-   * Captures draft/attachments from the submit render; safe to clear the
-   * input before the promise settles.
+   * Captures draft/attachments from the submit render; must still see the
+   * staged images until this promise is invoked (do not clear the dock first).
    */
   buildOutgoingBlocks: () => Promise<{
     blocks: ContentBlock[] | undefined;
@@ -40,8 +40,13 @@ export type ComposerSubmitContext = {
 /**
  * Run one submit attempt for the current draft snapshot.
  * Queued path is plain text only (queue stores strings) with an explicit notice.
- * Idle path clears the input immediately so create-session latency does not
- * leave the draft sitting in the dock while the timeline already shows the bubble.
+ *
+ * Idle path order is intentional (avoids a blank flash):
+ * 1. Keep draft + attachment strip while `@` files assemble (async).
+ * 2. Call sendPrompt — paints the optimistic timeline bubble **synchronously**
+ *    before its first await (images already on the canvas).
+ * 3. Only then clear the dock so the strip does not vanish into a gap frame.
+ *
  * @param ctx Freeze-frame of composer + bridge capabilities at click time.
  * @returns void; all outcomes surface via showNotice / sendPrompt side effects.
  */
@@ -83,22 +88,27 @@ export function runComposerSubmit(ctx: ComposerSubmitContext): void {
   }
 
   ctx.clearNotice();
-  // Clear the dock immediately; buildOutgoingBlocks still uses the click-time
-  // closure values. On hard failure we restore the text (attachments are not
-  // re-hydrated — rare path after create/connect failure).
-  ctx.clearDraftIfUnchanged(ctx.sentDraft);
-  ctx.clearAttachments();
+  // Do not clear draft/attachments before build+paint — that left a visible
+  // empty frame (composer strip gone, timeline bubble not yet painted) and
+  // made attached images look like they disappeared on send.
   void ctx.buildOutgoingBlocks().then(({ blocks, text, hint }) => {
     if (hint) {
       ctx.showNotice(hint, "warn");
     }
-    return ctx.sendPrompt(text, blocks).then((sent) => {
+    // sendPrompt paints the user row on its first synchronous lines (before
+    // any await). Invoke, then clear the dock so thumbs hand off without a gap.
+    const sendPromise = ctx.sendPrompt(text, blocks);
+    ctx.clearDraftIfUnchanged(ctx.sentDraft);
+    ctx.clearAttachments();
+    return sendPromise.then((sent) => {
       if (sent) {
         if (!hint) {
           ctx.clearNotice();
         }
       } else {
         ctx.restoreDraft(ctx.sentDraft);
+        // Attachments are not re-hydrated on this rare failure path (payload
+        // was already assembled; user can re-attach if create/connect failed).
         ctx.showNotice(
           ctx.bridgeInfo.startsWith("error:") ||
             /unable|cannot|failed/i.test(ctx.bridgeInfo)

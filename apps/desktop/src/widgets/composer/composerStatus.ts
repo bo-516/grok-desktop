@@ -55,9 +55,11 @@ export const COMPOSER_STATUS_BRIDGE_DOWN =
 export const COMPOSER_STATUS_LISTENING =
   "Listening… · click Mic to stop · Enter to send";
 
-/** Default shortcut hint when idle (priority 5). */
-export const COMPOSER_STATUS_DEFAULT =
-  "Enter to send · ⇧Tab mode · @ files · / commands";
+/**
+ * Default shortcut hint when idle (priority 5).
+ * Keep short — long multi-hint lines were low-contrast and dense under the dock.
+ */
+export const COMPOSER_STATUS_DEFAULT = "Enter to send · @ files · / commands";
 
 /**
  * Resolve exactly one status line from connection, notice, and dictation.

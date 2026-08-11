@@ -246,13 +246,13 @@ export const composerShortcuts: Record<string, string> = {
       "flex items-center justify-center h-8 px-3 border border-line-muted rounded-pill bg-white-faint text-fg-secondary text-12px font-medium transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg)",
     /* Always-mounted status row: fixed one-line height; tone classes change color only. */
     "composer-status":
-      "mt-2 mb-0 min-h-4.5 mx-1 text-center text-11px leading-4.5 tracking-normal truncate opacity-85",
-    "composer-status-neutral": "text-fg-muted",
+      "mt-2 mb-0 min-h-4.5 mx-1 text-center text-12px leading-4.5 tracking-normal truncate",
+    "composer-status-neutral": "text-fg-secondary",
     "composer-status-info": "text-fg-secondary",
     "composer-status-warn": "text-warning",
     /* Legacy aliases kept for any residual class references during migration. */
-    "composer-hint": "text-11px text-fg-muted tracking-normal",
-    "composer-hint-footer": "mt-2 mb-0 text-center opacity-85",
+    "composer-hint": "text-12px text-fg-secondary tracking-normal",
+    "composer-hint-footer": "mt-2 mb-0 text-center",
     "composer-hint-warn": "mt-1.5 mx-1 mb-0 text-center text-fg-secondary",
-    "composer-hint-kbd": "opacity-75",
+    "composer-hint-kbd": "text-fg-muted",
 };

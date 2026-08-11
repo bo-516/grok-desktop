@@ -26,6 +26,12 @@ import {
 type ComposerCompletionConfig = {
   commands: AvailableCommand[];
   listWorkspaceEntries?: (query: string) => Promise<ComposerWorkspaceEntry[]>;
+  /**
+   * Absolute session workspace root. Used to remap absolute `@` queries
+   * (e.g. Finder paste `/Users/…/src/a.ts`) onto relative entry paths.
+   * Empty / omitted leaves absolute remapping disabled.
+   */
+  workspace?: string;
 };
 
 /**
@@ -62,7 +68,7 @@ function workspaceEntriesEqual(
  * @returns Draft, menu state, and event handlers for the textarea.
  */
 export function useComposerCompletion(config: ComposerCompletionConfig) {
-  const { commands, listWorkspaceEntries } = config;
+  const { commands, listWorkspaceEntries, workspace = "" } = config;
   /** High-frequency draft belongs only to Composer, not global session state. */
   const [draft, setDraft] = useState("");
   /** Caret position decides plain typing vs `@` file completion vs `/` command completion. */
@@ -110,8 +116,13 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
     if (trigger.kind === "command") {
       return createCommandSuggestions(commands, trigger.query);
     }
-    return createMentionSuggestions(workspaceEntries, trigger.query);
-  }, [commands, trigger, workspaceEntries]);
+    // Pass workspace so absolute pasted paths match relative bridge entries.
+    return createMentionSuggestions(
+      workspaceEntries,
+      trigger.query,
+      workspace,
+    );
+  }, [commands, trigger, workspace, workspaceEntries]);
   const isMenuOpen = Boolean(trigger && dismissedTriggerKey !== triggerKey);
   const emptyLabel = getComposerEmptyLabel(
     trigger?.kind,

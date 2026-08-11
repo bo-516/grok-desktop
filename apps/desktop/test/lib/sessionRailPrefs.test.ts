@@ -3,17 +3,24 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   applyWorkspaceSessionOrder,
+  expandWorkspacePreview,
+  isPreviewExpanded,
   isSessionPinned,
   isWorkspaceCollapsed,
+  loadSessionRailPrefs,
   moveSessionIdInOrder,
   normalizeSessionRailPrefs,
+  normalizeWorkspaceKey,
   orderGroupsBySessionPin,
   orderSessionsByPin,
-  orderSessionsByTitleAscii,
-  orderSessionsByUserThenAscii,
+  orderSessionsByRecency,
+  orderSessionsByUserThenRecency,
+  resetSessionRailPrefsCache,
+  saveSessionRailPrefs,
+  SESSION_RAIL_PREFS_KEY,
   toggleCollapsedWorkspace,
   togglePinnedSession,
   workspaceParentPath,
@@ -23,8 +30,8 @@ import type { ProjectGroup, SessionRecord } from "@/store/sessionCatalog";
 /**
  * Minimal catalog row for ordering tests.
  * @param id Session id (also used as title when title omitted).
- * @param updatedAt Recency ms (unused for rail auto-sort; kept for realism).
- * @param title Optional display title for ASCII sort tests.
+ * @param updatedAt Last message activity ms (drives recency auto-sort).
+ * @param title Optional display title (not used for default rail order).
  */
 function rec(id: string, updatedAt: number, title?: string): SessionRecord {
   return {
@@ -60,7 +67,61 @@ function group(
   };
 }
 
+/**
+ * Install a Map-backed localStorage for Node tests (Node's stub lacks methods).
+ * @returns Restore function that reverts globalThis.localStorage.
+ */
+function installMemoryLocalStorage(): () => void {
+  const map = new Map<string, string>();
+  const prev = (globalThis as { localStorage?: Storage }).localStorage;
+  const mock: Storage = {
+    get length() {
+      return map.size;
+    },
+    clear() {
+      map.clear();
+    },
+    getItem(key: string) {
+      return map.has(key) ? (map.get(key) as string) : null;
+    },
+    key(index: number) {
+      return [...map.keys()][index] ?? null;
+    },
+    removeItem(key: string) {
+      map.delete(key);
+    },
+    setItem(key: string, value: string) {
+      map.set(key, String(value));
+    },
+  };
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    writable: true,
+    value: mock,
+  });
+  return () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: prev,
+    });
+  };
+}
+
 describe("sessionRailPrefs", () => {
+  /** Tear down memory localStorage when a storage test installed one. */
+  let restoreLocalStorage: (() => void) | null = null;
+
+  beforeEach(() => {
+    resetSessionRailPrefsCache();
+  });
+
+  afterEach(() => {
+    resetSessionRailPrefsCache();
+    restoreLocalStorage?.();
+    restoreLocalStorage = null;
+  });
+
   it("normalizeSessionRailPrefs dedupes session pins and drops junk", () => {
     const prefs = normalizeSessionRailPrefs({
       pinnedSessions: ["a", "a", 1, "", "b"],
@@ -68,6 +129,12 @@ describe("sessionRailPrefs", () => {
     });
     assert.deepEqual(prefs.pinnedSessions, ["a", "b"]);
     assert.deepEqual(prefs.collapsedWorkspaces, ["/b"]);
+    assert.deepEqual(prefs.previewExpandedWorkspaces, []);
+  });
+
+  it("normalizeWorkspaceKey strips trailing slashes", () => {
+    assert.equal(normalizeWorkspaceKey("/ws/project/"), "/ws/project");
+    assert.equal(normalizeWorkspaceKey("(no project)"), "(no project)");
   });
 
   it("ignores legacy pinnedWorkspaces without inventing session pins", () => {
@@ -91,41 +158,98 @@ describe("sessionRailPrefs", () => {
     assert.equal(isSessionPinned(prefs, "new"), false);
   });
 
-  it("toggleCollapsedWorkspace flips membership", () => {
+  it("toggleCollapsedWorkspace flips membership and normalizes path keys", () => {
     let prefs = normalizeSessionRailPrefs({});
-    prefs = toggleCollapsedWorkspace(prefs, "/ws");
+    prefs = toggleCollapsedWorkspace(prefs, "/ws/");
     assert.equal(isWorkspaceCollapsed(prefs, "/ws"), true);
+    assert.equal(isWorkspaceCollapsed(prefs, "/ws/"), true);
+    assert.deepEqual(prefs.collapsedWorkspaces, ["/ws"]);
     prefs = toggleCollapsedWorkspace(prefs, "/ws");
     assert.equal(isWorkspaceCollapsed(prefs, "/ws"), false);
   });
 
-  it("orderSessionsByTitleAscii sorts by first character code unit", () => {
+  it("collapse clears preview-expand for that workspace", () => {
+    let prefs = normalizeSessionRailPrefs({
+      previewExpandedWorkspaces: ["/ws", "/other"],
+    });
+    prefs = toggleCollapsedWorkspace(prefs, "/ws");
+    assert.equal(isWorkspaceCollapsed(prefs, "/ws"), true);
+    assert.equal(isPreviewExpanded(prefs, "/ws"), false);
+    assert.equal(isPreviewExpanded(prefs, "/other"), true);
+  });
+
+  it("expandWorkspacePreview sticks until collapse", () => {
+    let prefs = normalizeSessionRailPrefs({});
+    prefs = expandWorkspacePreview(prefs, "/ws");
+    assert.equal(isPreviewExpanded(prefs, "/ws"), true);
+    prefs = expandWorkspacePreview(prefs, "/ws");
+    assert.deepEqual(prefs.previewExpandedWorkspaces, ["/ws"]);
+  });
+
+  it("save/load roundtrip keeps collapsed workspaces across remount", () => {
+    restoreLocalStorage = installMemoryLocalStorage();
+    let prefs = normalizeSessionRailPrefs({});
+    prefs = toggleCollapsedWorkspace(prefs, "/Users/me/code/proj");
+    saveSessionRailPrefs(prefs);
+    resetSessionRailPrefsCache();
+    const reloaded = loadSessionRailPrefs();
+    assert.equal(isWorkspaceCollapsed(reloaded, "/Users/me/code/proj"), true);
+    assert.deepEqual(reloaded.collapsedWorkspaces, ["/Users/me/code/proj"]);
+    assert.ok(localStorage.getItem(SESSION_RAIL_PREFS_KEY));
+  });
+
+  it("memory cache survives without re-reading empty storage mid-session", () => {
+    restoreLocalStorage = installMemoryLocalStorage();
+    let prefs = normalizeSessionRailPrefs({});
+    prefs = toggleCollapsedWorkspace(prefs, "/a");
+    saveSessionRailPrefs(prefs);
+    // Simulate a wiped storage write after cache is warm.
+    localStorage.removeItem(SESSION_RAIL_PREFS_KEY);
+    const fromCache = loadSessionRailPrefs();
+    assert.equal(isWorkspaceCollapsed(fromCache, "/a"), true);
+  });
+
+  it("orderSessionsByRecency sorts by updatedAt desc then id", () => {
     const sessions = [
       rec("z", 1, "zeta"),
       rec("a", 9, "alpha"),
       rec("m", 5, "mu"),
     ];
-    const ordered = orderSessionsByTitleAscii(sessions);
+    const ordered = orderSessionsByRecency(sessions);
     assert.deepEqual(
       ordered.map((s) => s.id),
       ["a", "m", "z"],
     );
   });
 
-  it("orderSessionsByUserThenAscii prefers drag order over title ASCII", () => {
+  it("orderSessionsByUserThenRecency prefers drag order over recency", () => {
     const sessions = [
       rec("a", 1, "alpha"),
       rec("b", 2, "beta"),
       rec("c", 3, "gamma"),
     ];
-    const ordered = orderSessionsByUserThenAscii(sessions, ["c", "a"]);
+    const ordered = orderSessionsByUserThenRecency(sessions, ["c", "a"]);
     assert.deepEqual(
       ordered.map((s) => s.id),
       ["c", "a", "b"],
     );
   });
 
-  it("orderSessionsByPin puts pinned ids first; drag then ASCII for rest", () => {
+  it("orderSessionsByUserThenRecency appends unlisted sessions by recency", () => {
+    const sessions = [
+      rec("old", 10),
+      rec("mid", 20),
+      rec("new", 30),
+    ];
+    // Only "old" is in drag order; mid/new append by updatedAt desc.
+    const ordered = orderSessionsByUserThenRecency(sessions, ["old"]);
+    assert.deepEqual(
+      ordered.map((s) => s.id),
+      ["old", "new", "mid"],
+    );
+  });
+
+  it("orderSessionsByPin puts pinned ids first; drag then recency for rest", () => {
     const sessions = [
       rec("c", 3, "c"),
       rec("b", 2, "b"),
@@ -192,6 +316,7 @@ describe("sessionRailPrefs", () => {
     const prefs = normalizeSessionRailPrefs({
       pinnedSessions: ["b", "a"],
       collapsedWorkspaces: [],
+      previewExpandedWorkspaces: [],
     });
     const next = applyWorkspaceSessionOrder(prefs, "/ws", ["c", "a", "b"]);
     assert.deepEqual(next.sessionOrderByWorkspace["/ws"], ["c", "a", "b"]);
@@ -202,6 +327,7 @@ describe("sessionRailPrefs", () => {
     const prefs = normalizeSessionRailPrefs({
       pinnedSessions: [],
       collapsedWorkspaces: [],
+      previewExpandedWorkspaces: [],
       sessionOrderByWorkspace: { "/ws": ["b", "a", "a", ""] },
     });
     assert.deepEqual(prefs.sessionOrderByWorkspace, { "/ws": ["b", "a"] });

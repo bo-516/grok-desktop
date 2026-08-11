@@ -81,7 +81,13 @@ export function App() {
               authOk={shell.authOk}
               authMessage={shell.environment?.message}
               restartNotice={shell.restartNotice}
-              queueLength={shell.promptQueue.length}
+              queueLength={
+                shell.promptQueue.filter(
+                  (item) =>
+                    item.sessionId === shell.session.id ||
+                    item.sessionId === shell.viewingSessionId,
+                ).length
+              }
               waitingPermission={
                 shell.session.status === "waiting_permission"
               }

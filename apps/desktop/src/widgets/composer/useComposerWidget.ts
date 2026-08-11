@@ -108,7 +108,12 @@ export function useComposerWidget() {
     return (query: string) =>
       bridgeListWorkspaceEntries(query, workspace || undefined);
   }, [bridgeListWorkspaceEntries, workspace]);
-  const completion = useComposerCompletion({ commands, listWorkspaceEntries });
+  // workspace remaps absolute `@` queries (Finder paste) onto relative paths.
+  const completion = useComposerCompletion({
+    commands,
+    listWorkspaceEntries,
+    workspace,
+  });
   /** Tone-aware notice channel; status text is resolved outside this hook. */
   const { notice, showNotice, clearNotice } = useComposerNotice();
   const bar = useComposerBarControls({
@@ -188,6 +193,9 @@ export function useComposerWidget() {
   /**
    * Sends the current draft snapshot; newer typing while the bridge connects asynchronously is not cleared.
    * Mentions embed via bridge read; queue path is plain text with an explicit notice.
+   * Focus returns to the field afterwards so the click-Send path keeps the same
+   * keyboard state as Enter — including the Esc interrupt the live strip
+   * advertises, which is bound to this textarea.
    */
   const submitDraft = () => {
     runComposerSubmit({
@@ -213,6 +221,7 @@ export function useComposerWidget() {
       clearAttachments: media.clearAttachments,
       stopDictation: dictation.stopDictation,
     });
+    textareaRef.current?.focus();
   };
 
   /**
@@ -243,7 +252,7 @@ export function useComposerWidget() {
 
   /**
    * Handles completion-menu keys, ⇧Tab mode cycle, atomic mention arrows /
-   * Backspace / Delete, and Enter send.
+   * Backspace / Delete, Esc interrupt, and Enter send.
    * ⇧Tab always cycles Build → Plan → Ask (from pendingMode when in flight) so
    * the three modes can be flipped without waiting for agent confirmation; plain
    * Tab still accepts the active completion row when the menu is open.
@@ -285,6 +294,17 @@ export function useComposerWidget() {
     if (completion.isMenuOpen && event.key === "Escape") {
       event.preventDefault();
       completion.dismissMenu();
+      return;
+    }
+    /**
+     * Esc interrupts the live turn (the strip above the card advertises it).
+     * Scoped to the textarea on purpose: a window-level listener would race
+     * every menu / drawer / modal that also closes on Escape and would cancel
+     * a turn the user only meant to dismiss a popover from.
+     */
+    if (event.key === "Escape" && streaming) {
+      event.preventDefault();
+      cancelTurn();
       return;
     }
 

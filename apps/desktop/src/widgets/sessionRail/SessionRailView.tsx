@@ -1,5 +1,6 @@
 /**
- * Pure session list chrome: brand, New chat + search, project groups, footer.
+ * Pure session list chrome: brand, New chat + search, fixed PROJECTS label,
+ * scrollable workspace groups (sticky folder names), footer.
  * No store/prefs orchestration — those live in useSessionRailWidget.
  */
 
@@ -30,12 +31,15 @@ export function SessionRailView(props: SessionRailViewProps) {
     live,
     liveCount,
     catalogLength,
+    selectedWorkspace,
     newSession,
     runCli,
     reconnect,
     rowForSession,
     isGroupCollapsed,
+    isGroupPreviewExpanded,
     onToggleCollapse,
+    onExpandPreview,
   } = props;
 
   return (
@@ -109,6 +113,22 @@ export function SessionRailView(props: SessionRailViewProps) {
           </label>
         </div>
 
+        {/*
+         * PROJECTS sits outside the scrollport so list rows cannot peek under
+         * the label (sticky-in-scroll left a subpixel bleed above the head).
+         * Workspace folder names stick at top-0 inside the scroll area.
+         */}
+        {groups.length > 0 ? (
+          <div className="project-section-head">
+            <span className="project-section-label">Projects</span>
+            {searching ? (
+              <span className="project-section-count">
+                {matchCount} found
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="side-nav-scroll">
           {groups.length === 0 ? (
             <div className="side-nav-empty">
@@ -117,45 +137,38 @@ export function SessionRailView(props: SessionRailViewProps) {
                 : "No chats yet. Send a message to start."}
             </div>
           ) : (
-            <>
-              <div className="project-section-head">
-                <span className="project-section-label">Projects</span>
-                {searching ? (
-                  <span className="project-section-count">
-                    {matchCount} found
-                  </span>
-                ) : null}
-              </div>
-              {groups.map((group) => (
-                <SessionRailProjectGroupView
-                  key={group.workspace}
-                  group={group}
-                  collapsed={isGroupCollapsed(group.workspace)}
-                  onToggleCollapse={() => onToggleCollapse(group.workspace)}
-                  renderSession={(rec: SessionRecord) => {
-                    const row = rowForSession(
-                      rec,
-                      group.workspace,
-                      group.sessions.map((s) => s.id),
-                    );
-                    return (
-                      <SessionRailSessionRowView
-                        key={rec.id}
-                        rec={row.rec}
-                        selected={row.selected}
-                        isLiveActive={row.isLiveActive}
-                        liveStatus={row.liveStatus}
-                        pinned={row.pinned}
-                        onSelect={row.onSelect}
-                        onTogglePin={row.onTogglePin}
-                        onReorder={row.onReorder}
-                        onRemove={row.onRemove}
-                      />
-                    );
-                  }}
-                />
-              ))}
-            </>
+            groups.map((group) => (
+              <SessionRailProjectGroupView
+                key={group.workspace}
+                group={group}
+                active={group.workspace === selectedWorkspace}
+                collapsed={isGroupCollapsed(group.workspace)}
+                previewExpanded={isGroupPreviewExpanded(group.workspace)}
+                onToggleCollapse={() => onToggleCollapse(group.workspace)}
+                onExpandPreview={() => onExpandPreview(group.workspace)}
+                renderSession={(rec: SessionRecord) => {
+                  const row = rowForSession(
+                    rec,
+                    group.workspace,
+                    group.sessions.map((s) => s.id),
+                  );
+                  return (
+                    <SessionRailSessionRowView
+                      key={rec.id}
+                      rec={row.rec}
+                      selected={row.selected}
+                      isLiveActive={row.isLiveActive}
+                      liveStatus={row.liveStatus}
+                      pinned={row.pinned}
+                      onSelect={row.onSelect}
+                      onTogglePin={row.onTogglePin}
+                      onReorder={row.onReorder}
+                      onRemove={row.onRemove}
+                    />
+                  );
+                }}
+              />
+            ))
           )}
         </div>
 

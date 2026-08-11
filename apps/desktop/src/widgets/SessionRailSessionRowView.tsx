@@ -4,13 +4,14 @@
  * does not float the project group): hover reveals the pin control; a pinned
  * row keeps the pin visible and stays at the top of its project list via
  * prefs. Rows are HTML5-draggable so the user can reorder within a project;
- * drag order outranks title auto-sort.
+ * drag order outranks last-message recency auto-sort.
  */
 
 import cs from "classnames";
 import { Pin, X } from "lucide-react";
 import { useRef, type DragEvent } from "react";
 import { ShinyText } from "@/components/react-bits";
+import { isWeakSessionTitle } from "@grok-desktop/acp-core";
 import {
   formatRelativeTime,
   type SessionRecord,
@@ -20,15 +21,16 @@ import {
 const SESSION_DRAG_MIME = "application/x-grok-session-id";
 
 /**
- * Shorten the shared relative-time label to fit the rail's fixed meta slot.
- * Only "yesterday" overflows 26px; every other shape ("now", "12m", "3h",
- * "6d", "4w", "2mo") already fits, so they pass through untouched. Callers
- * keep the full label as the `title` so precision is not lost.
- * @param label Output of `formatRelativeTime`.
- * @returns Compact label of at most four characters.
+ * Display title for a catalog row: rewrite weak placeholders so the rail
+ * never shows `(no summary)` or `Chat 019fe…` as the primary label.
+ * Full raw title stays on the element `title` when it differs.
+ * @param raw Catalog title from disk / agent / local upsert.
  */
-function compactRelativeTime(label: string): string {
-  return label === "yesterday" ? "1d" : label;
+function displaySessionTitle(raw: string): string {
+  if (!raw || isWeakSessionTitle(raw)) {
+    return "Untitled chat";
+  }
+  return raw;
 }
 
 /**
@@ -51,14 +53,16 @@ export function SessionRailFooterLiveStatus(props: {
 }
 
 /**
- * One session row: status cue + title + pin + meta (relative time / remove).
- * Nested under a project tree guide; selected state uses a left accent bar
- * so it never competes with the folder header chrome.
- * Grid columns keep title and actions paint-separated so long titles never
- * overlap pin / time / remove on narrow sidebar width. Time and remove
- * cross-fade inside one fixed-width slot; pin occupies its own column so
- * pin and remove never stack on the same pixel. Drag-and-drop reorders
- * within the parent project; a short drag does not fire select.
+ * One session row: title + trailing actions (pin + time / remove).
+ * Nested under a project tree guide; selected state is a quiet elevated
+ * fill + medium title (no border ring / left accent bar / status dot) so
+ * it never competes with folder header chrome. Live / waiting still lift
+ * title contrast via row classes.
+ * Title and the pin/meta cluster are separate grid tracks so long titles
+ * never overlap actions. Pin sits tight against the meta slot inside
+ * `sess-actions`; time and remove cross-fade in one fixed-width slot so
+ * they never stack. Drag-and-drop reorders within the parent project; a
+ * short drag does not fire select.
  * @param props Session record, selection / live / pin flags, handlers.
  * @returns Interactive row for the side-nav session list.
  */
@@ -96,12 +100,14 @@ export function SessionRailSessionRowView(props: {
   } = props;
   const isStreaming = liveStatus === "streaming" && isLiveActive;
   const isWaiting = liveStatus === "waiting_permission" && isLiveActive;
-  /** Full label stays on the tooltip; the slot renders the compact form. */
+  /** Friendly rail label; raw catalog title stays for tooltips when weak. */
+  const titleLabel = displaySessionTitle(rec.title);
+  /** Relative time already fits the meta slot (`45s` / `12m` / `1d`). */
   const fullTime = formatRelativeTime(rec.updatedAt);
-  const timeLabel = isStreaming ? "…" : compactRelativeTime(fullTime);
+  const timeLabel = isStreaming ? "…" : fullTime;
   const pinLabel = pinned
-    ? `Unpin ${rec.title}`
-    : `Pin ${rec.title} to top`;
+    ? `Unpin ${titleLabel}`
+    : `Pin ${titleLabel} to top`;
   /**
    * After a real drag, the browser still emits click — skip select once so
    * reordering does not also switch the active chat.
@@ -209,59 +215,59 @@ export function SessionRailSessionRowView(props: {
         }
       }}
     >
-      <span
-        className={cs("sess-status", {
-          "sess-status-live": isStreaming,
-          "sess-status-wait": isWaiting,
-          "sess-status-idle": !isStreaming && !isWaiting,
-        })}
-        aria-hidden="true"
-      />
-      <span className="sess-title" title={rec.title}>
-        {rec.title}
+      <span className="sess-title" title={rec.title || titleLabel}>
+        {titleLabel}
       </span>
-      <button
-        type="button"
-        className={cs("sess-pin", {
-          "sess-pin-active": pinned,
-        })}
-        title={pinLabel}
-        aria-label={pinLabel}
-        aria-pressed={pinned}
-        onClick={(e) => {
-          e.stopPropagation();
-          onTogglePin();
-          // Mouse click leaves focus on the pin; group-focus-within would keep
-          // pin + remove visible after the pointer leaves. Keyboard (detail 0)
-          // keeps focus so the control stays discoverable while tabbing.
-          if (e.detail > 0) {
-            e.currentTarget.blur();
-          }
-        }}
-      >
-        <Pin
-          className="sess-pin-icon"
-          strokeWidth={1.75}
-          fill={pinned ? "currentColor" : "none"}
-          aria-hidden="true"
-        />
-      </button>
-      <span className="sess-meta">
-        <span className="sess-time pr-2" title={fullTime}>
-          {timeLabel}
-        </span>
+      {/* Pin + time/remove share one trailing cluster so the pin sits tight
+          against the meta slot (not a full grid gap away from the time). */}
+      <span className="sess-actions">
         <button
           type="button"
-          className="sess-remove flex items-center justify-center"
-          title="Remove from list"
-          aria-label={`Remove ${rec.title} from list`}
+          className={cs("sess-pin", {
+            "sess-pin-active": pinned,
+          })}
+          title={pinLabel}
+          aria-label={pinLabel}
+          aria-pressed={pinned}
           onClick={(e) => {
             e.stopPropagation();
-            onRemove();
+            onTogglePin();
+            // Mouse click leaves focus on the pin; group-focus-within would keep
+            // pin + remove visible after the pointer leaves. Keyboard (detail 0)
+            // keeps focus so the control stays discoverable while tabbing.
+            if (e.detail > 0) {
+              e.currentTarget.blur();
+            }
           }}
         >
-          <X className="sess-remove-icon" strokeWidth={2} aria-hidden="true" />
+          <Pin
+            className="sess-pin-icon"
+            strokeWidth={1.75}
+            fill={pinned ? "currentColor" : "none"}
+            aria-hidden="true"
+          />
         </button>
+        <span className="sess-meta">
+          <span className="sess-time" title={fullTime}>
+            {timeLabel}
+          </span>
+          <button
+            type="button"
+            className="sess-remove flex items-center justify-center"
+            title="Remove from list"
+            aria-label={`Remove ${titleLabel} from list`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+          >
+            <X
+              className="sess-remove-icon"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+          </button>
+        </span>
       </span>
     </div>
   );

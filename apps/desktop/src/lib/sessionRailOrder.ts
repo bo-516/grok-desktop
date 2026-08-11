@@ -1,39 +1,46 @@
 /**
- * Session rail ordering within a project: pin → user drag → title
- * first-character auto-sort. Pure helpers — no React / storage. Drag order
- * outranks auto-sort; pin floats above both inside the same workspace only
- * (project folders keep their own order).
+ * Session rail ordering within a project: pin → user drag → recency
+ * (`updatedAt` desc = last user or agent message). Pure helpers — no React /
+ * storage. Drag order outranks auto-sort; pin floats above both inside the
+ * same workspace only (project folders keep their own order).
  */
 
 import {
-  compareByFirstCharAscii,
   type ProjectGroup,
   type SessionRecord,
 } from "@/store/sessionCatalog";
 import type { SessionRailPrefs } from "@/lib/sessionRailPrefs";
 
 /**
- * Sort sessions by title first-character code unit (asc), stable by id.
+ * Sort sessions by last message activity (`updatedAt` desc), stable by id.
+ * Used as the default within-project rail order when the user has not dragged
+ * a custom order (and for ids missing from a partial drag list).
  * @param sessions Input rows (not mutated).
- * @returns New array in auto-sort order.
+ * @returns New array newest-activity first.
  */
-export function orderSessionsByTitleAscii(
+export function orderSessionsByRecency(
   sessions: SessionRecord[],
 ): SessionRecord[] {
-  return [...sessions].sort((a, b) =>
-    compareByFirstCharAscii(a.title, b.title, a.id, b.id),
-  );
+  return [...sessions].sort((a, b) => {
+    if (b.updatedAt !== a.updatedAt) {
+      return b.updatedAt - a.updatedAt;
+    }
+    if (a.id !== b.id) {
+      return a.id < b.id ? -1 : 1;
+    }
+    return 0;
+  });
 }
 
 /**
- * Apply user drag order, then title auto-sort for anything not listed.
+ * Apply user drag order, then recency for anything not listed.
  * Drag list ids that are missing from `sessions` are skipped; new sessions
- * not in the list sort by title ASCII after the dragged block.
+ * not in the list sort by `updatedAt` desc after the dragged block.
  * @param sessions Sessions for one project (any prior order).
- * @param userOrder Drag order for this workspace (index 0 = top). Empty → ASCII only.
+ * @param userOrder Drag order for this workspace (index 0 = top). Empty → recency only.
  * @returns New array; does not mutate `sessions`.
  */
-export function orderSessionsByUserThenAscii(
+export function orderSessionsByUserThenRecency(
   sessions: SessionRecord[],
   userOrder: string[] | undefined,
 ): SessionRecord[] {
@@ -41,7 +48,7 @@ export function orderSessionsByUserThenAscii(
     return sessions;
   }
   if (!userOrder || userOrder.length === 0) {
-    return orderSessionsByTitleAscii(sessions);
+    return orderSessionsByRecency(sessions);
   }
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const ordered: SessionRecord[] = [];
@@ -52,13 +59,13 @@ export function orderSessionsByUserThenAscii(
       byId.delete(id);
     }
   }
-  const rest = orderSessionsByTitleAscii([...byId.values()]);
+  const rest = orderSessionsByRecency([...byId.values()]);
   return [...ordered, ...rest];
 }
 
 /**
  * Order sessions inside one project: pinned ids first (prefs pin order), then
- * user drag order for the rest, then title first-character auto-sort.
+ * user drag order for the rest, then `updatedAt` desc for anything unlisted.
  * @param sessions Sessions for one project (any prior order).
  * @param pinnedSessions Pin order from prefs (index 0 highest).
  * @param userOrder Optional drag order for this workspace.
@@ -72,7 +79,7 @@ export function orderSessionsByPin(
   if (sessions.length === 0) {
     return sessions;
   }
-  const base = orderSessionsByUserThenAscii(sessions, userOrder);
+  const base = orderSessionsByUserThenRecency(sessions, userOrder);
   if (pinnedSessions.length === 0) {
     return base;
   }
@@ -90,7 +97,7 @@ export function orderSessionsByPin(
 }
 
 /**
- * Order sessions inside each project group (pin → drag → title ASCII).
+ * Order sessions inside each project group (pin → drag → recency).
  * Project-folder order is left unchanged — pin is per-session within its
  * workspace only; it must not float or re-rank the workspace folder itself.
  * @param groups Groups already sorted by project-name first-char ASCII.

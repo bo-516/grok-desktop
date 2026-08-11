@@ -7,6 +7,8 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   applyWorkspaceSessionOrder,
+  expandWorkspacePreview,
+  isPreviewExpanded,
   isSessionPinned,
   isWorkspaceCollapsed,
   loadSessionRailPrefs,
@@ -64,7 +66,11 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   const reconnect = useSessionStore((s) => s.reconnect);
   const runCli = useSessionStore((s) => s.runCli);
   const [query, setQuery] = useState("");
-  /** Pin + collapse prefs; seeded from localStorage once per mount. */
+  /**
+   * Pin + collapse + preview-expand prefs. Seeded from memory cache /
+   * localStorage so remounts restore the last collapse state instead of
+   * re-initializing every project as expanded.
+   */
   const [railPrefs, setRailPrefs] = useState<SessionRailPrefs>(() =>
     loadSessionRailPrefs(),
   );
@@ -82,9 +88,9 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   }, [poolEntries]);
 
   /**
-   * Workspace-folder groups: project-name first-char auto-sort stays fixed.
-   * Inside each folder, pin + per-workspace drag order apply (drag beats
-   * auto; pin beats both). Pin never reorders the folder list itself.
+   * Workspace-folder groups: project-name first-char order stays fixed.
+   * Inside each folder: pin → drag → last message recency (`updatedAt`
+   * desc). Pin never reorders the folder list itself.
    */
   const groups = useMemo(() => {
     /**
@@ -93,9 +99,9 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
      * user-owned conversations in the rail.
      */
     const filtered = filterCatalogForSessionRail(catalog, query);
-    const byAscii = groupSessionsByProject(filtered);
+    const byProject = groupSessionsByProject(filtered);
     return orderGroupsBySessionPin(
-      byAscii,
+      byProject,
       railPrefs.pinnedSessions,
       railPrefs.sessionOrderByWorkspace,
     );
@@ -107,6 +113,21 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   ]);
 
   const selectedId = viewingSessionId ?? activeSessionId;
+  /**
+   * Workspace folder that holds the viewed chat — the rail marks that project
+   * so the selection stays locatable once its row scrolls under the sticky
+   * header or the group is collapsed. Null when search filters the selection
+   * out (no group may claim the marker then).
+   */
+  const selectedWorkspace = useMemo(() => {
+    if (!selectedId) {
+      return null;
+    }
+    const owner = groups.find((g) =>
+      g.sessions.some((s) => s.id === selectedId),
+    );
+    return owner?.workspace ?? null;
+  }, [groups, selectedId]);
   const live = connectionMode === "live-bridge";
   /** Chats surviving the filter; shown next to the section label while searching. */
   const matchCount = groups.reduce((n, g) => n + g.sessions.length, 0);
@@ -132,22 +153,44 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
 
   /**
    * Persist prefs after a local mutation so pin/collapse survive refresh.
-   * @param next Full next prefs blob.
+   * Uses functional setState so rapid toggles never clobber each other with
+   * a stale railPrefs closure.
+   * @param updater Pure transform from previous prefs to next.
    */
-  const commitRailPrefs = useCallback((next: SessionRailPrefs) => {
-    setRailPrefs(next);
-    saveSessionRailPrefs(next);
-  }, []);
+  const commitRailPrefs = useCallback(
+    (updater: (prev: SessionRailPrefs) => SessionRailPrefs) => {
+      setRailPrefs((prev) => {
+        const next = updater(prev);
+        saveSessionRailPrefs(next);
+        return next;
+      });
+    },
+    [],
+  );
 
   /**
    * Toggle collapse for a workspace group header click.
+   * Persists to localStorage (and memory cache) so the folder does not
+   * re-expand on remount / reload.
    * @param workspace Absolute path key for the group.
    */
   const onToggleCollapse = useCallback(
     (workspace: string) => {
-      commitRailPrefs(toggleCollapsedWorkspace(railPrefs, workspace));
+      commitRailPrefs((prev) => toggleCollapsedWorkspace(prev, workspace));
     },
-    [commitRailPrefs, railPrefs],
+    [commitRailPrefs],
+  );
+
+  /**
+   * Reveal sessions past the preview cap for one project ("Show more").
+   * Persisted so remount keeps the full list open until collapse.
+   * @param workspace Absolute path key for the group.
+   */
+  const onExpandPreview = useCallback(
+    (workspace: string) => {
+      commitRailPrefs((prev) => expandWorkspacePreview(prev, workspace));
+    },
+    [commitRailPrefs],
   );
 
   /**
@@ -157,14 +200,14 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
    */
   const onTogglePin = useCallback(
     (sessionId: string) => {
-      commitRailPrefs(togglePinnedSession(railPrefs, sessionId));
+      commitRailPrefs((prev) => togglePinnedSession(prev, sessionId));
     },
-    [commitRailPrefs, railPrefs],
+    [commitRailPrefs],
   );
 
   /**
    * Persist a within-project drag: reorder the full group id list and store
-   * it as drag order (outranks title auto-sort). Drop is same-workspace only.
+   * it as drag order (outranks recency auto-sort). Drop is same-workspace only.
    * @param workspace Project workspace path key.
    * @param orderedIds Current top-to-bottom ids for that group (already pin/drag applied).
    * @param fromId Dragged session id.
@@ -181,11 +224,11 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
       if (nextIds === orderedIds) {
         return;
       }
-      commitRailPrefs(
-        applyWorkspaceSessionOrder(railPrefs, workspace, nextIds),
+      commitRailPrefs((prev) =>
+        applyWorkspaceSessionOrder(prev, workspace, nextIds),
       );
     },
-    [commitRailPrefs, railPrefs],
+    [commitRailPrefs],
   );
 
   /**
@@ -243,6 +286,15 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     [railPrefs],
   );
 
+  /**
+   * Whether "Show more" is sticky for this workspace (full list past preview).
+   * @param workspace Absolute path key for the group.
+   */
+  const isGroupPreviewExpanded = useCallback(
+    (workspace: string) => isPreviewExpanded(railPrefs, workspace),
+    [railPrefs],
+  );
+
   return {
     railOpen,
     onClose: props.onClose,
@@ -255,12 +307,15 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     live,
     liveCount,
     catalogLength: catalog.length,
+    selectedWorkspace,
     newSession,
     runCli,
     reconnect,
     rowForSession,
     isGroupCollapsed,
+    isGroupPreviewExpanded,
     onToggleCollapse,
+    onExpandPreview,
   };
 }
 

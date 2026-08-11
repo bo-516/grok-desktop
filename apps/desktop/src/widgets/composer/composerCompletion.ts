@@ -124,19 +124,80 @@ export function replaceComposerTrigger(
 }
 
 /**
+ * Rewrite an absolute (or `file://`) mention query to a workspace-relative
+ * fragment when it lives under `workspace`. Relative queries pass through.
+ * Bridge entries are always relative paths, so a pasted absolute path must be
+ * remapped here too — the client re-filters the bridge payload with the same
+ * query the user typed.
+ * @param query Raw text after `@` (relative fragment, absolute path, or file URI).
+ * @param workspace Absolute workspace root; empty disables absolute remapping.
+ * @returns Lowercased relative fragment for matching; empty when the query is
+ *   empty or names the workspace root; original lowercased absolute text when
+ *   the path sits outside the workspace (matches nothing on purpose).
+ */
+export function normalizeMentionQuery(
+  query: string,
+  workspace: string = "",
+): string {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return "";
+  }
+  let candidate = trimmed;
+  if (candidate.startsWith("file://")) {
+    try {
+      candidate = decodeURIComponent(candidate.slice("file://".length) || "/");
+    } catch {
+      candidate = candidate.slice("file://".length) || "/";
+    }
+  }
+  // POSIX absolute, or Windows drive path (composer may receive either).
+  const isAbsolute =
+    candidate.startsWith("/") || /^[A-Za-z]:[\\/]/.test(candidate);
+  if (!isAbsolute || !workspace.trim()) {
+    return trimmed.toLocaleLowerCase();
+  }
+  const toPosix = (p: string) => p.replace(/\\/g, "/");
+  const trimSlash = (p: string) => {
+    const t = p.replace(/\/+$/, "");
+    return t || "/";
+  };
+  const qPosix = trimSlash(toPosix(candidate));
+  const wsPosix = trimSlash(toPosix(workspace.trim()));
+  const qLower = qPosix.toLocaleLowerCase();
+  const wsLower = wsPosix.toLocaleLowerCase();
+  if (qLower === wsLower) {
+    return "";
+  }
+  if (qLower.startsWith(`${wsLower}/`)) {
+    return qPosix.slice(wsPosix.length + 1).toLocaleLowerCase();
+  }
+  return trimmed.toLocaleLowerCase();
+}
+
+/**
  * Filters real bridge workspace entries by the user query.
  * @param entries Bridge-sorted candidates; this function never touches the filesystem.
- * @param query Query after `@`; matching is case-insensitive.
+ * @param query Query after `@` (relative or absolute under the workspace); matching is case-insensitive.
+ * @param workspace Absolute workspace root used to remap absolute queries; omit when unknown.
  * @returns Up to 10 file/directory suggestions suitable for the menu.
  */
 export function createMentionSuggestions(
   entries: ComposerWorkspaceEntry[],
   query: string,
+  workspace: string = "",
 ): ComposerSuggestion[] {
-  const normalizedQuery = query.toLocaleLowerCase();
+  const normalizedQuery = normalizeMentionQuery(query, workspace);
 
   return entries
-    .filter((entry) => entry.path.toLocaleLowerCase().includes(normalizedQuery))
+    .filter((entry) => {
+      const pathLower = entry.path.toLocaleLowerCase();
+      // Empty query after remap (typed workspace root) keeps the bridge order.
+      if (!normalizedQuery) {
+        return true;
+      }
+      return pathLower.includes(normalizedQuery);
+    })
     .slice(0, 10)
     .map((entry) => ({
       id: `${entry.kind}:${entry.path}`,

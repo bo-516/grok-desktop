@@ -91,6 +91,35 @@ describe("composerCompletion", () => {
     assert.equal(suggestions[0]?.kind, "file");
   });
 
+  it("matches absolute and file:// queries against relative bridge entries", () => {
+    const workspace = "/Users/me/proj";
+    const entries = [
+      { path: "apps/desktop/src/widgets/timeline/TimelineView.tsx", kind: "file" as const },
+      { path: "apps/desktop/src/widgets", kind: "directory" as const },
+    ];
+    const abs =
+      "/Users/me/proj/apps/desktop/src/widgets/timeline/TimelineView.tsx";
+    const byAbs = createMentionSuggestions(entries, abs, workspace);
+    const byUri = createMentionSuggestions(
+      entries,
+      `file://${abs}`,
+      workspace,
+    );
+    const byOutside = createMentionSuggestions(
+      entries,
+      "/tmp/other/apps/desktop/src/widgets/timeline/TimelineView.tsx",
+      workspace,
+    );
+
+    assert.equal(byAbs.length, 1);
+    assert.equal(
+      byAbs[0]?.value,
+      "apps/desktop/src/widgets/timeline/TimelineView.tsx",
+    );
+    assert.equal(byUri.length, 1);
+    assert.equal(byOutside.length, 0);
+  });
+
   it("quotes a selected file path that contains spaces using the @ mark", () => {
     const trigger = findComposerTrigger("Read @des", 9);
     assert.ok(trigger);
