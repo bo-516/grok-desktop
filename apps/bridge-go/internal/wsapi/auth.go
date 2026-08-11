@@ -120,6 +120,14 @@ func IsOriginAllowed(origin string, allowed []string) bool {
 			}
 		}
 	}
+	// Any wails://… host (darwin uses wails://localhost; variants differ by OS).
+	if strings.HasPrefix(origin, "wails:") {
+		for _, a := range allowed {
+			if strings.HasPrefix(a, "wails:") {
+				return true
+			}
+		}
+	}
 	return false
 }
 

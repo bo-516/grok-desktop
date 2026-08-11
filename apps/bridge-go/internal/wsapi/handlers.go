@@ -189,8 +189,13 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		}
 		return session.RestartSession(h.lifecycleDeps(), sessionID, spawnConfig, approve)
 
-	// --- T3 surfaces: explicit Node bridge hint ---
-	case "set_model", "set_mode", "compact", "token_usage", "cli":
+	// CLI channel: disk-only commands are served here (see cli.go); the rest
+	// still answer with a per-command cli_result error pointing at Node.
+	case "cli":
+		return h.handleCli(ws, msg)
+
+	// --- T3 surfaces: Node-only (or not yet ported) ---
+	case "set_model", "set_mode", "compact", "token_usage":
 		return fmt.Errorf("%s is not available on the Go bridge%s", typ, NodeBridgeHint)
 
 	default:
