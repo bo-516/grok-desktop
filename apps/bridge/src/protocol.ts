@@ -188,6 +188,38 @@ export type ServerMsg =
       model?: string;
       mode?: SessionState["mode"];
     }
+  /**
+   * session/load replay window opened. UI freezes canvas fan-out for this
+   * sessionId only (other sessions keep streaming). Paired with replay_end.
+   */
+  | {
+      type: "replay_begin";
+      sessionId: string;
+    }
+  /**
+   * session/load replay window closed. Node fills `session` (already reduced);
+   * Go fills ordered `updates` (no timeline on the Go bridge). Authoritative
+   * status/model/mode override batch-reduce streaming residue (composer Stop).
+   * Multiple ends for one session are legal when the buffer hits size caps.
+   */
+  | {
+      type: "replay_end";
+      sessionId: string;
+      /** Reduced full snapshot (Node path). */
+      session?: SessionState;
+      /** Raw ordered updates from the load window (Go path). */
+      updates?: { update: SessionUpdate; eventId?: string }[];
+      /** Authoritative post-load status (Go path required; Node usually idle). */
+      status: SessionStatus;
+      model?: string;
+      mode?: SessionState["mode"];
+      /** Observability: number of updates absorbed in this window/chunk. */
+      count: number;
+      /** Observability: approximate UTF-8 byte size of buffered updates. */
+      bytes: number;
+      /** Observability: wall time from begin to this end (ms). */
+      elapsedMs: number;
+    }
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
   | { type: "stderr"; text: string; sessionId?: string }

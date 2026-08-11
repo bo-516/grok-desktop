@@ -60,13 +60,19 @@ export type CreateSessionRuntimeOpts = {
   onState: (session: SessionState) => void;
   /**
    * Raw session/update relay for the UI reduce path (O(n) broadcast).
-   * Fired for every ACP update including session/load replay.
+   * Fired for every ACP update including session/load replay; the lifecycle
+   * layer gates WS fan-out during replay via onReplayChange.
    */
   onSessionUpdate?: (
     update: SessionUpdate,
     sessionId: string,
     eventId: string | null,
   ) => void;
+  /**
+   * session/load replay window edge. Lifecycle uses this to emit
+   * replay_begin / replay_end and suppress per-update broadcast.
+   */
+  onReplayChange?: (on: boolean, sessionId: string) => void;
   onStderr: (text: string, sessionId: string) => void;
   onInfo: (message: string, sessionId: string) => void;
   /** Child process exit (crash) — pool may auto-recover. */
@@ -195,6 +201,10 @@ export async function createSessionRuntime(
     onSessionUpdate: (update, sessionId, eventId) => {
       const id = sessionId || sessionIdHint;
       opts.onSessionUpdate?.(update, id, eventId);
+    },
+    onReplayChange: (on, sessionId) => {
+      const id = sessionId || sessionIdHint;
+      opts.onReplayChange?.(on, id);
     },
     onStderr: (text) => {
       process.stderr.write(text);

@@ -170,6 +170,8 @@ export async function dispatchClientMsg(
   }
   if (msg.type === "close_session") {
     const closed = pool.close(msg.sessionId);
+    // Drop crash-recovery seed so long-running bridges do not retain timelines forever.
+    deps.lifecycle.sessionSeeds.delete(msg.sessionId);
     if (state.focusedSessionId === msg.sessionId) {
       state.focusedSessionId = pool.list().at(-1)?.sessionId ?? null;
     }

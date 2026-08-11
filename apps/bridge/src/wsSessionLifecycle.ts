@@ -12,6 +12,7 @@ import path from "node:path";
 import type { SessionState } from "@grok-desktop/acp-core";
 import type { ServerMsg } from "./protocol.js";
 import type { RuntimePool } from "./runtimePool.js";
+import { createSessionReplayGate } from "./sessionReplayGate.js";
 import {
   createSessionRuntime,
   type SessionSpawnConfig,
@@ -140,98 +141,122 @@ export async function startOrResume(
 
   /** Per-session last lifecycle fingerprint so timeline-only deltas stay quiet. */
   const lastLifecycle = new Map<string, LifecycleFingerprint>();
+  /** Load-replay WS framing (begin / silent / end) for this runtime. */
+  const replayGate = createSessionReplayGate(broadcast);
 
-  const runtime = await createSessionRuntime({
-    cwd,
-    alwaysApprove: opts.alwaysApprove,
-    resumeId: opts.forceNew ? undefined : opts.resumeId,
-    seed: opts.forceNew ? undefined : opts.seed,
-    spawnConfig: opts.spawnConfig,
-    onSessionUpdate: (update, sessionId, eventId) => {
-      // Hot path: O(1) raw update, never a growing SessionState blob.
-      broadcast({
-        type: "session_update",
-        sessionId,
-        update,
-        ...(eventId ? { eventId } : {}),
-      });
-    },
-    onState: (session) => {
-      if (session.id) {
-        sessionSeeds.set(session.id, session);
-      }
-      const fp = lifecycleFingerprint(session);
-      const prev = session.id ? lastLifecycle.get(session.id) : undefined;
-      const changed = lifecycleChanged(prev, fp);
-      if (session.id) {
-        lastLifecycle.set(session.id, fp);
-      }
-      if (!changed) {
-        // Timeline-only growth: skip full state and skip pool spam.
-        return;
-      }
-      // Lifecycle side channel (status / permission / model / mode / id).
-      const needsFullState =
-        !prev ||
-        prev.id !== fp.id ||
-        Boolean(session.pendingPermission) ||
-        (prev.permKey !== "" && fp.permKey === "");
-      if (needsFullState) {
-        broadcast({ type: "state", session });
-      } else {
-        broadcast({
-          type: "session_lifecycle",
-          sessionId: session.id,
-          status: session.status,
-          pendingPermission: session.pendingPermission ?? null,
-          model: session.model,
-          mode: session.mode,
-        });
-      }
-      broadcastPool();
-    },
-    onStderr: (text, sessionId) => {
-      broadcast({ type: "stderr", text, sessionId });
-    },
-    onInfo: (message, sessionId) => {
-      broadcast({ type: "info", message, sessionId });
-    },
-    onProcessExit: (sessionId, code) => {
-      if (!sessionId) {
-        return;
-      }
-      // F-OPS-04: unexpected exit → close + auto session/load recovery with seed.
-      if (pool.has(sessionId)) {
-        const seed = sessionSeeds.get(sessionId);
-        const spawnConfig = pool.get(sessionId)?.spawnConfig;
-        const exitCwd =
-          pool.get(sessionId)?.cwd ?? seed?.workspace ?? state.defaultListCwd;
-        pool.close(sessionId);
-        lastLifecycle.delete(sessionId);
-        broadcast({
-          type: "info",
-          message: `agent process exited (code ${code}); recovering via session/load…`,
-          sessionId,
-        });
-        broadcastPool();
-        void startOrResume(deps, {
-          cwd: exitCwd,
-          alwaysApprove,
-          resumeId: sessionId,
-          seed,
-          forceNew: false,
-          spawnConfig,
-        }).catch((e) => {
+  // Reserve capacity before spawn so concurrent start/recovery cannot overshoot.
+  pool.beginSpawn();
+  let runtime;
+  try {
+    runtime = await createSessionRuntime({
+      cwd,
+      alwaysApprove: opts.alwaysApprove,
+      resumeId: opts.forceNew ? undefined : opts.resumeId,
+      seed: opts.forceNew ? undefined : opts.seed,
+      spawnConfig: opts.spawnConfig,
+      onReplayChange: (on, sessionId) => {
+        replayGate.onReplayChange(on, sessionId || opts.resumeId || "");
+      },
+      onSessionUpdate: (update, sessionId, eventId) => {
+        replayGate.onSessionUpdate(update, sessionId, eventId);
+      },
+      onState: (session) => {
+        if (session.id) {
+          sessionSeeds.set(session.id, session);
+        }
+        // replay_end or silent mid-window — skip normal lifecycle fan-out.
+        if (replayGate.onState(session)) {
+          if (session.id) {
+            lastLifecycle.set(session.id, lifecycleFingerprint(session));
+          }
+          // Pool lights after a finished load.
+          if (session.id && !replayGate.isReplaying(session.id)) {
+            broadcastPool();
+          }
+          return;
+        }
+        const fp = lifecycleFingerprint(session);
+        const prev = session.id ? lastLifecycle.get(session.id) : undefined;
+        const changed = lifecycleChanged(prev, fp);
+        if (session.id) {
+          lastLifecycle.set(session.id, fp);
+        }
+        if (!changed) {
+          // Timeline-only growth: skip full state and skip pool spam.
+          return;
+        }
+        // Lifecycle side channel (status / permission / model / mode / id).
+        const needsFullState =
+          !prev ||
+          prev.id !== fp.id ||
+          Boolean(session.pendingPermission) ||
+          (prev.permKey !== "" && fp.permKey === "");
+        if (needsFullState) {
+          broadcast({ type: "state", session });
+        } else {
           broadcast({
-            type: "error",
-            message: `crash recovery failed: ${e instanceof Error ? e.message : String(e)}`,
+            type: "session_lifecycle",
+            sessionId: session.id,
+            status: session.status,
+            pendingPermission: session.pendingPermission ?? null,
+            model: session.model,
+            mode: session.mode,
+          });
+        }
+        broadcastPool();
+      },
+      onStderr: (text, sessionId) => {
+        broadcast({ type: "stderr", text, sessionId });
+      },
+      onInfo: (message, sessionId) => {
+        broadcast({ type: "info", message, sessionId });
+      },
+      onProcessExit: (sessionId, code) => {
+        if (!sessionId) {
+          return;
+        }
+        // F-OPS-04: unexpected exit → close + auto session/load recovery with seed.
+        if (pool.has(sessionId)) {
+          const seed = sessionSeeds.get(sessionId);
+          const spawnConfig = pool.get(sessionId)?.spawnConfig;
+          const exitCwd =
+            pool.get(sessionId)?.cwd ?? seed?.workspace ?? state.defaultListCwd;
+          pool.close(sessionId);
+          lastLifecycle.delete(sessionId);
+          if (state.focusedSessionId === sessionId) {
+            state.focusedSessionId = null;
+          }
+          broadcast({
+            type: "info",
+            message: `agent process exited (code ${code}); recovering via session/load…`,
             sessionId,
           });
           broadcastPool();
-        });
-      }
-    },
-  });
+          void startOrResume(deps, {
+            cwd: exitCwd,
+            alwaysApprove,
+            resumeId: sessionId,
+            seed,
+            forceNew: false,
+            spawnConfig,
+          }).catch((e) => {
+            if (state.focusedSessionId === sessionId) {
+              state.focusedSessionId = null;
+            }
+            broadcast({
+              type: "error",
+              message: `crash recovery failed: ${e instanceof Error ? e.message : String(e)}`,
+              sessionId,
+            });
+            broadcastPool();
+          });
+        }
+      },
+    });
+  } catch (e) {
+    pool.cancelSpawn();
+    throw e;
+  }
 
   pool.insert(runtime);
   state.focusedSessionId = runtime.sessionId;

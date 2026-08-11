@@ -73,6 +73,29 @@ describe("pickLruIdleVictim", () => {
 });
 
 describe("RuntimePool", () => {
+  it("beginSpawn reserves capacity so concurrent starts cannot overshoot", () => {
+    const disposed: string[] = [];
+    const pool = new RuntimePool(1);
+    pool.beginSpawn();
+    assert.throws(() => pool.beginSpawn(), /RuntimePool full/);
+    pool.insert(fakeRuntime("a", "idle", 10, disposed));
+    assert.equal(pool.size, 1);
+    // After insert, a new spawn can reclaim the idle resident.
+    pool.beginSpawn();
+    pool.insert(fakeRuntime("b", "idle", 20, disposed));
+    assert.equal(pool.size, 1);
+    assert.ok(disposed.includes("a"));
+  });
+
+  it("cancelSpawn releases a reservation without insert", () => {
+    const pool = new RuntimePool(1);
+    pool.beginSpawn();
+    pool.cancelSpawn();
+    // Second begin must succeed once the first reservation is cancelled.
+    pool.beginSpawn();
+    pool.cancelSpawn();
+  });
+
   it("evicts idle LRU when at capacity", () => {
     const disposed: string[] = [];
     const pool = new RuntimePool(2);
