@@ -17,5 +17,9 @@ describe("mcpLogReader", () => {
     await writeFile(path.join(dir, "fs.stderr.log"), "boom\n", "utf8");
     assert.equal(await readMcpStderrLog("fs", home), "boom\n");
     assert.deepEqual(await listMcpStderrLogs(home), ["fs.stderr.log"]);
+    // Path traversal / unsafe names must not read outside the log dir.
+    assert.equal(await readMcpStderrLog("../etc/passwd", home), "");
+    assert.equal(await readMcpStderrLog("/etc/passwd", home), "");
+    assert.equal(await readMcpStderrLog("a/b", home), "");
   });
 });

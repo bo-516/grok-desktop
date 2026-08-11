@@ -126,6 +126,36 @@ describe("listWorkspaceEntries", () => {
     }
   });
 
+  it("matches absolute and file:// queries under the workspace root", async () => {
+    const absFile = path.join(root, "src/app.ts");
+    const absDir = path.join(root, "src");
+    const byAbs = await listWorkspaceEntries(root, absFile);
+    const byUri = await listWorkspaceEntries(root, `file://${absFile}`);
+    const byAbsDir = await listWorkspaceEntries(root, absDir);
+    const byOutside = await listWorkspaceEntries(
+      root,
+      path.join(os.tmpdir(), "not-this-workspace", "src/app.ts"),
+    );
+
+    assert.ok(
+      byAbs.some((e) => e.path === "src/app.ts"),
+      "absolute path under workspace must hit the relative entry",
+    );
+    assert.ok(
+      byUri.some((e) => e.path === "src/app.ts"),
+      "file:// absolute path under workspace must hit",
+    );
+    assert.ok(
+      byAbsDir.some((e) => e.path === "src" || e.path.startsWith("src/")),
+      "absolute directory under workspace must hit",
+    );
+    assert.equal(
+      byOutside.some((e) => e.path === "src/app.ts"),
+      false,
+      "absolute path outside workspace must not false-match by suffix",
+    );
+  });
+
   it("still marks a path that matches .gitignore but was committed earlier", async () => {
     // The real repo's shape: `docs/` is ignored, yet files under it were
     // committed before the rule existed. Plain `git check-ignore` consults the

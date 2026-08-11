@@ -56,4 +56,33 @@ describe("workspacePath boundary", () => {
       /outside workspace/,
     );
   });
+
+  it("allows basename starting with .. that is not parent traversal", () => {
+    // Node previously used startsWith("..") which false-denied ..foo
+    assert.equal(
+      isPathInsideWorkspace(root, path.join(root, "..foo")),
+      true,
+    );
+  });
+
+  it("rejects symlink that escapes workspace (QA-REV-14)", async () => {
+    const { mkdtemp, symlink, mkdir, writeFile } = await import("node:fs/promises");
+    const os = await import("node:os");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "ws-symlink-"));
+    const outside = await mkdtemp(path.join(os.tmpdir(), "ws-out-"));
+    await writeFile(path.join(outside, "secret.txt"), "leak", "utf8");
+    await symlink(outside, path.join(dir, "escape"), "dir");
+    assert.throws(
+      () => resolveWorkspacePath(dir, "escape/secret.txt"),
+      /outside workspace/,
+    );
+    // Control: normal file still works (compare realpath — macOS /var → /private/var).
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "ok.ts"), "ok", "utf8");
+    const { realpathSync } = await import("node:fs");
+    assert.equal(
+      resolveWorkspacePath(dir, "src/ok.ts"),
+      realpathSync(path.join(dir, "src", "ok.ts")),
+    );
+  });
 });

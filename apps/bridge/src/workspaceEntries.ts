@@ -54,9 +54,59 @@ const DEFAULT_MAX_ENTRIES = 400;
 const DEFAULT_MAX_SCANNED = 20000;
 
 /**
+ * Rewrite an absolute (or `file://`) mention query to a workspace-relative
+ * fragment when it lives under `workspace`. Relative queries pass through.
+ * Entries are always stored as relative paths, so a pasted absolute path would
+ * otherwise never score a hit ("No matching files").
+ * @param workspace Absolute workspace root (caller may pass unresolved cwd).
+ * @param query Raw text after `@` (relative fragment, absolute path, or file URI).
+ * @returns Lowercased relative fragment for scoring; empty string when the query
+ *   is empty or names the workspace root itself; original lowercased absolute
+ *   text when the path sits outside the workspace (matches nothing on purpose).
+ */
+export function normalizeWorkspaceMentionQuery(
+  workspace: string,
+  query: string,
+): string {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return "";
+  }
+  let candidate = trimmed;
+  if (candidate.startsWith("file://")) {
+    try {
+      candidate = decodeURIComponent(candidate.slice("file://".length) || "/");
+    } catch {
+      candidate = candidate.slice("file://".length) || "/";
+    }
+  }
+  const root = path.resolve(workspace || ".");
+  // Only absolute queries need remapping; relative fragments already match entry.path.
+  if (!path.isAbsolute(candidate)) {
+    return trimmed.toLocaleLowerCase();
+  }
+  const absQuery = path.resolve(candidate);
+  const relative = path.relative(root, absQuery);
+  // path.relative returns "" when absQuery === root — treat as empty query.
+  if (relative === "") {
+    return "";
+  }
+  // Outside workspace (or different drive on Windows): leave absolute so scoring
+  // cannot accidentally hit a relative path that shares a suffix.
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return trimmed.toLocaleLowerCase();
+  }
+  return relative.split(path.sep).join("/").toLocaleLowerCase();
+}
+
+/**
  * Read and rank mentionable files/directories in the current workspace by query.
  * @param workspace Real workspace already selected by the bridge; returns an empty array if missing or unreadable instead of reading other directories.
- * @param query Incomplete relative-path fragment after `@`; empty string returns the first path-sorted batch.
+ * @param query Incomplete path fragment after `@` (relative or absolute under the workspace); empty string returns the first path-sorted batch.
  * @param limits Testable depth/count/scan bounds; callers still own performance if values are too large.
  * @returns At most `maxEntries` matching relative paths; excludes hidden entries, generated directories, and symlinks.
  */
@@ -66,7 +116,7 @@ export async function listWorkspaceEntries(
   limits?: { maxDepth?: number; maxEntries?: number; maxScanned?: number },
 ): Promise<WorkspaceEntry[]> {
   const root = path.resolve(workspace);
-  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const normalizedQuery = normalizeWorkspaceMentionQuery(root, query);
   const maxDepth = limits?.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxEntries = limits?.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const maxScanned = limits?.maxScanned ?? DEFAULT_MAX_SCANNED;

@@ -28,14 +28,58 @@ const (
 	defaultMaxScanned  = 20000
 )
 
+// normalizeWorkspaceMentionQuery rewrites an absolute (or file://) @query to a
+// workspace-relative fragment when it lives under workspace. Relative queries
+// pass through. Entries are always relative, so a pasted absolute path would
+// otherwise never score a hit ("No matching files").
+//
+// workspace: absolute cwd (Abs applied). query: raw text after @.
+// Returns lowercased relative fragment; empty when query is empty or names the
+// workspace root; original lowercased absolute text when outside workspace.
+func normalizeWorkspaceMentionQuery(workspace, query string) string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return ""
+	}
+	candidate := trimmed
+	if strings.HasPrefix(candidate, "file://") {
+		// Best-effort strip; percent-decoding is not required for path matching.
+		candidate = strings.TrimPrefix(candidate, "file://")
+		if candidate == "" {
+			candidate = "/"
+		}
+	}
+	if !filepath.IsAbs(candidate) {
+		return strings.ToLower(trimmed)
+	}
+	root, err := filepath.Abs(workspace)
+	if err != nil {
+		return strings.ToLower(trimmed)
+	}
+	absQuery := filepath.Clean(candidate)
+	rel, err := filepath.Rel(root, absQuery)
+	if err != nil {
+		return strings.ToLower(trimmed)
+	}
+	// Outside workspace (or different volume): keep absolute so scoring cannot
+	// false-hit a relative path that only shares a suffix.
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return strings.ToLower(trimmed)
+	}
+	if rel == "." {
+		return ""
+	}
+	return strings.ToLower(filepath.ToSlash(rel))
+}
+
 // ListWorkspaceEntries walks workspace for @ completion matches.
-// workspace: absolute cwd; query: lowercased path fragment (empty = first batch).
+// workspace: absolute cwd; query: path fragment after @ (relative or absolute under workspace; empty = first batch).
 func ListWorkspaceEntries(workspace, query string) ([]WorkspaceEntry, error) {
 	root, err := filepath.Abs(workspace)
 	if err != nil {
 		return nil, err
 	}
-	normalizedQuery := strings.ToLower(strings.TrimSpace(query))
+	normalizedQuery := normalizeWorkspaceMentionQuery(root, query)
 	type scored struct {
 		entry WorkspaceEntry
 		score int

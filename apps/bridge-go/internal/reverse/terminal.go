@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,11 +75,8 @@ func (r *TerminalRegistry) Create(workspaceAbs string, params TerminalCreatePara
 		cmd = exec.Command(command, args...)
 		cmd.Dir = workCwd
 	}
-	env := os.Environ()
-	for k, v := range params.Env {
-		env = append(env, k+"="+v)
-	}
-	cmd.Env = env
+	// Whitelist parent env (F-CFG-05) then merge agent overrides through the same filter.
+	cmd.Env = filterTerminalEnv(os.Environ(), params.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -98,6 +96,9 @@ func (r *TerminalRegistry) Create(workspaceAbs string, params TerminalCreatePara
 	limit := params.OutputByteLimit
 	if limit <= 0 {
 		limit = 256_000
+	}
+	if limit > 1_000_000 {
+		limit = 1_000_000
 	}
 
 	appendOut := func(chunk []byte) {
@@ -254,4 +255,53 @@ func stringsTrim(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// alwaysPassEnv keys match Node envWhitelist.ts ALWAYS_PASS_ENV (F-CFG-05).
+var alwaysPassEnv = map[string]bool{
+	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true,
+	"TMPDIR": true, "TMP": true, "TEMP": true,
+	"LANG": true, "LC_ALL": true, "LC_CTYPE": true,
+	"TERM": true, "COLORTERM": true, "SHELL": true,
+	"XAI_API_KEY": true, "GROK_BIN": true, "GROK_HOME": true,
+	"GROK_SANDBOX": true, "GROK_WEB_FETCH": true, "GROK_MEMORY": true,
+	"GROK_SUBAGENTS": true, "GROK_LSP_TOOLS": true, "GROK_TOOL_SEARCH": true,
+	"GROK_LOG_FILE": true, "RUST_LOG": true,
+	"HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true,
+	"https_proxy": true, "http_proxy": true, "no_proxy": true,
+	"SSL_CERT_FILE": true, "NODE_EXTRA_CA_CERTS": true,
+}
+
+// isAllowedEnvKey reports whether a key may be passed to reverse terminals.
+func isAllowedEnvKey(key string) bool {
+	if alwaysPassEnv[key] {
+		return true
+	}
+	return strings.HasPrefix(key, "GROK_") || strings.HasPrefix(key, "XAI_")
+}
+
+// filterTerminalEnv builds a whitelisted env for reverse terminal/create.
+// parent is os.Environ() KEY=value pairs; agent may override only allowlisted keys.
+func filterTerminalEnv(parent []string, agent map[string]string) []string {
+	merged := map[string]string{}
+	for _, e := range parent {
+		i := strings.IndexByte(e, '=')
+		if i <= 0 {
+			continue
+		}
+		k, v := e[:i], e[i+1:]
+		if isAllowedEnvKey(k) {
+			merged[k] = v
+		}
+	}
+	for k, v := range agent {
+		if isAllowedEnvKey(k) {
+			merged[k] = v
+		}
+	}
+	out := make([]string, 0, len(merged))
+	for k, v := range merged {
+		out = append(out, k+"="+v)
+	}
+	return out
 }

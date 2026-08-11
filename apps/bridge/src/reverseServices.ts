@@ -1,15 +1,17 @@
 /**
  * Agent → client reverse-request handlers (fs + terminal).
  * Unknown methods throw MethodNotImplementedError so AcpClient returns JSON-RPC -32601.
+ * Terminal env uses the same whitelist as grok children (F-CFG-05); paths are realpath-sandboxed.
  */
 
 import {
   spawn,
   type ChildProcessByStdio,
 } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
+import { filterEnvForGrokChild } from "./envWhitelist.js";
 import { resolveWorkspacePath } from "./workspacePath.js";
 
 /**
@@ -17,6 +19,18 @@ import { resolveWorkspacePath } from "./workspacePath.js";
  * Matches `stdio: ["ignore", "pipe", "pipe"]` so we never claim a Writable stdin.
  */
 export type TerminalChild = ChildProcessByStdio<null, Readable, Readable>;
+
+/** Hard ceiling on reverse fs/read_text_file body size (bytes). */
+export const MAX_REVERSE_READ_BYTES = 10 * 1024 * 1024;
+
+/** Default terminal output ring size when agent omits outputByteLimit. */
+export const DEFAULT_TERMINAL_OUTPUT_BYTES = 256_000;
+
+/** Absolute max terminal output retained (agent cannot exceed). */
+export const MAX_TERMINAL_OUTPUT_BYTES = 1_000_000;
+
+/** Max concurrent terminals per session registry. */
+export const MAX_TERMINALS_PER_SESSION = 16;
 
 /** JSON-RPC method-not-found surface for reverse handlers. */
 export class MethodNotImplementedError extends Error {
@@ -43,6 +57,22 @@ export type TerminalHandle = {
 };
 
 /**
+ * Clamp agent-requested outputByteLimit into a safe range.
+ * @param requested Agent value; non-finite / missing → default.
+ * @returns Integer byte cap in [1, MAX_TERMINAL_OUTPUT_BYTES].
+ */
+export function clampTerminalOutputLimit(requested: unknown): number {
+  if (typeof requested !== "number" || !Number.isFinite(requested)) {
+    return DEFAULT_TERMINAL_OUTPUT_BYTES;
+  }
+  const n = Math.floor(requested);
+  if (n <= 0) {
+    return DEFAULT_TERMINAL_OUTPUT_BYTES;
+  }
+  return Math.min(n, MAX_TERMINAL_OUTPUT_BYTES);
+}
+
+/**
  * Mutable terminal registry for one session runtime.
  * Create/kill reverse methods share this map.
  */
@@ -57,6 +87,8 @@ export class TerminalRegistry {
    * `shell: true` — with `shell: false` Node treats the whole string as the
    * executable path, gets ENOENT, and without an `error` listener that event
    * crashes the entire bridge process (unhandled 'error' on ChildProcess).
+   * Env is filtered with {@link filterEnvForGrokChild} so reverse shells cannot
+   * inherit secrets withheld from the agent process (F-CFG-05).
    * @param workspaceAbs Session cwd.
    * @param params Agent terminal/create params (command, args, cwd, env optional).
    * @returns terminalId for subsequent wait/kill.
@@ -75,6 +107,13 @@ export class TerminalRegistry {
     if (!command) {
       throw new Error("terminal/create requires command");
     }
+    if (this.terminals.size >= MAX_TERMINALS_PER_SESSION) {
+      // Evict oldest finished terminal first; if all live, kill the oldest.
+      const oldestId = this.terminals.keys().next().value;
+      if (oldestId) {
+        this.kill(oldestId);
+      }
+    }
     const workCwd = params.cwd
       ? resolveWorkspacePath(workspaceAbs, params.cwd)
       : path.resolve(workspaceAbs);
@@ -90,9 +129,15 @@ export class TerminalRegistry {
      * ENOENT, and without an `error` listener the bridge process dies.
      */
     const useShell = args.length === 0 && /\s/.test(command);
+    // Whitelist parent env, then re-filter agent overrides so only GROK_/XAI_/
+    // always-pass keys survive (never raw process.env + arbitrary agent keys).
+    const env = filterEnvForGrokChild({
+      ...filterEnvForGrokChild(process.env),
+      ...(params.env ?? {}),
+    });
     const child = spawn(command, args, {
       cwd: workCwd,
-      env: { ...process.env, ...(params.env ?? {}) },
+      env,
       shell: useShell,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -104,7 +149,7 @@ export class TerminalRegistry {
       exitCode: null,
       cwd: workCwd,
     };
-    const limit = params.outputByteLimit ?? 256_000;
+    const limit = clampTerminalOutputLimit(params.outputByteLimit);
     const append = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       handle.output += text;
@@ -231,14 +276,29 @@ export async function handleReverseRequest(
 
   if (method === "fs/read_text_file") {
     const abs = resolveWorkspacePath(workspaceAbs, p.path as string | undefined);
+    const st = await stat(abs);
+    if (st.isDirectory()) {
+      throw new Error(`path is a directory: ${String(p.path ?? "")}`);
+    }
+    if (st.size > MAX_REVERSE_READ_BYTES) {
+      throw new Error(
+        `file too large for reverse read (${st.size} > ${MAX_REVERSE_READ_BYTES})`,
+      );
+    }
     const text = await readFile(abs, "utf8");
     return { content: text };
   }
 
   if (method === "fs/write_text_file") {
+    const content = String(p.content ?? "");
+    if (Buffer.byteLength(content, "utf8") > MAX_REVERSE_READ_BYTES) {
+      throw new Error(
+        `content too large for reverse write (> ${MAX_REVERSE_READ_BYTES})`,
+      );
+    }
     const abs = resolveWorkspacePath(workspaceAbs, p.path as string | undefined);
     await mkdir(path.dirname(abs), { recursive: true });
-    await writeFile(abs, String(p.content ?? ""), "utf8");
+    await writeFile(abs, content, "utf8");
     return {};
   }
 
