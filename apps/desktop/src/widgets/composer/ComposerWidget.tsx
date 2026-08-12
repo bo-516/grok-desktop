@@ -10,6 +10,7 @@ import cs from "classnames";
 import { Plus } from "lucide-react";
 import { ClickSpark, StarBorder } from "@/components/react-bits";
 import { ProjectSwitcherWidget } from "@/widgets/project";
+import { ComposerContextUsageView } from "./ComposerContextUsageView";
 import { ComposerInputView } from "./ComposerInputView";
 import { ComposerModelMenuView } from "./ComposerModelMenuView";
 import { ComposerModeControlView } from "./ComposerModeControlView";
@@ -150,6 +151,13 @@ export function ComposerWidget() {
               </button>
             </div>
             <div className="composer-bar-right">
+              {/*
+                Context meter left of the model chip (Settings → Appearance).
+                Gated by contextUsageDisplay so the toggle does not leave an empty slot.
+              */}
+              {widget.contextUsageDisplay ? (
+                <ComposerContextUsageView display={widget.contextUsageDisplay} />
+              ) : null}
               <ComposerModelMenuView
                 open={widget.menuOpen}
                 panel={widget.menuPanel}

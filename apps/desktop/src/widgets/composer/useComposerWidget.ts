@@ -27,6 +27,7 @@ import { useComposerAttachments } from "./useComposerAttachments";
 import { useComposerDictation } from "./useComposerDictation";
 import { useComposerNotice } from "./useComposerNotice";
 import { useComposerBarControls } from "./useComposerBarControls";
+import { useContextUsageDisplay } from "./useContextUsageDisplay";
 import { modeLabel } from "./composerModes";
 import { runComposerSubmit } from "./composerSubmit";
 
@@ -80,6 +81,14 @@ export function useComposerWidget() {
   );
   const availableModels = useSessionStore(
     (state) => state.session.availableModels ?? EMPTY_AVAILABLE_MODELS,
+  );
+  /** Last turn_completed usage for the context ring; undefined before first turn. */
+  const tokenUsage = useSessionStore((state) => state.session.tokenUsage);
+  /** Prebuilt ring view-model; null when Settings → Appearance hides the meter. */
+  const contextUsageDisplay = useContextUsageDisplay(
+    model,
+    availableModels,
+    tokenUsage,
   );
   const bridgeInfo = useSessionStore((state) => state.bridgeInfo);
   const timelineLength = useSessionStore((state) => state.session.timeline.length);
@@ -406,6 +415,11 @@ export function useComposerWidget() {
     closeMenu: bar.closeMenu,
     closeModeMenu: bar.closeModeMenu,
     connectionMode,
+    /**
+     * Context-usage ring model when Settings → Appearance is on; null hides it.
+     * Built from session.tokenUsage + model totalContextTokens.
+     */
+    contextUsageDisplay,
     dictating: dictation.dictating,
     dragOver: media.dragOver,
     effort: bar.effort,

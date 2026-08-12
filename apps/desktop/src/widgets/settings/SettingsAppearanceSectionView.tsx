@@ -1,9 +1,10 @@
 /**
- * Settings drawer — UI color palette swatches (instant, no restart).
- * Stateless presentation; parent owns palette/theme state and pick handler.
+ * Settings drawer — UI color palette + chrome toggles (instant, no restart).
+ * Stateless presentation; parent owns palette/theme/context-usage state.
  */
 
 import cs from "classnames";
+import { Checkbox } from "@/components/ui/Checkbox";
 import {
   COLOR_PALETTE_OPTIONS,
   isPaletteOptionActive,
@@ -22,17 +23,29 @@ export type SettingsAppearanceSectionViewProps = {
    * @param option Swatch from COLOR_PALETTE_OPTIONS
    */
   onPickPalette: (option: ColorPaletteOption) => void;
+  /**
+   * When true, the composer shows a context-usage ring left of the model name
+   * (tokens, window size, percent from the last completed turn).
+   */
+  showContextUsage: boolean;
+  /**
+   * Toggle the composer context meter; applies instantly (no session restart).
+   * @param show Next visibility value
+   */
+  onShowContextUsageChange: (show: boolean) => void;
 };
 
 /**
- * Render the "UI color" section of Session settings.
+ * Render the "Appearance" section of Session settings (color + chrome).
  *
  * Swatches carry no visible caption — at drawer width they clipped to "Bla…" /
  * "Oran…" and turned a 10-swatch row into noise. The name of the active option
  * is printed once below the row instead, and each button keeps its title +
  * aria-label so hover and screen readers still name every colour.
  *
- * @param props theme/palette snapshot + pick handler
+ * Context usage is a pure UI chrome toggle (F-CTX-01): no SPAWN dirty state.
+ *
+ * @param props theme/palette/context-usage snapshot + handlers
  */
 export function SettingsAppearanceSectionView(
   props: SettingsAppearanceSectionViewProps,
@@ -42,7 +55,10 @@ export function SettingsAppearanceSectionView(
   );
   return (
     <section className="side-panel-section">
-      <h3 className="side-panel-section-title">UI color</h3>
+      <h3 className="side-panel-section-title">Appearance</h3>
+      <p className="side-panel-hint">
+        Color and chrome apply instantly — no session restart.
+      </p>
       <ul className="palette-picker" aria-label="UI color palette">
         {COLOR_PALETTE_OPTIONS.map((option, index) => {
           const active = isPaletteOptionActive(
@@ -76,6 +92,16 @@ export function SettingsAppearanceSectionView(
         {activeOption ? activeOption.label : "Custom"} · retints surfaces, text
         and accents instantly.
       </p>
+
+      <div className="panel-group">
+        <Checkbox
+          className="panel-row"
+          checked={props.showContextUsage}
+          onChange={(e) => props.onShowContextUsageChange(e.target.checked)}
+          label="Show context usage"
+          description="Ring left of the model name: last-turn tokens, context window, and fill percent."
+        />
+      </div>
     </section>
   );
 }

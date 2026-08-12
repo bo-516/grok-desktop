@@ -12,6 +12,7 @@
  */
 
 import type { SessionState, SessionUpdate } from "@grok-desktop/acp-core";
+import { mergeAvailableModelsPreferContext } from "../lib/contextUsageDisplay";
 import {
   applySessionLifecycle,
   createSessionReduceBucket,
@@ -243,6 +244,13 @@ export function createLiveBridgeDispatch(
               bucket.state.lastAgentText || incoming.lastAgentText || "",
             plan: incoming.plan ?? bucket.state.plan,
             title: incoming.title ?? bucket.state.title,
+            // F-CTX-01: client-reduced usage + context limits must survive Go
+            // empty full-state hydrates (bridge SessionState has no tokenUsage).
+            tokenUsage: bucket.state.tokenUsage ?? incoming.tokenUsage,
+            availableModels: mergeAvailableModelsPreferContext(
+              incoming.availableModels,
+              bucket.state.availableModels,
+            ),
           }
         : incoming;
       // Keep eventId ring when preserving history so live updates still dedupe.

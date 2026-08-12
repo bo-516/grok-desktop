@@ -22,6 +22,7 @@ import {
   userImagesFromBlocks,
   userTextFromBlocks,
 } from "@grok-desktop/acp-core";
+import { mergeAvailableModelsPreferContext } from "@/lib/contextUsageDisplay";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
 
 /** User timeline row (narrowed for media merge). */
@@ -311,6 +312,15 @@ export function mergeCanvasInbound(
       plan:
         withMedia.plan && withMedia.plan.length > 0 ? withMedia.plan : local.plan,
       title: withMedia.title || local.title,
+      // F-CTX-01: Go SessionState has no tokenUsage; empty hydrate must not wipe
+      // a client-reduced last-turn rollup used by the composer context ring.
+      tokenUsage: withMedia.tokenUsage ?? local.tokenUsage,
+      // Prefer catalog rows that still carry totalContextTokens when inbound
+      // models were stripped to {id,name} by a thin bridge snapshot.
+      availableModels: mergeAvailableModelsPreferContext(
+        withMedia.availableModels,
+        local.availableModels,
+      ),
     };
   }
 

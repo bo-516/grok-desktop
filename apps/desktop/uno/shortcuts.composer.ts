@@ -244,6 +244,36 @@ export const composerShortcuts: Record<string, string> = {
       "flex items-center justify-center w-8 h-8 border-none rounded-pill bg-primary text-on-primary text-14px font-semibold transition-all duration-fast ease-soft hover:enabled:bg-accent-hover active:enabled:scale-96 disabled:(opacity-35 cursor-not-allowed)",
     "composer-stop":
       "flex items-center justify-center h-8 px-3 border border-line-muted rounded-pill bg-white-faint text-fg-secondary text-12px font-medium transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg)",
+    /*
+     * Context-usage ring (F-CTX-01): sits in composer-bar-right just left of
+     * the model name chip. 20×20 SVG; stroke colors are token classes only.
+     * Pair with literal `group` on the host so group-hover reveals the tip.
+     */
+    "composer-usage":
+      "relative shrink-0 flex items-center justify-center w-7.5 h-7.5 rounded-full cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]",
+    "composer-usage-svg": "block w-5 h-5",
+    "composer-usage-track": "stroke-line-muted opacity-55",
+    "composer-usage-fill":
+      "transition-[stroke-dashoffset] duration-normal ease-soft",
+    "composer-usage-fill-idle": "stroke-fg-faint opacity-40",
+    "composer-usage-fill-ok": "stroke-primary",
+    "composer-usage-fill-warn": "stroke-warning",
+    "composer-usage-fill-danger": "stroke-danger",
+    /*
+     * Hover tip bubble — centered above the ring (正上方中间).
+     * left-1/2 + translate-x-center pulls the bubble back by half its own width.
+     * translate-x-center is a plain rule in uno.config; presetUno's
+     * -translate-x-1/2 needs a preflight this app disables and silently resolves
+     * to transform:none, which parked the bubble's left edge on the ring center.
+     * Show/hide is opacity-only so nothing competes for the transform slot.
+     * pointer-events-none so the tip never steals hover from the ring host.
+     */
+    "composer-usage-tip":
+      "pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-50 flex w-max max-w-64 translate-x-center flex-col gap-0.5 rounded-12px border border-line-subtle bg-elevated px-3 py-2 text-left shadow-popover opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 group-focus-within:opacity-100",
+    "composer-usage-tip-title":
+      "m-0 text-11px font-medium leading-snug text-fg-secondary",
+    "composer-usage-tip-line":
+      "m-0 text-12px font-normal leading-snug text-fg whitespace-nowrap",
     /* Always-mounted status row: fixed one-line height; tone classes change color only. */
     "composer-status":
       "mt-2 mb-0 min-h-4.5 mx-1 text-center text-12px leading-4.5 tracking-normal truncate",

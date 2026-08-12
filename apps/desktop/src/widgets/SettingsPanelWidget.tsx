@@ -23,6 +23,10 @@ import {
   type ColorPaletteId,
   type ColorPaletteOption,
 } from "../lib/colorPalette";
+import {
+  loadContextUsagePrefs,
+  saveContextUsagePrefs,
+} from "../lib/contextUsagePrefs";
 import { applyTheme, loadTheme, type ThemeId } from "../lib/theme";
 import {
   createDefaultSettingsDraft,
@@ -73,6 +77,10 @@ export function SettingsPanelWidget(props: {
   );
   const [theme, setTheme] = useState<ThemeId>(() => loadTheme());
   const [palette, setPalette] = useState<ColorPaletteId>(() => loadPalette());
+  /** Composer context ring visibility — instant UI pref, not SPAWN dirty. */
+  const [showContextUsage, setShowContextUsage] = useState(
+    () => loadContextUsagePrefs().showContextUsage,
+  );
   const [discardOpen, setDiscardOpen] = useState(false);
   /*
    * Compatibility sources stay collapsed until asked for: ten toggles is the
@@ -114,6 +122,15 @@ export function SettingsPanelWidget(props: {
     applyPalette(option.id);
     setPalette(option.id);
   };
+
+  /**
+   * Toggle the composer context-usage ring; persists immediately (no restart).
+   * @param show Next visibility value from the Appearance checkbox
+   */
+  const setContextUsageVisible = useCallback((show: boolean) => {
+    setShowContextUsage(show);
+    saveContextUsagePrefs({ showContextUsage: show });
+  }, []);
 
   /**
    * Patch one SPAWN draft field.
@@ -234,7 +251,9 @@ export function SettingsPanelWidget(props: {
         <SettingsAppearanceSectionView
           theme={theme}
           palette={palette}
+          showContextUsage={showContextUsage}
           onPickPalette={pickPalette}
+          onShowContextUsageChange={setContextUsageVisible}
         />
 
         <SettingsSecuritySectionView
