@@ -28,6 +28,7 @@ import {
   readToolMeta,
   readToolRawInput,
 } from "./subagentLink.js";
+import { parseTurnCompletedUsage } from "./sessionTokenUsage.js";
 
 /**
  * When a spawn card body carries `subagent_id:`, record the join key and
@@ -376,15 +377,24 @@ export function applySessionUpdate(
         todos: raw as SessionState["todos"],
       };
     }
+    case "turn_completed": {
+      // F-CTX-01: last-turn usage rollup for the composer context ring.
+      // Silent metadata — must not finalize thought or append a timeline row.
+      const tokenUsage = parseTurnCompletedUsage(update);
+      if (!tokenUsage) {
+        return state;
+      }
+      return { ...state, tokenUsage };
+    }
     default: {
       // Soft-ignore unknown kinds that look like metadata; only soft-error opaque ones.
       // Soft-ignore must not finalize thought; hard error rows must finalize.
       // `subagent` / `task` are gone: those kinds are handled above, and leaving
       // them here would let the fallback shadow real cases. Remaining vendor
       // kinds below are explicitly listed rather than pattern-matched.
+      // `turn_completed` is handled above — do not re-list it as knownSilent.
       const soft = /token|usage|context|compact|notification|hook/i;
       const knownSilent = new Set([
-        "turn_completed", // usage rollup, no UI yet
         "session_recap", // candidate for the session header
         "retry_state", // candidate for a transient status chip
         "image_compressed", // composer already reports its own result

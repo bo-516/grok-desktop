@@ -377,6 +377,10 @@ export type BackgroundTaskCard = {
   status: string;
 };
 
+/** Re-export so consumers can import usage types from `types` or the package root. */
+export type { SessionTokenUsage } from "./sessionTokenUsage.js";
+import type { SessionTokenUsage } from "./sessionTokenUsage.js";
+
 /** Full single-session state consumed by the UI. */
 export type SessionState = {
   id: string;
@@ -423,6 +427,12 @@ export type SessionState = {
   /** Accumulated agent text for M0 logging convenience. */
   lastAgentText: string;
   errorMessage?: string;
+  /**
+   * Latest turn token usage from `turn_completed` (F-CTX-01).
+   * Overwritten each completed turn; absent until the first rollup arrives.
+   * Silent metadata — never becomes a timeline row.
+   */
+  tokenUsage?: SessionTokenUsage;
   /** Goal-mode snapshot; absent when the agent is not running an orchestrated goal. */
   goal?: GoalSnapshot;
   /** subagentId → card; sidebar data, never timeline rows. */
@@ -443,6 +453,11 @@ export type AvailableModel = {
   id: string;
   /** Optional human label from the agent; UI may fall back to formatting the id. */
   name?: string;
+  /**
+   * Context window size from model `_meta.totalContextTokens` (grok-build).
+   * Used for the composer context ring; omitted when the agent did not declare it.
+   */
+  totalContextTokens?: number;
 };
 
 export type InitializeResult = {

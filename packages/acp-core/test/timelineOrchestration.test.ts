@@ -335,6 +335,8 @@ describe("knownSilent + unknown kinds via applySessionUpdate", () => {
   });
 
   it("silences known non-orchestration vendor kinds without error rows", () => {
+    // turn_completed is handled as usage metadata (no timeline row) when the
+    // bag is missing/invalid; valid bags are covered in sessionTokenUsage tests.
     const kinds = [
       "turn_completed",
       "session_recap",

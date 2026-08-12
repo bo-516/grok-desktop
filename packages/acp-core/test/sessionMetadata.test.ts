@@ -28,6 +28,21 @@ describe("normalizeAvailableModels", () => {
     ]);
   });
 
+  it("preserves totalContextTokens from model _meta (grok-build shape)", () => {
+    const models = normalizeAvailableModels([
+      {
+        modelId: "grok-4.5",
+        name: "Grok 4.5",
+        _meta: { totalContextTokens: 500000 },
+      },
+      { id: "no-meta", totalContextTokens: 128000 },
+      { id: "bad-meta", _meta: { totalContextTokens: -1 } },
+    ]);
+    assert.equal(models[0]?.totalContextTokens, 500000);
+    assert.equal(models[1]?.totalContextTokens, 128000);
+    assert.equal(models[2]?.totalContextTokens, undefined);
+  });
+
   it("returns empty for non-arrays", () => {
     assert.deepEqual(normalizeAvailableModels(undefined), []);
     assert.deepEqual(normalizeAvailableModels("grok"), []);

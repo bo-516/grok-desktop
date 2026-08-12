@@ -48,6 +48,14 @@ export {
   isOrchestrationUpdate,
 } from "./timelineOrchestration.js";
 export {
+  contextUsagePercent,
+  parsePromptResultUsage,
+  parseTurnCompletedUsage,
+  parseUsageBag,
+  turnCompletedUpdateFromUsage,
+  type SessionTokenUsage,
+} from "./sessionTokenUsage.js";
+export {
   SPAWN_SUBAGENT_TOOL,
   WAIT_SUBAGENT_TOOL,
   KILL_SUBAGENT_TOOL,

@@ -93,11 +93,42 @@ export function normalizeAvailableModels(value: unknown): AvailableModel[] {
     }
     ids.add(id);
     const nameRaw = record.name ?? record.label;
-    const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : undefined;
-    models.push(name ? { id, name } : { id });
+    const name =
+      typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : undefined;
+    /**
+     * Context window lives on model `_meta.totalContextTokens` (probe-confirmed
+     * for grok-build). Also accept a top-level field so hand-rolled catalogs work.
+     */
+    const meta = asRecord(record._meta);
+    const totalContextTokens = readPositiveInt(
+      meta?.totalContextTokens ?? record.totalContextTokens,
+    );
+    const model: AvailableModel = name ? { id, name } : { id };
+    if (totalContextTokens !== undefined) {
+      model.totalContextTokens = totalContextTokens;
+    }
+    models.push(model);
   }
 
   return models;
+}
+
+/**
+ * Read a positive integer from an untrusted model field.
+ * @param value Protocol number or numeric string; fractions are rejected.
+ * @returns Integer ≥ 1, or undefined when absent / invalid.
+ */
+function readPositiveInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
+    return Math.floor(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 1) {
+      return Math.floor(n);
+    }
+  }
+  return undefined;
 }
 
 /**
