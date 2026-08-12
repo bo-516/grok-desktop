@@ -12,10 +12,8 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/reverse"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
-
-// NodeBridgeHint is appended to T3 error messages so the UI can direct the user.
-const NodeBridgeHint = " (switch to Node bridge for this feature)"
 
 // Handlers owns focused session, seeds, and client message dispatch.
 type Handlers struct {
@@ -136,6 +134,8 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 	case "close_session":
 		sessionID, _ := msg["sessionId"].(string)
 		closed := h.Pool.Close(sessionID)
+		// Drop crash-recovery seed so long-running bridges do not retain timelines forever.
+		h.SessionSeeds.Delete(sessionID)
 		if h.State.FocusedSessionID == sessionID {
 			list := h.Pool.List()
 			h.State.FocusedSessionID = ""
@@ -177,6 +177,21 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		h.Pool.Touch(rt.SessionID)
 		return rt.RespondPermission(optionID)
 
+	case "set_model":
+		return h.handleSetModel(ws, msg)
+
+	case "set_mode":
+		return h.handleSetMode(ws, msg)
+
+	case "compact":
+		return h.handleCompact(msg)
+
+	case "token_usage":
+		return h.handleTokenUsage(ws, msg)
+
+	case "fork_session":
+		return h.handleForkSession(ws, msg)
+
 	case "restart_session":
 		sessionID, _ := msg["sessionId"].(string)
 		approve := h.AlwaysApprove
@@ -189,14 +204,9 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		}
 		return session.RestartSession(h.lifecycleDeps(), sessionID, spawnConfig, approve)
 
-	// CLI channel: disk-only commands are served here (see cli.go); the rest
-	// still answer with a per-command cli_result error pointing at Node.
+	// CLI channel: one-shot grok + disk helpers (see cli.go / cli_commands.go).
 	case "cli":
 		return h.handleCli(ws, msg)
-
-	// --- T3 surfaces: Node-only (or not yet ported) ---
-	case "set_model", "set_mode", "compact", "token_usage":
-		return fmt.Errorf("%s is not available on the Go bridge%s", typ, NodeBridgeHint)
 
 	default:
 		if typ == "" {
@@ -274,7 +284,7 @@ func (h *Handlers) handleWriteWorkspaceFile(ws *websocket.Conn, msg map[string]a
 	if c, ok := msg["cwd"].(string); ok && c != "" {
 		writeCwd, _ = filepath.Abs(c)
 	}
-	abs, err := reverse.ResolveWorkspacePath(writeCwd, pathStr)
+	abs, err := workspacepath.ResolveWorkspacePath(writeCwd, pathStr)
 	if err != nil {
 		h.Send(ws, map[string]any{
 			"type": "write_workspace_file_result", "requestId": requestID,

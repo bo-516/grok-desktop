@@ -84,7 +84,7 @@ func TestSessionsListReturnsEveryWorkspace(t *testing.T) {
 	writeSessionFixture(t, home, "/tmp/proj-b", "22222222-bbbb", "Beta chat")
 	writeSessionFixture(t, home, "/tmp/proj-c", "33333333-cccc", "Gamma chat")
 
-	data, err := dispatchCliCommand("sessions_list", nil, "/tmp/proj-a")
+	data, err := dispatchCliCommand("sessions_list", nil, "/tmp/proj-a", nil)
 	if err != nil {
 		t.Fatalf("sessions_list failed: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestSessionsListReturnsEveryWorkspace(t *testing.T) {
 func TestSessionsListEmptyHomeReturnsNoRows(t *testing.T) {
 	t.Setenv("GROK_HOME", t.TempDir())
 
-	data, err := dispatchCliCommand("sessions_list", nil, "")
+	data, err := dispatchCliCommand("sessions_list", nil, "", nil)
 	if err != nil {
 		t.Fatalf("sessions_list on empty home failed: %v", err)
 	}
@@ -130,18 +130,45 @@ func TestSessionsListEmptyHomeReturnsNoRows(t *testing.T) {
 	}
 }
 
-// Unported commands must name themselves in the error so the UI can tell the
-// user which feature needs the Node bridge, not just that "cli" is dead.
-func TestDispatchCliCommandUnsupported(t *testing.T) {
-	_, err := dispatchCliCommand("worktree_list", nil, "")
+// Unknown command ids must name themselves so the UI can surface a clear error
+// rather than treating the whole CLI channel as dead.
+func TestDispatchCliCommandUnknown(t *testing.T) {
+	_, err := dispatchCliCommand("not_a_real_command", nil, "", nil)
 	if err == nil {
-		t.Fatal("want error for unported command")
+		t.Fatal("want error for unknown command")
 	}
-	if !strings.Contains(err.Error(), "worktree_list") {
+	if !strings.Contains(err.Error(), "not_a_real_command") {
 		t.Fatalf("error must name the command, got %q", err)
 	}
-	if !strings.Contains(err.Error(), NodeBridgeHint) {
-		t.Fatalf("error must carry the Node bridge hint, got %q", err)
+}
+
+// Pure argv builders for MCP add must match Node cliCommands flag shapes.
+func TestBuildMcpAddArgs(t *testing.T) {
+	stdio := buildMcpAddStdioArgs("srv", "npx", []string{"-y", "pkg"}, []string{"A=1"}, "project")
+	joined := strings.Join(stdio, " ")
+	if !strings.Contains(joined, "mcp add srv") || !strings.Contains(joined, "-e A=1") {
+		t.Fatalf("stdio args unexpected: %v", stdio)
+	}
+	if !strings.Contains(joined, "--scope project") {
+		t.Fatalf("want --scope project, got %v", stdio)
+	}
+	httpArgs := buildMcpAddHttpArgs("remote", "https://ex", []string{"Auth: t"}, "sse", "user")
+	joinedHTTP := strings.Join(httpArgs, " ")
+	if !strings.Contains(joinedHTTP, "--transport sse") || !strings.Contains(joinedHTTP, "-H Auth: t") {
+		t.Fatalf("http args unexpected: %v", httpArgs)
+	}
+}
+
+// MCP stderr log name validation rejects path traversal.
+func TestMcpStderrLogSafety(t *testing.T) {
+	if isSafeMcpServerName("../etc") {
+		t.Fatal("traversal name must be unsafe")
+	}
+	if !isSafeMcpServerName("browser-use") {
+		t.Fatal("normal name must be safe")
+	}
+	if resolveMcpLogFile("..", t.TempDir()) != "" {
+		t.Fatal("unsafe name must resolve empty")
 	}
 }
 
@@ -151,7 +178,7 @@ func TestDispatchInspectAndMcpList(t *testing.T) {
 	bin := writeFakeGrokCLI(t, t.TempDir())
 	t.Setenv("GROK_BIN", bin)
 
-	insp, err := dispatchCliCommand("inspect", nil, t.TempDir())
+	insp, err := dispatchCliCommand("inspect", nil, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -163,7 +190,7 @@ func TestDispatchInspectAndMcpList(t *testing.T) {
 		t.Fatalf("inspect missing skills: %#v", inspMap)
 	}
 
-	list, err := dispatchCliCommand("mcp_list", nil, t.TempDir())
+	list, err := dispatchCliCommand("mcp_list", nil, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("mcp_list: %v", err)
 	}
@@ -178,7 +205,7 @@ func TestDispatchMcpDoctor(t *testing.T) {
 	bin := writeFakeGrokCLI(t, t.TempDir())
 	t.Setenv("GROK_BIN", bin)
 
-	data, err := dispatchCliCommand("mcp_doctor", map[string]any{"name": "browser-use"}, "")
+	data, err := dispatchCliCommand("mcp_doctor", map[string]any{"name": "browser-use"}, "", nil)
 	if err != nil {
 		t.Fatalf("mcp_doctor: %v", err)
 	}

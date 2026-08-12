@@ -153,6 +153,11 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	// the UI keeps the client-reduced body from replay_end.
 	skipEmptyStateAfterReplay := map[string]bool{}
 
+	// Reserve capacity before spawn so concurrent start/recovery cannot overshoot.
+	if err := deps.Pool.BeginSpawn(); err != nil {
+		return err
+	}
+
 	runtime, err := CreateSessionRuntime(CreateRuntimeOpts{
 		Cwd:           cwd,
 		AlwaysApprove: opts.AlwaysApprove,
@@ -343,10 +348,12 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		},
 	})
 	if err != nil {
+		deps.Pool.CancelSpawn()
 		return err
 	}
 
 	if err := deps.Pool.Insert(runtime); err != nil {
+		// Insert already consumed the BeginSpawn reservation; just dispose the child.
 		runtime.Dispose()
 		return err
 	}

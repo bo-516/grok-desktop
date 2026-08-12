@@ -44,12 +44,18 @@ type PooledRuntime struct {
 	LastUsed    int64
 	SpawnConfig *SessionSpawnConfig
 
-	GetStatus       func() SessionStatus
-	GetSessionState func() acp.SessionState
-	Prompt          func(text string, blocks []ContentBlock) error
-	Cancel          func()
+	GetStatus         func() SessionStatus
+	GetSessionState   func() acp.SessionState
+	Prompt            func(text string, blocks []ContentBlock) error
+	Cancel            func()
 	RespondPermission func(optionID string) error
-	Dispose         func()
+	// Mid-session ACP ops (nil when the agent/runtime does not expose them).
+	SetModel     func(modelID string) error
+	SetMode      func(modeID string) error
+	Compact      func(instruction string) error
+	TokenUsage   func() (any, error)
+	ForkSession  func(sourceCwd, newCwd string) (any, error)
+	Dispose      func()
 }
 
 // PoolEntry is the UI rail summary for one resident process.
@@ -63,11 +69,15 @@ type PoolEntry struct {
 
 // RuntimePool is a capacity-bounded map of live session runtimes.
 // Idle (idle/disconnected) entries are reclaimed LRU; busy never evicted.
+// In-flight spawns (BeginSpawn … Insert/CancelSpawn) count against capacity so
+// concurrent start/recovery cannot overshoot (mirrors Node RuntimePool).
 type RuntimePool struct {
 	Capacity int
 	mu       sync.Mutex
 	// map insertion order is not LRU; we track LastUsed and sort on reclaim.
 	m map[string]*PooledRuntime
+	// pendingSpawns is the number of BeginSpawn reservations not yet Insert/CancelSpawn.
+	pendingSpawns int
 }
 
 // NewRuntimePool creates a pool with at least capacity 1.
@@ -112,8 +122,31 @@ func (p *RuntimePool) Touch(sessionID string) {
 	}
 }
 
+// BeginSpawn reserves a pool slot before spawning a child process.
+// Reclaims idle LRU when needed; returns error when all resident sessions are busy.
+// Pair with Insert (consumes the reservation) or CancelSpawn on failure.
+func (p *RuntimePool) BeginSpawn() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.ensureRoomIncludingPendingLocked(); err != nil {
+		return err
+	}
+	p.pendingSpawns++
+	return nil
+}
+
+// CancelSpawn drops a reservation after spawn/handshake failure (no Insert).
+func (p *RuntimePool) CancelSpawn() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pendingSpawns > 0 {
+		p.pendingSpawns--
+	}
+}
+
 // Insert adds or replaces a runtime; reclaims idle LRU when over capacity.
-// Throws (returns error) when full and no idle victim exists.
+// Consumes one pending spawn reservation when present.
+// Returns error when full and no idle victim exists.
 func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -123,7 +156,11 @@ func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 		// dispose under lock is OK if Dispose does not re-enter pool.
 		go old.Dispose()
 	}
-	if err := p.ensureCapacityLocked(); err != nil {
+	// Consume reservation first so ensureCapacity does not count this spawn twice.
+	if p.pendingSpawns > 0 {
+		p.pendingSpawns--
+	}
+	if err := p.ensureCapacityForInsertLocked(); err != nil {
 		return err
 	}
 	runtime.LastUsed = time.Now().UnixMilli()
@@ -215,40 +252,61 @@ func PickLruIdleVictim(entries []struct {
 	return bestID
 }
 
-func (p *RuntimePool) ensureCapacityLocked() error {
+// ensureCapacityForInsertLocked frees a resident slot for insert (not pending).
+// Caller must hold p.mu.
+func (p *RuntimePool) ensureCapacityForInsertLocked() error {
 	for len(p.m) >= p.Capacity {
-		type snap struct {
-			SessionID string
-			LastUsed  int64
-			Status    SessionStatus
+		if err := p.reclaimOneIdleOrThrowLocked(); err != nil {
+			return err
 		}
-		entries := make([]snap, 0, len(p.m))
-		for _, rt := range p.m {
-			st := acp.StatusIdle
-			if rt.GetStatus != nil {
-				st = rt.GetStatus()
-			}
-			entries = append(entries, snap{rt.SessionID, rt.LastUsed, st})
+	}
+	return nil
+}
+
+// ensureRoomIncludingPendingLocked frees room counting in-flight BeginSpawn.
+// Caller must hold p.mu.
+func (p *RuntimePool) ensureRoomIncludingPendingLocked() error {
+	for len(p.m)+p.pendingSpawns >= p.Capacity {
+		if err := p.reclaimOneIdleOrThrowLocked(); err != nil {
+			return err
 		}
-		// Convert for PickLruIdleVictim
-		converted := make([]struct {
-			SessionID string
-			LastUsed  int64
-			Status    SessionStatus
-		}, len(entries))
-		for i, e := range entries {
-			converted[i].SessionID = e.SessionID
-			converted[i].LastUsed = e.LastUsed
-			converted[i].Status = e.Status
+	}
+	return nil
+}
+
+// reclaimOneIdleOrThrowLocked evicts one idle LRU victim or errors when all-busy.
+// Caller must hold p.mu.
+func (p *RuntimePool) reclaimOneIdleOrThrowLocked() error {
+	type snap struct {
+		SessionID string
+		LastUsed  int64
+		Status    SessionStatus
+	}
+	entries := make([]snap, 0, len(p.m))
+	for _, rt := range p.m {
+		st := acp.StatusIdle
+		if rt.GetStatus != nil {
+			st = rt.GetStatus()
 		}
-		victim := PickLruIdleVictim(converted)
-		if victim == "" {
-			return fmt.Errorf("RuntimePool full (%d): all sessions busy; close one or wait for idle", p.Capacity)
-		}
-		if rt, ok := p.m[victim]; ok {
-			delete(p.m, victim)
-			go rt.Dispose()
-		}
+		entries = append(entries, snap{rt.SessionID, rt.LastUsed, st})
+	}
+	converted := make([]struct {
+		SessionID string
+		LastUsed  int64
+		Status    SessionStatus
+	}, len(entries))
+	for i, e := range entries {
+		converted[i].SessionID = e.SessionID
+		converted[i].LastUsed = e.LastUsed
+		converted[i].Status = e.Status
+	}
+	victim := PickLruIdleVictim(converted)
+	if victim == "" {
+		return fmt.Errorf("RuntimePool full (%d): all sessions busy; close one or wait for idle", p.Capacity)
+	}
+	if rt, ok := p.m[victim]; ok {
+		delete(p.m, victim)
+		go rt.Dispose()
 	}
 	return nil
 }

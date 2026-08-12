@@ -9,8 +9,7 @@ Matches the frozen relay WebSocket protocol in
 
 - Spawns real `grok agent stdio` only — no mock agent product path
 - Does **not** port timeline reduce; forwards raw `session_update` to the UI
-- T3 features that are not yet ported (`set_model`, `set_mode`, `compact`, `token_usage`, and most `cli` commands) return an explicit error with a **switch to Node bridge** hint
-- CLI channel **is** ported for Environment: `sessions_list`, `inspect`, `mcp_list`, `mcp_doctor`
+- Session ops (`set_model`, `set_mode`, `compact`, `token_usage`, `fork_session`) and the full CLI channel match the Node bridge protocol surface
 
 ## Build
 
@@ -79,11 +78,15 @@ Missing `Origin` is allowed (non-browser clients). Illegal Origin → **403**. M
 
 ```text
 cmd/bridge/          process entry
-internal/acp/        NDJSON codec, line framing, thin ACP client + handshake
+pkg/jsonrpc/         NDJSON JSON-RPC 2.0 framing (codec + line splitter)
+pkg/workspacepath/   workspace path sandbox + read guards
+pkg/envfilter/       grok child env whitelist
+pkg/bridgeauth/      token / Origin / listen-port helpers
+internal/acp/        thin ACP client + handshake (uses pkg/jsonrpc)
 internal/spawn/      grok process tree (setpgid on posix; Job Object stub on Windows)
 internal/pool/       RuntimePool LRU
-internal/wsapi/      WS server, auth, message routing
-internal/reverse/    fs read/write, terminal registry, path guards
+internal/wsapi/      WS server, message routing (auth re-exports pkg/bridgeauth)
+internal/reverse/    fs read/write, terminal registry (uses pkg/workspacepath)
 internal/session/    disk list, workspace entries, crash recovery seeds
 ```
 
@@ -96,17 +99,21 @@ internal/session/    disk list, workspace entries, crash recovery seeds
 | bridge → UI | `state` | hydrate only (start, reconnect, get_state, permission) |
 | UI → bridge | `get_state` | on-demand full snapshot |
 
-## T3 (partial)
+## Session ops & CLI channel
 
 | Request | Status |
 |---|---|
+| `set_model` / `set_mode` | ACP RPC; `restart_required` on method-not-found |
+| `compact` / `token_usage` / `fork_session` | ACP RPC (`token_usage` / `fork_session` reply on `cli_result`) |
 | `cli` → `sessions_list` | disk walk under `~/.grok/sessions` |
-| `cli` → `inspect` / `mcp_list` / `mcp_doctor` | one-shot `grok` via `spawn.RunGrokCli` (Environment sheet) |
-| `cli` → other commands | unsupported (Node hint) |
-| `set_model`, `set_mode`, `compact`, `token_usage` | unsupported (Node hint) |
+| `cli` → `inspect` / `mcp_*` / `worktree_*` / `auth_*` / … | one-shot `grok` via `spawn.RunGrokCli` |
+| `cli` → `prompts_*` | disk user-prompts store |
+| `cli` → `mcp_stderr_log` | read `~/.grok/logs/mcp` |
 
-Unsupported paths respond with:
+## Pool capacity
 
-```text
-<feature> is not available on the Go bridge (switch to Node bridge for this feature)
-```
+| Variable | Default | Cap |
+|---|---|---|
+| `BRIDGE_POOL_CAPACITY` | `4` | max `16` (min effective `1`) |
+
+Concurrent `start` / crash recovery uses `BeginSpawn` reservations so resident + in-flight processes never exceed capacity.

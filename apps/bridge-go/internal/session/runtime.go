@@ -67,7 +67,8 @@ func BuildSpawnExtraArgs(cfg *pool.SessionSpawnConfig, alwaysApprove bool) []str
 	if cfg.NoSubagents {
 		args = append(args, "--no-subagents")
 	}
-	if cfg.Rules != "" {
+	// Whitespace-only rules must not emit --rules (matches Node buildSpawnExtraArgs).
+	if t := stringsTrim(cfg.Rules); t != "" {
 		args = append(args, "--rules", cfg.Rules)
 	}
 	if cfg.DisableWebSearch {
@@ -273,6 +274,32 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		},
 		RespondPermission: func(optionID string) error {
 			return client.RespondPermission(optionID)
+		},
+		SetModel: func(modelID string) error {
+			_, err := client.SetModel(hs.SessionID, modelID)
+			return err
+		},
+		SetMode: func(modeID string) error {
+			_, err := client.SetMode(hs.SessionID, modeID)
+			return err
+		},
+		Compact: func(instruction string) error {
+			_, err := client.Compact(hs.SessionID, instruction)
+			return err
+		},
+		TokenUsage: func() (any, error) {
+			return client.TokenUsage(hs.SessionID)
+		},
+		ForkSession: func(sourceCwd, newCwd string) (any, error) {
+			src := stringsTrim(sourceCwd)
+			if src == "" {
+				src = cwd
+			}
+			dst := stringsTrim(newCwd)
+			if dst == "" {
+				dst = src
+			}
+			return client.ForkSession(hs.SessionID, src, dst)
 		},
 		Dispose: dispose,
 	}

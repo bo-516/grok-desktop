@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/userprompts"
 )
 
 // sessionsListLimit caps rows returned by sessions_list. Mirrors the Node
@@ -25,7 +26,7 @@ const (
 // handleCli answers one `cli` channel request on the reply socket ws, reading
 // requestId / command / args / cwd out of the raw client frame msg. Missing or
 // mistyped fields degrade to their zero value, so a malformed frame lands in
-// the unsupported-command branch instead of panicking on a nil map; cwd falls
+// the unknown-command branch instead of panicking on a nil map; cwd falls
 // back to the bridge's default list cwd.
 //
 // Every path replies with a cli_result envelope — successes and failures alike
@@ -33,6 +34,9 @@ const (
 // pendingCli). A bare `error` frame would leave that promise hung until the
 // client-side timeout fires. cli_result is unicast: broadcasting it would
 // settle the same requestId on unrelated clients.
+//
+// auth_logout disposes the whole runtime pool after a successful CLI call
+// (F-AUTH-07), matching Node handleCli.onAuthLogout.
 //
 // Always returns nil; command failures ride inside the envelope, so returning
 // an error here would double-report them as a second `error` frame.
@@ -44,7 +48,12 @@ func (h *Handlers) handleCli(ws *websocket.Conn, msg map[string]any) error {
 	if c, ok := msg["cwd"].(string); ok && c != "" {
 		cwd, _ = filepath.Abs(c)
 	}
-	data, err := dispatchCliCommand(command, args, cwd)
+	onAuthLogout := func() {
+		h.Pool.DisposeAll()
+		h.State.FocusedSessionID = ""
+		h.BroadcastPool()
+	}
+	data, err := dispatchCliCommand(command, args, cwd, onAuthLogout)
 	if err != nil {
 		h.Send(ws, map[string]any{
 			"type": "cli_result",
@@ -74,36 +83,204 @@ func (h *Handlers) handleCli(ws *websocket.Conn, msg map[string]any) error {
 // workspace for commands that scope to one project, and is ignored by
 // sessions_list on purpose (see sessionsList).
 //
-// Ported surface today:
-//   - sessions_list — pure disk walk (no CLI subprocess)
-//   - inspect / mcp_list / mcp_doctor — one-shot `grok` via spawn.RunGrokCli
-//     (Environment sheet load + doctor; mirrors Node cliCommands)
+// Ported surface mirrors Node cliDispatch (sessions / MCP / worktree / auth /
+// models / memory / plugin / prompts / mcp_stderr_log / import_claude).
+// Unknown command ids return an error naming that one command.
 //
-// Everything else returns an error naming that one command, so the UI can
-// point at the missing feature rather than reporting the whole channel as dead.
-func dispatchCliCommand(command string, args map[string]any, cwd string) (any, error) {
+// onAuthLogout is invoked after a successful auth_logout so the pool can dispose
+// all runtimes (F-AUTH-07); nil is safe when the caller does not need the hook.
+func dispatchCliCommand(command string, args map[string]any, cwd string, onAuthLogout func()) (any, error) {
 	switch command {
 	case "sessions_list":
 		return sessionsList()
+	case "sessions_search":
+		return sessionsSearch(stringArg(args, "query"), cwd)
+	case "sessions_delete":
+		return sessionsDelete(stringArg(args, "sessionId"))
+	case "export":
+		outFile := stringArg(args, "outFile")
+		return sessionsExport(stringArg(args, "sessionId"), outFile)
 	case "inspect":
 		return inspectJSON(cwd)
 	case "mcp_list":
 		return mcpList(cwd)
 	case "mcp_doctor":
-		name := ""
-		if args != nil {
-			if n, ok := args["name"].(string); ok {
-				name = n
+		return mcpDoctor(stringArg(args, "name"), cwd)
+	case "mcp_add_stdio":
+		return mcpAddStdio(args, cwd)
+	case "mcp_enable":
+		return mcpEnable(stringArg(args, "name"), cwd)
+	case "mcp_disable":
+		return mcpDisable(stringArg(args, "name"), cwd)
+	case "mcp_remove":
+		scope := "user"
+		if stringArg(args, "scope") == "project" {
+			scope = "project"
+		}
+		return mcpRemove(stringArg(args, "name"), scope, cwd)
+	case "mcp_add_http":
+		return mcpAddHttp(args, cwd)
+	case "worktree_list":
+		return worktreeList(cwd)
+	case "worktree_rm":
+		return worktreeRm(stringArg(args, "name"), boolArg(args, "dryRun"), cwd)
+	case "worktree_gc":
+		maxAge := stringArg(args, "maxAge")
+		if maxAge == "" {
+			maxAge = "7d"
+		}
+		return worktreeGc(maxAge, cwd)
+	case "models_list":
+		return modelsList()
+	case "memory_clear":
+		scope := stringArg(args, "scope")
+		if scope == "" {
+			scope = "workspace"
+		}
+		return memoryClear(scope, cwd)
+	case "auth_login":
+		return authLogin(boolArg(args, "deviceAuth"))
+	case "auth_logout":
+		data, err := authLogout()
+		if err == nil && onAuthLogout != nil {
+			onAuthLogout()
+		}
+		return data, err
+	case "update_check":
+		return updateCheck()
+	case "plugin":
+		return pluginAction(stringArg(args, "action"), stringArg(args, "name"), cwd)
+	case "marketplace":
+		return marketplaceAction(stringArg(args, "action"), stringArg(args, "name"))
+	case "mcp_stderr_log":
+		return mcpStderrLog(args)
+	case "import_claude":
+		return importClaude(cwd)
+	case "prompts_get":
+		// Paths derived only from GROK_HOME + project root of cwd — ignore path args.
+		return userprompts.PromptsGet(cwd)
+	case "prompts_set":
+		scope := userprompts.PromptScope(stringArg(args, "scope"))
+		entries := coercePromptEntries(args)
+		return userprompts.PromptsSet(scope, entries, cwd)
+	case "prompts_clear":
+		scope := userprompts.PromptScope(stringArg(args, "scope"))
+		return userprompts.PromptsClear(scope, cwd)
+	case "prompts_move":
+		from := userprompts.PromptScope(stringArg(args, "from"))
+		to := userprompts.PromptScope(stringArg(args, "to"))
+		idx := intArg(args, "entryIndex")
+		return userprompts.PromptsMove(from, to, idx, cwd)
+	default:
+		return nil, fmt.Errorf("unknown cli command: %s", command)
+	}
+}
+
+// stringArg reads a string from the free-form args bag.
+func stringArg(args map[string]any, key string) string {
+	if args == nil {
+		return ""
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
+
+// intArg reads an integer from the free-form args bag (JSON numbers are float64).
+func intArg(args map[string]any, key string) int {
+	if args == nil {
+		return 0
+	}
+	switch v := args[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+// boolArg reads a boolean from the free-form args bag.
+func boolArg(args map[string]any, key string) bool {
+	if args == nil {
+		return false
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return false
+}
+
+// stringSliceArg reads a []string from JSON arrays (or returns nil).
+func stringSliceArg(args map[string]any, key string) []string {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, fmt.Sprint(item))
+	}
+	return out
+}
+
+// coercePromptEntries maps args.entries into []PromptEntry.
+// Enabled defaults to true when the field is absent (JS clients omit it).
+func coercePromptEntries(args map[string]any) []userprompts.PromptEntry {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args["entries"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]userprompts.PromptEntry, 0, len(raw))
+	for i, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := m["id"].(string)
+		if id == "" {
+			id = fmt.Sprintf("e%d", i)
+		}
+		text, _ := m["text"].(string)
+		enabled := true
+		if ev, exists := m["enabled"]; exists {
+			if b, ok := ev.(bool); ok {
+				enabled = b
 			}
 		}
-		return mcpDoctor(name, cwd)
-	default:
-		return nil, fmt.Errorf(
-			"cli command %q is not available on the Go bridge%s",
-			command,
-			NodeBridgeHint,
-		)
+		var cat userprompts.PromptCategory
+		if c, ok := m["category"].(string); ok && c != "" {
+			cat = userprompts.PromptCategory(c)
+		}
+		e := userprompts.PromptEntry{
+			Id:      id,
+			Text:    text,
+			Enabled: enabled,
+		}
+		if cat != "" {
+			e.Category = cat
+		}
+		out = append(out, e)
 	}
+	return out
 }
 
 // sessionsList enumerates `~/.grok/sessions` across every workspace folder and

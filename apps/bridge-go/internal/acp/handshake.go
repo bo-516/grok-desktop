@@ -1,7 +1,9 @@
 package acp
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -304,9 +306,52 @@ func normalizeAvailableModels(raw any) []AvailableModel {
 		} else if n, ok := rec["label"].(string); ok && strings.TrimSpace(n) != "" {
 			m.Name = strings.TrimSpace(n)
 		}
+		// Context window: model `_meta.totalContextTokens` (grok-build) or top-level.
+		// Must survive JSON to the desktop or the composer ring stays at "No turns yet".
+		if n := readPositiveInt(rec["totalContextTokens"]); n > 0 {
+			m.TotalContextTokens = n
+		} else if meta, ok := rec["_meta"].(map[string]any); ok {
+			if n := readPositiveInt(meta["totalContextTokens"]); n > 0 {
+				m.TotalContextTokens = n
+			}
+		}
 		models = append(models, m)
 	}
 	return models
+}
+
+// readPositiveInt reads a finite integer ≥ 1 from JSON number or numeric string.
+// Returns 0 when absent / invalid so callers can treat 0 as "unknown".
+func readPositiveInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		if n >= 1 {
+			return int(n)
+		}
+	case int:
+		if n >= 1 {
+			return n
+		}
+	case int64:
+		if n >= 1 {
+			return int(n)
+		}
+	case json.Number:
+		i, err := n.Int64()
+		if err == nil && i >= 1 {
+			return int(i)
+		}
+	case string:
+		s := strings.TrimSpace(n)
+		if s == "" {
+			return 0
+		}
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err == nil && i >= 1 {
+			return int(i)
+		}
+	}
+	return 0
 }
 
 func preferCommands(a, b []any) []any {
