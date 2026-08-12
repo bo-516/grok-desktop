@@ -35,6 +35,7 @@ function localRec(
     lastAgentText: partial.lastAgentText ?? "",
     sessionKind: partial.sessionKind,
     parentSessionId: partial.parentSessionId,
+    noProject: partial.noProject,
   };
 }
 
@@ -108,6 +109,30 @@ describe("sessionActions", () => {
     assert.equal(byId.get("shared")?.title, "Strong remote title");
     assert.equal(byId.get("other-ws")?.workspace, "/flow-novel");
     assert.equal(byId.get("other-ws")?.title, "Flow novel work");
+  });
+
+  it("mergeRemoteSessionsIntoCatalog keeps no-project rows unfiled", () => {
+    // Disk files these under the bridge's own cwd; backfilling that path moved
+    // the chat into a real project folder on the next sync (rail lost it).
+    const local = [
+      localRec({
+        id: "unfiled",
+        title: "Ask without a project",
+        workspace: "",
+        noProject: true,
+        updatedAt: 10,
+      }),
+    ];
+    const merged = mergeRemoteSessionsIntoCatalog(local, [
+      {
+        id: "unfiled",
+        title: "Ask without a project",
+        workspace: "/Users/me/grok-desktop",
+        updatedAt: "2026-08-09T12:00:00.000Z",
+      },
+    ]);
+    assert.equal(merged[0]?.workspace, "");
+    assert.equal(merged[0]?.noProject, true);
   });
 
   it("mergeRemoteSessionsIntoCatalog leaves catalog alone on empty remote", () => {

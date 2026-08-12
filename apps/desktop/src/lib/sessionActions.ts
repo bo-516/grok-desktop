@@ -169,7 +169,8 @@ export function normalizeSessionsList(data: unknown): RemoteSessionRow[] {
  * Merge upstream session rows into the local catalog.
  * - Empty remote list leaves the catalog untouched (QA-SESS-38).
  * - Existing rich rows keep timeline / toolCalls; title only fills when weak.
- * - Workspace is filled when the local row is missing one.
+ * - Workspace is filled when the local row is missing one, except for rows
+ *   marked `noProject` (they must stay unfiled).
  * - `updatedAt` takes the max of local and remote so rail order stays honest.
  * @param catalog Current local catalog.
  * @param rows Normalized remote sessions (all workspaces).
@@ -199,7 +200,14 @@ export function mergeRemoteSessionsIntoCatalog(
       }
       byId.set(row.id, {
         ...existing,
-        workspace: existing.workspace || row.workspace || "",
+        /*
+         * Chats started with "No project" keep an empty workspace: on disk they
+         * sit under the bridge's own cwd, so backfilling that path here would
+         * silently move them into a real project folder on the next sync.
+         */
+        workspace: existing.noProject
+          ? ""
+          : existing.workspace || row.workspace || "",
         title: strongTitle,
         updatedAt: Math.max(existing.updatedAt, remoteUpdated ?? 0),
         createdAt: existing.createdAt || remoteCreated || existing.updatedAt,

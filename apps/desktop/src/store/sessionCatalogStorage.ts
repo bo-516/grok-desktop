@@ -11,6 +11,7 @@ import {
   type SessionState,
 } from "@grok-desktop/acp-core";
 import {
+  NO_PROJECT_KEY,
   SESSION_STORAGE_KEY,
   type SessionRecord,
 } from "./sessionCatalogTypes";
@@ -57,7 +58,7 @@ export function pruneEmptyWeakSessions(
       continue;
     }
     // empty + weak title → keep only newest per workspace
-    const key = rec.workspace || "(no project)";
+    const key = rec.workspace || NO_PROJECT_KEY;
     const prev = emptyByWs.get(key);
     if (!prev || rec.updatedAt >= prev.updatedAt) {
       emptyByWs.set(key, rec);

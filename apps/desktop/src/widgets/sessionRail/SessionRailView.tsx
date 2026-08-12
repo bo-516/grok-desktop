@@ -7,6 +7,7 @@
 import { GlareHover } from "@/components/react-bits";
 import type { SessionRecord } from "@/store/sessionCatalog";
 import { SessionRailFooterView } from "../SessionRailFooterView";
+import { SessionRailNoProjectGroupView } from "../SessionRailNoProjectGroupView";
 import { SessionRailProjectGroupView } from "../SessionRailProjectGroupView";
 import { SessionRailSessionRowView } from "../SessionRailSessionRowView";
 import type { SessionRailWidgetModel } from "./useSessionRailWidget";
@@ -25,6 +26,9 @@ export function SessionRailView(props: SessionRailViewProps) {
     query,
     setQuery,
     groups,
+    noProjectSessions,
+    noProjectActive,
+    noProjectKey,
     matchCount,
     searching,
     streamingCount,
@@ -41,6 +45,36 @@ export function SessionRailView(props: SessionRailViewProps) {
     onToggleCollapse,
     onExpandPreview,
   } = props;
+
+  /**
+   * One session row with its full model (selection, live status, pin, drag).
+   * Shared by the project tree and the no-project section so both lists behave
+   * identically; `workspace` scopes drag order to the owning section.
+   * @param rec Catalog row to render.
+   * @param workspace Section key (project path or the no-project key).
+   * @param orderedIds Visible top-to-bottom ids of that section, for drops.
+   */
+  const renderRow = (
+    rec: SessionRecord,
+    workspace: string,
+    orderedIds: string[],
+  ) => {
+    const row = rowForSession(rec, workspace, orderedIds);
+    return (
+      <SessionRailSessionRowView
+        key={rec.id}
+        rec={row.rec}
+        selected={row.selected}
+        isLiveActive={row.isLiveActive}
+        liveStatus={row.liveStatus}
+        pinned={row.pinned}
+        onSelect={row.onSelect}
+        onTogglePin={row.onTogglePin}
+        onReorder={row.onReorder}
+        onRemove={row.onRemove}
+      />
+    );
+  };
 
   return (
     <>
@@ -130,45 +164,53 @@ export function SessionRailView(props: SessionRailViewProps) {
         ) : null}
 
         <div className="side-nav-scroll">
-          {groups.length === 0 ? (
+          {groups.length === 0 && noProjectSessions.length === 0 ? (
             <div className="side-nav-empty">
               {query
                 ? "No matching chats"
                 : "No chats yet. Send a message to start."}
             </div>
           ) : (
-            groups.map((group) => (
-              <SessionRailProjectGroupView
-                key={group.workspace}
-                group={group}
-                active={group.workspace === selectedWorkspace}
-                collapsed={isGroupCollapsed(group.workspace)}
-                previewExpanded={isGroupPreviewExpanded(group.workspace)}
-                onToggleCollapse={() => onToggleCollapse(group.workspace)}
-                onExpandPreview={() => onExpandPreview(group.workspace)}
-                renderSession={(rec: SessionRecord) => {
-                  const row = rowForSession(
+            <>
+              {groups.map((group) => (
+                <SessionRailProjectGroupView
+                  key={group.workspace}
+                  group={group}
+                  active={group.workspace === selectedWorkspace}
+                  collapsed={isGroupCollapsed(group.workspace)}
+                  previewExpanded={isGroupPreviewExpanded(group.workspace)}
+                  onToggleCollapse={() => onToggleCollapse(group.workspace)}
+                  onExpandPreview={() => onExpandPreview(group.workspace)}
+                  renderSession={(rec: SessionRecord) =>
+                    renderRow(
+                      rec,
+                      group.workspace,
+                      group.sessions.map((s) => s.id),
+                    )
+                  }
+                />
+              ))}
+              {/*
+               * Chats with no workspace folder. Own section below the tree
+               * (renders nothing while empty) so they stop hiding inside the
+               * project their bridge process happened to run from.
+               */}
+              <SessionRailNoProjectGroupView
+                sessions={noProjectSessions}
+                active={noProjectActive}
+                collapsed={isGroupCollapsed(noProjectKey)}
+                previewExpanded={isGroupPreviewExpanded(noProjectKey)}
+                onToggleCollapse={() => onToggleCollapse(noProjectKey)}
+                onExpandPreview={() => onExpandPreview(noProjectKey)}
+                renderSession={(rec: SessionRecord) =>
+                  renderRow(
                     rec,
-                    group.workspace,
-                    group.sessions.map((s) => s.id),
-                  );
-                  return (
-                    <SessionRailSessionRowView
-                      key={rec.id}
-                      rec={row.rec}
-                      selected={row.selected}
-                      isLiveActive={row.isLiveActive}
-                      liveStatus={row.liveStatus}
-                      pinned={row.pinned}
-                      onSelect={row.onSelect}
-                      onTogglePin={row.onTogglePin}
-                      onReorder={row.onReorder}
-                      onRemove={row.onRemove}
-                    />
-                  );
-                }}
+                    noProjectKey,
+                    noProjectSessions.map((s) => s.id),
+                  )
+                }
               />
-            ))
+            </>
           )}
         </div>
 

@@ -43,6 +43,14 @@ export type SessionRecord = {
   sessionKind?: string;
   /** Parent chat id when this row is a harness-spawned subagent session. */
   parentSessionId?: string;
+  /**
+   * Chat started with "No project" selected. Sticky per row because the bridge
+   * resolves an empty cwd to its own working directory: on disk the session
+   * lives under that folder, so `sessions_list` would otherwise re-home the row
+   * into a real project group on the next sync. Rail renders these in the
+   * standalone {@link NO_PROJECT_KEY} section instead of a project folder.
+   */
+  noProject?: boolean;
 };
 
 /** Sessions grouped under one workspace folder. */
@@ -69,6 +77,12 @@ export type TimeGroup = {
 
 /** localStorage key for the persisted catalog JSON array. */
 export const SESSION_STORAGE_KEY = "grok-desktop.session-catalog.v1";
+
+/**
+ * Group / prefs key for chats that belong to no workspace folder.
+ * Same string the rail prefs use for collapse, preview-expand, and drag order.
+ */
+export const NO_PROJECT_KEY = "(no project)";
 
 export {
   extractTitleFromTimeline,

@@ -281,6 +281,18 @@ export function upsertFromLiveState(
     lastAgentText,
   };
 
+  /**
+   * "No project" is decided once, when the row is first created: a workspace
+   * always arrives on later snapshots (the bridge resolves an empty cwd to its
+   * own folder), and while the no-project pref is on every inbound session is
+   * masked to "" — re-deriving here would drag real project chats into the
+   * no-project section.
+   */
+  let noProject = existing?.noProject;
+  if (!existing && !state.workspace.trim()) {
+    noProject = true;
+  }
+
   const next: SessionRecord = {
     id: state.id,
     workspace: state.workspace || existing?.workspace || "",
@@ -307,6 +319,7 @@ export function upsertFromLiveState(
     // Live ACP state never carries session_kind; keep disk-merge role fields.
     sessionKind: existing?.sessionKind,
     parentSessionId: existing?.parentSessionId,
+    noProject,
   };
   const without = catalog.filter((s) => s.id !== state.id);
   return [next, ...without].sort((a, b) => b.updatedAt - a.updatedAt);

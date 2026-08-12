@@ -3,12 +3,56 @@
  * Pure — no React, no localStorage.
  */
 
-import type {
-  ProjectGroup,
-  SessionRecord,
-  TimeBucket,
-  TimeGroup,
+import {
+  NO_PROJECT_KEY,
+  type ProjectGroup,
+  type SessionRecord,
+  type TimeBucket,
+  type TimeGroup,
 } from "./sessionCatalogTypes";
+
+/**
+ * Whether a row belongs to no workspace folder.
+ * Either the sticky `noProject` marker (chat started with "No project", even
+ * though disk filed it under the bridge cwd) or an empty workspace path.
+ * @param rec Catalog session row.
+ * @returns True when the row belongs in the standalone no-project section.
+ */
+export function isNoProjectSession(rec: SessionRecord): boolean {
+  return rec.noProject === true || !rec.workspace.trim();
+}
+
+/**
+ * Split rail rows into project-scoped chats and no-project chats.
+ * The rail renders them as two independent sections, so the no-project list
+ * never becomes a pseudo folder inside PROJECTS.
+ * @param catalog Rows already filtered for the rail.
+ * @returns `noProject` sorted by `updatedAt` desc; `withProject` in input order.
+ */
+export function splitNoProjectSessions(catalog: SessionRecord[]): {
+  noProject: SessionRecord[];
+  withProject: SessionRecord[];
+} {
+  const noProject: SessionRecord[] = [];
+  const withProject: SessionRecord[] = [];
+  for (const rec of catalog) {
+    if (isNoProjectSession(rec)) {
+      noProject.push(rec);
+    } else {
+      withProject.push(rec);
+    }
+  }
+  noProject.sort((a, b) => {
+    if (b.updatedAt !== a.updatedAt) {
+      return b.updatedAt - a.updatedAt;
+    }
+    if (a.id !== b.id) {
+      return a.id < b.id ? -1 : 1;
+    }
+    return 0;
+  });
+  return { noProject, withProject };
+}
 
 /**
  * Project display name from workspace path (Codex-style group header).
@@ -71,7 +115,7 @@ export function groupSessionsByProject(
 ): ProjectGroup[] {
   const map = new Map<string, SessionRecord[]>();
   for (const s of catalog) {
-    const key = s.workspace || "(no project)";
+    const key = s.workspace || NO_PROJECT_KEY;
     const list = map.get(key) ?? [];
     list.push(s);
     map.set(key, list);

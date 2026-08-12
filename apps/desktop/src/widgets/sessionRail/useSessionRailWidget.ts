@@ -14,6 +14,7 @@ import {
   loadSessionRailPrefs,
   moveSessionIdInOrder,
   orderGroupsBySessionPin,
+  orderSessionsByPin,
   saveSessionRailPrefs,
   toggleCollapsedWorkspace,
   togglePinnedSession,
@@ -21,7 +22,9 @@ import {
 } from "@/lib/sessionRailPrefs";
 import { filterCatalogForSessionRail } from "@/lib/sessionActions";
 import {
+  NO_PROJECT_KEY,
   groupSessionsByProject,
+  splitNoProjectSessions,
   type SessionRecord,
 } from "@/store/sessionCatalog";
 import { useSessionStore } from "@/store/sessionStore";
@@ -94,14 +97,22 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
    * Subagents and empty (no-message / untitled) drafts are stripped by
    * {@link filterCatalogForSessionRail} so the list only shows real chats.
    */
-  const groups = useMemo(() => {
+  const { groups, noProjectSessions } = useMemo(() => {
     const filtered = filterCatalogForSessionRail(catalog, query);
-    const byProject = groupSessionsByProject(filtered);
-    return orderGroupsBySessionPin(
-      byProject,
-      railPrefs.pinnedSessions,
-      railPrefs.sessionOrderByWorkspace,
-    );
+    // Unfiled chats are their own rail section, never a pseudo folder.
+    const { noProject, withProject } = splitNoProjectSessions(filtered);
+    return {
+      groups: orderGroupsBySessionPin(
+        groupSessionsByProject(withProject),
+        railPrefs.pinnedSessions,
+        railPrefs.sessionOrderByWorkspace,
+      ),
+      noProjectSessions: orderSessionsByPin(
+        noProject,
+        railPrefs.pinnedSessions,
+        railPrefs.sessionOrderByWorkspace[NO_PROJECT_KEY],
+      ),
+    };
   }, [
     catalog,
     query,
@@ -134,9 +145,18 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     );
     return owner?.workspace ?? null;
   }, [groups, selectedId]);
+  /** Same marker for the unfiled section when it holds the viewed chat. */
+  const noProjectActive = useMemo(
+    () =>
+      Boolean(selectedId) &&
+      noProjectSessions.some((s) => s.id === selectedId),
+    [noProjectSessions, selectedId],
+  );
   const live = connectionMode === "live-bridge";
   /** Chats surviving the filter; shown next to the section label while searching. */
-  const matchCount = groups.reduce((n, g) => n + g.sessions.length, 0);
+  const matchCount =
+    groups.reduce((n, g) => n + g.sessions.length, 0) +
+    noProjectSessions.length;
   const searching = query.trim().length > 0;
   /** Sessions with a live process that is actively streaming agent output. */
   const streamingCount = poolEntries.filter(
@@ -307,6 +327,12 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     query,
     setQuery,
     groups,
+    /** Unfiled chats for the standalone "No project" rail section. */
+    noProjectSessions,
+    /** Whether the viewed chat lives in that section. */
+    noProjectActive,
+    /** Shared prefs key for its collapse / preview / drag order. */
+    noProjectKey: NO_PROJECT_KEY,
     matchCount,
     searching,
     streamingCount,

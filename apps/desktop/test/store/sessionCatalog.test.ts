@@ -13,14 +13,17 @@ import {
   formatRelativeTime,
   groupSessionsByProject,
   groupSessionsByTime,
+  isNoProjectSession,
   isWeakSessionTitle,
   pickSessionTitle,
   projectNameFromWorkspace,
   pruneEmptyWeakSessions,
   rehydrateCatalogTitles,
   resolveCatalogUpdatedAt,
+  splitNoProjectSessions,
   timeBucketFor,
   upsertFromLiveState,
+  type SessionRecord,
 } from "@/store/sessionCatalog";
 
 describe("sessionCatalog", () => {
@@ -590,6 +593,88 @@ describe("sessionCatalog", () => {
       groups[0]?.sessions.map((s) => s.id),
       ["a", "a2"],
     );
+  });
+
+  it("splitNoProjectSessions pulls unfiled chats out of the project tree", () => {
+    /**
+     * Row builder for split tests.
+     * @param partial Id plus the fields the case cares about.
+     */
+    const rec = (
+      partial: Partial<SessionRecord> & Pick<SessionRecord, "id">,
+    ): SessionRecord => ({
+      id: partial.id,
+      workspace: partial.workspace ?? "",
+      title: partial.title ?? partial.id,
+      mode: "build",
+      model: "m",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: partial.updatedAt ?? 1,
+      timeline: [],
+      toolCalls: {},
+      lastAgentText: "",
+      noProject: partial.noProject,
+    });
+
+    // Sticky marker wins over the workspace path: on disk a no-project chat
+    // sits under the bridge cwd, so the path alone cannot be trusted.
+    const marked = rec({
+      id: "marked",
+      workspace: "/bridge/cwd",
+      noProject: true,
+      updatedAt: 100,
+    });
+    const legacy = rec({ id: "legacy", workspace: "", updatedAt: 300 });
+    const filed = rec({ id: "filed", workspace: "/proj/demo" });
+    const { noProject, withProject } = splitNoProjectSessions([
+      marked,
+      legacy,
+      filed,
+    ]);
+    assert.equal(isNoProjectSession(marked), true);
+    assert.equal(isNoProjectSession(filed), false);
+    // Newest first inside the section.
+    assert.deepEqual(
+      noProject.map((s) => s.id),
+      ["legacy", "marked"],
+    );
+    assert.deepEqual(
+      withProject.map((s) => s.id),
+      ["filed"],
+    );
+    // Grouping the remainder must not resurrect a "(no project)" folder.
+    assert.deepEqual(
+      groupSessionsByProject(withProject).map((g) => g.workspace),
+      ["/proj/demo"],
+    );
+  });
+
+  it("upsertFromLiveState marks new no-workspace rows and keeps the mark", () => {
+    const loose = createSessionState({ id: "loose", workspace: "" });
+    let cat = upsertFromLiveState([], loose, 1000);
+    assert.equal(cat[0]?.noProject, true);
+
+    // Bridge later reports its own resolved cwd — the row stays unfiled.
+    const resolved = createSessionState({
+      id: "loose",
+      workspace: "/bridge/cwd",
+    });
+    cat = upsertFromLiveState(cat, resolved, 2000);
+    assert.equal(cat[0]?.noProject, true);
+
+    // A real project chat is never marked, even while the masking pref is on
+    // and a later snapshot arrives with an empty workspace.
+    const filed = createSessionState({ id: "filed", workspace: "/proj/demo" });
+    let filedCat = upsertFromLiveState([], filed, 1000);
+    assert.equal(filedCat[0]?.noProject, undefined);
+    filedCat = upsertFromLiveState(
+      filedCat,
+      createSessionState({ id: "filed", workspace: "" }),
+      2000,
+    );
+    assert.equal(filedCat[0]?.noProject, undefined);
+    assert.equal(filedCat[0]?.workspace, "/proj/demo");
   });
 
   it("groupSessionsByTime buckets Today / Yesterday / Earlier", () => {

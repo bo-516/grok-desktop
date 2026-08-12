@@ -12,6 +12,7 @@ export type {
   TimeGroup,
 } from "./sessionCatalogTypes";
 export {
+  NO_PROJECT_KEY,
   SESSION_STORAGE_KEY,
   extractTitleFromTimeline,
   fallbackSessionLabel,
@@ -28,7 +29,9 @@ export {
   formatRelativeTime,
   groupSessionsByProject,
   groupSessionsByTime,
+  isNoProjectSession,
   projectNameFromWorkspace,
+  splitNoProjectSessions,
   timeBucketFor,
 } from "./sessionCatalogGroup";
 export {
