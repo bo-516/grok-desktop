@@ -141,6 +141,14 @@ export type SessionStore = {
     count: number;
     error?: string;
   }>;
+  /**
+   * Fork the open session into a peer, show thinking while the RPC runs, then
+   * switch the canvas to the forked branch (`newSessionId`).
+   * @param opts Optional child workspace (worktree path); default = parent cwd.
+   */
+  forkSession: (opts?: {
+    newCwd?: string;
+  }) => Promise<{ ok: true; newSessionId: string } | { ok: false; error: string }>;
   /** Restart session process with new SPAWN config + session/load. */
   restartWithSpawn: (spawnConfig: Record<string, unknown>) => boolean;
   disconnect: () => void;

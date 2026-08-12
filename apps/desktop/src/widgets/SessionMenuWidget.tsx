@@ -1,11 +1,11 @@
 /**
  * Stateful session ⋯ menu: session-only ops (+ narrow New chat / ⌘K fallbacks).
- * Drawer / theme / slash media live in sidebar footer and command palette.
+ * Fork uses the structured store RPC (thinking strip → switch to child branch);
+ * drawer / theme / slash media live in sidebar footer and command palette.
  */
 
 import { useState } from "react";
 import { useSessionStore } from "../store/sessionStore";
-import { buildForkCommand } from "../lib/sessionActions";
 import {
   SessionActionsMenuView,
   type SessionMenuActionId,
@@ -42,10 +42,10 @@ export type SessionMenuWidgetProps = {
 export function SessionMenuWidget(props: SessionMenuWidgetProps) {
   const session = useSessionStore((s) => s.session);
   const catalog = useSessionStore((s) => s.catalog);
-  const sendPrompt = useSessionStore((s) => s.sendPrompt);
   const selectSession = useSessionStore((s) => s.selectSession);
   const newSession = useSessionStore((s) => s.newSession);
   const syncRemoteSessions = useSessionStore((s) => s.syncRemoteSessions);
+  const forkSession = useSessionStore((s) => s.forkSession);
   const [open, setOpen] = useState(false);
 
   /**
@@ -55,7 +55,8 @@ export function SessionMenuWidget(props: SessionMenuWidgetProps) {
   const runSessionMenuAction = (id: SessionMenuActionId) => {
     setOpen(false);
     if (id === "fork") {
-      void sendPrompt(buildForkCommand());
+      // Thinking strip while RPC runs, then canvas switches to the forked branch.
+      void forkSession();
       return;
     }
     if (id === "rewind") {

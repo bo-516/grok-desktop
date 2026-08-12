@@ -42,6 +42,7 @@ import {
   selectSessionAction,
   setWorkspaceAction,
 } from "./sessionStoreNavigation";
+import { forkSessionAction } from "./sessionStoreFork";
 
 export type {
   ConnectionMode,
@@ -175,6 +176,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     return syncCatalogFromBridge(live, set, get);
   },
+
+  forkSession: async (opts) => forkSessionAction(set, get, opts),
 
   restartWithSpawn: (spawnConfig) => {
     const live = get().live;

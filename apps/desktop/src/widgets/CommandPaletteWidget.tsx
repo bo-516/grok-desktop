@@ -35,6 +35,7 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
   const selectSession = useSessionStore((s) => s.selectSession);
   const newSession = useSessionStore((s) => s.newSession);
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
+  const forkSession = useSessionStore((s) => s.forkSession);
   const runCli = useSessionStore((s) => s.runCli);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -142,7 +143,12 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
       prefillComposer("/imagine-video ");
       return;
     }
-    // Fire-and-forget slash (usage, privacy, compact, fork, …)
+    // Fork is a structured RPC: thinking strip then switch to the child branch.
+    if (item.kind === "command" && item.runValue === "fork") {
+      void forkSession();
+      return;
+    }
+    // Fire-and-forget slash (usage, privacy, compact, …)
     if (item.kind === "command" && item.runValue) {
       await sendPrompt(`/${item.runValue}`);
     }

@@ -104,6 +104,16 @@ export function connectLiveBridge(
   setModel: (modelId: string, sessionId?: string) => boolean;
   setMode: (modeId: string, sessionId?: string) => boolean;
   compact: (instruction?: string, sessionId?: string) => boolean;
+  /**
+   * Branch the session into a peer (`_x.ai/session/fork` via bridge).
+   * @param sessionId Source session; omit to use the focused bridge session.
+   * @param opts Optional source/new cwd overrides.
+   * @returns cli_result envelope; `data` holds `{ newSessionId, … }` on success.
+   */
+  forkSession: (
+    sessionId?: string,
+    opts?: { sourceCwd?: string; newCwd?: string },
+  ) => Promise<CliChannelResult>;
   restartSession: (
     sessionId: string,
     spawnConfig?: SessionSpawnConfig,
@@ -273,6 +283,36 @@ export function connectLiveBridge(
       send({ type: "set_mode", modeId, sessionId }),
     compact: (instruction, sessionId) =>
       send({ type: "compact", instruction, sessionId }),
+    /**
+     * Fork via bridge `fork_session` (reuses the CLI requestId correlation path).
+     * @param sessionId Source session id.
+     * @param opts Optional cwd overrides for same-folder vs worktree forks.
+     */
+    forkSession: (sessionId, opts) => {
+      cliRequestState.sequence += 1;
+      const requestId = `fork-${cliRequestState.sequence}`;
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingCli.delete(requestId);
+          reject(new Error("fork_session timed out"));
+        }, 120_000);
+        pendingCli.set(requestId, { resolve, reject, timeout });
+        if (
+          send({
+            type: "fork_session",
+            requestId,
+            sessionId,
+            sourceCwd: opts?.sourceCwd,
+            newCwd: opts?.newCwd,
+          })
+        ) {
+          return;
+        }
+        clearTimeout(timeout);
+        pendingCli.delete(requestId);
+        reject(new Error("Bridge WebSocket is not connected"));
+      });
+    },
     restartSession: (sessionId, spawnConfig, alwaysApprove) =>
       send({
         type: "restart_session",
