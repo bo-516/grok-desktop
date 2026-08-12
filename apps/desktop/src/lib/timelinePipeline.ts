@@ -1,9 +1,10 @@
 /**
- * Single compose for tools → thoughts → turns grouping.
- * Timeline UI and change-set turn indexing must call this (not hand-nest the three).
+ * Single compose for tools → subagents → thoughts → turns grouping.
+ * Timeline UI and change-set turn indexing must call this (not hand-nest the four).
  */
 
 import type { TimelineItem, ToolCallCard } from "@grok-desktop/acp-core";
+import { groupTimelineSubagents } from "./subagentGrouping";
 import { groupTimelineThoughts } from "./thoughtGrouping";
 import { groupTimelineTools } from "./toolGrouping";
 import {
@@ -13,9 +14,10 @@ import {
 
 /**
  * Build top-level render units for the chat canvas / turn index.
- * Order is fixed: collapsible tools, then consecutive thoughts, then turns.
+ * Order is fixed: collapsible tools, spawn fan-out groups, consecutive
+ * thoughts, then turns.
  * @param timeline Ordered session items (may be empty).
- * @param toolCalls Session tool-call map (kinds for tool grouping).
+ * @param toolCalls Session tool-call map (kinds + vendor meta for grouping).
  * @returns User / turn / error units (plus rare residual work units if grouping is bypassed).
  */
 export function buildTimelineRenderUnits(
@@ -23,7 +25,9 @@ export function buildTimelineRenderUnits(
   toolCalls: Record<string, ToolCallCard | undefined>,
 ): TimelineRenderUnitWithTurns[] {
   return groupTimelineTurns(
-    groupTimelineThoughts(groupTimelineTools(timeline, toolCalls)),
+    groupTimelineThoughts(
+      groupTimelineSubagents(groupTimelineTools(timeline, toolCalls), toolCalls),
+    ),
   );
 }
 

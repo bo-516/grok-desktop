@@ -1,10 +1,11 @@
 /**
  * Collapse consecutive thought timeline units for readability (symmetric to toolGrouping).
  * Does not merge across tool / agent / user rows so turn order stays intact.
+ * Accepts subagent_group units from {@link groupTimelineSubagents} and passes them through.
  */
 
 import type { TimelineItem } from "@grok-desktop/acp-core";
-import type { TimelineRenderUnit } from "./toolGrouping";
+import type { SubagentTimelineUnit } from "./subagentGrouping";
 
 export type ThoughtItem = Extract<TimelineItem, { kind: "thought" }>;
 
@@ -23,17 +24,17 @@ export type ThoughtGroupUnit = {
 };
 
 export type TimelineRenderUnitWithThoughts =
-  | TimelineRenderUnit
+  | SubagentTimelineUnit
   | ThoughtGroupUnit;
 
 /**
- * Group consecutive thought items in an already tool-grouped unit list.
+ * Group consecutive thought items in an already tool/subagent-grouped unit list.
  * Single thoughts stay as `{ type: "item" }`; two or more adjacent become one thought_group.
- * @param units Output of {@link groupTimelineTools} (or any unit list with item/tool_group).
+ * @param units Output of {@link groupTimelineSubagents} (item / tool_group / subagent_group).
  * @returns Units with adjacent thoughts collapsed; non-thought units unchanged and never crossed.
  */
 export function groupTimelineThoughts(
-  units: TimelineRenderUnit[],
+  units: SubagentTimelineUnit[],
 ): TimelineRenderUnitWithThoughts[] {
   const out: TimelineRenderUnitWithThoughts[] = [];
   let i = 0;

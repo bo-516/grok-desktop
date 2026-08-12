@@ -10,6 +10,7 @@ import { useState } from "react";
 import type { SessionStatus, ToolCallCard } from "@grok-desktop/acp-core";
 import type { TurnActivityChild } from "@/lib/turnGrouping";
 import { CollapsibleStepView } from "@/widgets/shared";
+import { SubagentGroupWidget } from "./SubagentGroupWidget";
 import { ThoughtGroupView } from "./ThoughtGroupView";
 import { ThoughtWidget } from "./ThoughtWidget";
 import { ToolCardView } from "./ToolCardView";
@@ -26,7 +27,7 @@ type TurnStepViewProps = {
 
 /**
  * Renders one rail step with turn-step geometry (no nested shell-toggle header
- * for narration; thought/tool widgets keep their own expand chrome).
+ * for narration; thought/tool/subagent widgets keep their own expand chrome).
  * @param props Child unit plus session/tool context and optional active flag.
  * @returns listitem row for the activity rail.
  */
@@ -45,6 +46,15 @@ export function TurnStepView(props: TurnStepViewProps) {
           toolCalls={toolCalls}
         />
       </div>
+    );
+  }
+  if (child.type === "subagent_group") {
+    return (
+      <SubagentGroupWidget
+        unit={child}
+        toolCalls={toolCalls}
+        active={active}
+      />
     );
   }
   if (child.type === "thought_group") {

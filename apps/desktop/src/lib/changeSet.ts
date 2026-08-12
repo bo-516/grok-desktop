@@ -313,9 +313,12 @@ export function buildSessionChangeSet(
 export function collectToolCallIdsFromTurn(unit: TurnUnit): string[] {
   const ids: string[] = [];
   for (const child of unit.activity) {
-    if (child.type === "tool_group") {
+    if (child.type === "tool_group" || child.type === "subagent_group") {
       for (const id of child.toolCallIds) {
         ids.push(id);
+      }
+      if (child.type === "subagent_group" && child.waitToolCallId) {
+        ids.push(child.waitToolCallId);
       }
       continue;
     }

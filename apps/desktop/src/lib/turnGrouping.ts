@@ -52,12 +52,16 @@ export type TimelineRenderUnitWithTurns =
 /**
  * True when a unit is work or mid-turn narration that belongs inside a turn.
  * User and error rows are turn boundaries (never children).
- * @param unit Output of thought grouping (item / tool_group / thought_group).
+ * @param unit Output of thought grouping (item / tool_group / thought_group / subagent_group).
  */
 export function isTurnMemberUnit(
   unit: TimelineRenderUnitWithThoughts,
 ): boolean {
-  if (unit.type === "tool_group" || unit.type === "thought_group") {
+  if (
+    unit.type === "tool_group" ||
+    unit.type === "thought_group" ||
+    unit.type === "subagent_group"
+  ) {
     return true;
   }
   const kind = unit.item.kind;
@@ -70,7 +74,11 @@ export function isTurnMemberUnit(
  * @param unit Any thought-grouped unit.
  */
 export function isWorkUnit(unit: TimelineRenderUnitWithThoughts): boolean {
-  if (unit.type === "tool_group" || unit.type === "thought_group") {
+  if (
+    unit.type === "tool_group" ||
+    unit.type === "thought_group" ||
+    unit.type === "subagent_group"
+  ) {
     return true;
   }
   return unit.item.kind === "thought" || unit.item.kind === "tool";

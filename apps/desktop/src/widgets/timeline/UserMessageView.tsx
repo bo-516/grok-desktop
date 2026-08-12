@@ -28,8 +28,6 @@ import { ImageLightboxView, MentionTextView } from "@/widgets/shared";
 export type UserMessageViewProps = {
   /** User row blocks from appendUserPrompt / seed / agent echo. */
   blocks: ContentBlock[];
-  /** Find-in-timeline highlight on the text bubble. */
-  highlight?: boolean;
 };
 
 /**
@@ -49,10 +47,10 @@ function toAttachment(img: UserImageBlock, index: number): ImageAttachment {
 
 /**
  * Right-aligned user turn: optional image strip above text bubble.
- * @param props Blocks + optional find highlight; empty text+images → null.
+ * @param props Blocks; empty text+images → null.
  */
 export function UserMessageView(props: UserMessageViewProps) {
-  const { blocks, highlight = false } = props;
+  const { blocks } = props;
   const rawText = userTextFromBlocks(blocks);
   /**
    * Agent history may keep only `[Image #N]` stand-ins when binary blocks were
@@ -215,11 +213,7 @@ export function UserMessageView(props: UserMessageViewProps) {
         </ul>
       ) : null}
       {hasText ? (
-        <div
-          className="item-user"
-          data-kind="user"
-          data-find-hit={highlight ? "1" : undefined}
-        >
+        <div className="item-user" data-kind="user">
           {/* Sent text uses the same accent spans as the composer mirror so
               history matches the draft (no icon pill). Placeholders stripped. */}
           <MentionTextView text={text} />

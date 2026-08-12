@@ -11,6 +11,11 @@
  *
  * Links open outside the shell via {@link openExternalUrl} (Wails system browser /
  * Vite new tab) — bare target=_blank is a no-op inside the desktop webview.
+ *
+ * Thematic breaks (`---` / `***` / `___` → `<hr class="md-hr">`): currently
+ * `hidden` on the `md-hr` Uno shortcut so agent separators do not read as shell
+ * chrome. If that later feels wrong (e.g. real section rules are wanted), drop
+ * only the `hidden` token from `md-hr` in `uno/shortcuts.timeline.ts`.
  */
 
 import type { HTMLAttributes, MouseEvent, ReactNode } from "react";

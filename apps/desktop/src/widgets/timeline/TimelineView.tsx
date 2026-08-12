@@ -16,7 +16,6 @@ import type {
   ToolCallCard,
 } from "@grok-desktop/acp-core";
 import { timelineRenderUnitKey } from "@/lib/timelinePipeline";
-import type { TimelineSearchHit } from "@/lib/timelineSearch";
 import type {
   isTurnLive as isTurnLiveFn,
   TimelineRenderUnitWithTurns,
@@ -44,16 +43,8 @@ export type TimelineViewProps = {
   seededUnitKeys: ReadonlySet<string>;
   isRestoring: boolean;
   isEmpty: boolean;
-  findOpen: boolean;
-  findQuery: string;
-  findIndex: number;
-  hits: TimelineSearchHit[];
-  activeHit: TimelineSearchHit | undefined;
   scrollRef: RefObject<HTMLDivElement | null>;
   handleScroll: (event: UIEvent<HTMLDivElement>) => void;
-  setFindOpen: (open: boolean) => void;
-  setFindQuery: (query: string) => void;
-  setFindIndex: (updater: number | ((i: number) => number)) => void;
   /** Bound isTurnLive from turnGrouping (injected for pure tests). */
   isTurnLive: typeof isTurnLiveFn;
 };
@@ -72,16 +63,8 @@ export function TimelineView(props: TimelineViewProps) {
     seededUnitKeys,
     isRestoring,
     isEmpty,
-    findOpen,
-    findQuery,
-    findIndex,
-    hits,
-    activeHit,
     scrollRef,
     handleScroll,
-    setFindOpen,
-    setFindQuery,
-    setFindIndex,
     isTurnLive,
   } = props;
 
@@ -129,46 +112,7 @@ export function TimelineView(props: TimelineViewProps) {
       ref={scrollRef}
       data-status={status}
       onScroll={handleScroll}
-      onKeyDown={(e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-          e.preventDefault();
-          setFindOpen(true);
-        }
-      }}
-      tabIndex={-1}
     >
-      {findOpen ? (
-        <div className="timeline-find" role="search">
-          <input
-            className="text-input"
-            autoFocus
-            placeholder="Find in conversation"
-            value={findQuery}
-            onChange={(e) => {
-              setFindQuery(e.target.value);
-              setFindIndex(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setFindOpen(false);
-              }
-              if (e.key === "Enter" && hits.length > 0) {
-                setFindIndex((i) => (i + 1) % hits.length);
-              }
-            }}
-          />
-          <span className="timeline-find-count">
-            {hits.length === 0 ? "0" : `${findIndex + 1}/${hits.length}`}
-          </span>
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => setFindOpen(false)}
-          >
-            Close
-          </button>
-        </div>
-      ) : null}
       {units.map((unit, unitIndex) => {
         const unitKey = timelineRenderUnitKey(unit);
         // History restored by a rail click paints instantly; only content that
@@ -181,8 +125,6 @@ export function TimelineView(props: TimelineViewProps) {
             answerId !== undefined &&
             timeline[timeline.length - 1]?.id === answerId;
           const answerShowCursor = status === "streaming" && isLastAnswer;
-          const answerHighlight =
-            answerId !== undefined && activeHit?.itemId === answerId;
           // One FadeContent per turn so rail repartition does not re-enter every step.
           return (
             <FadeContent
@@ -197,7 +139,6 @@ export function TimelineView(props: TimelineViewProps) {
                 sessionStatus={status}
                 toolCalls={toolCalls}
                 answerShowCursor={answerShowCursor}
-                answerHighlight={answerHighlight}
               />
             </FadeContent>
           );
@@ -205,11 +146,10 @@ export function TimelineView(props: TimelineViewProps) {
         // User / error stay top-level; residual work units share TurnStepView.
         if (unit.type === "item") {
           const item = unit.item;
-          const highlight = activeHit?.itemId === item.id;
           if (item.kind === "user") {
             return (
               <FadeContent key={unitKey} durationMs={320} immediate={seeded}>
-                <UserMessageView blocks={item.blocks} highlight={highlight} />
+                <UserMessageView blocks={item.blocks} />
               </FadeContent>
             );
           }

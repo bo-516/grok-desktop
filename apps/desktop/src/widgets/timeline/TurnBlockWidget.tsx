@@ -40,8 +40,6 @@ type TurnBlockWidgetProps = {
   toolCalls: Record<string, ToolCallCard | undefined>;
   /** True when the answer item is the last timeline agent and session is streaming. */
   answerShowCursor?: boolean;
-  /** Optional find highlight for the answer body. */
-  answerHighlight?: boolean;
   /** When true, done label uses Stopped-style wording. */
   cancelled?: boolean;
 };
@@ -59,7 +57,6 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
     sessionStatus,
     toolCalls,
     answerShowCursor = false,
-    answerHighlight = false,
     cancelled = false,
   } = props;
   const openPreview = usePreviewStore((s) => s.openPreview);
@@ -185,7 +182,6 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
         <TurnAnswerView
           text={unit.answer.item.text}
           showCursor={answerShowCursor}
-          highlight={answerHighlight}
         />
       ) : null}
     </div>

@@ -137,6 +137,29 @@ export const timelineShortcuts: Record<string, string> = {
     /* Hint text drops first on narrow columns; the kbd chip carries the meaning. */
     "turn-status-hint": "text-10px leading-4 text-fg-faint max-[520px]:hidden",
     "thought-group-segments": "flex flex-col gap-1.5 mt-1",
+
+    /* L1 inline subagent fan-out group inside the turn rail */
+    "subagent-group": "w-full max-w-full",
+    "subagent-group-body": "flex flex-col gap-1 mt-1 pl-0.5",
+    "subagent-step":
+      "flex flex-col gap-0.5 w-full min-w-0",
+    "subagent-step-openable": "",
+    "subagent-step-main":
+      "flex items-center gap-1.5 w-full min-w-0 text-left text-11px leading-snug text-fg-secondary",
+    "subagent-step-label": "min-w-0 flex-1 truncate text-fg",
+    "subagent-step-meta": "shrink-0 text-10px text-fg-muted tabular-nums",
+    "subagent-step-output-toggle":
+      "self-start text-10px text-fg-muted px-1 py-0.5",
+    "subagent-step-output":
+      "mt-1 max-h-48 overflow-y-auto text-12px text-fg-secondary",
+    "tool-status-dot":
+      "inline-block w-1.5 h-1.5 rounded-full shrink-0",
+    "tool-status-completed": "bg-success",
+    "tool-status-failed": "bg-danger",
+    "tool-status-in_progress": "bg-primary",
+    "tool-status-pending": "bg-fg-faint",
+    "top-nav-back-btn":
+      "shrink-0 text-11px text-fg-secondary px-1.5 py-0.5",
     "item-tool":
       "max-w-full bg-white-faint border-none rounded-shell px-3 py-2.5",
     "item-error":
@@ -226,8 +249,10 @@ export const timelineShortcuts: Record<string, string> = {
     "md-list":
       "m-0 pl-[1.45em] [&>li]:my-[0.28em] [&>li]:marker:text-fg-muted [&_ul]:mt-[0.28em] [&_ol]:mt-[0.28em]",
     "md-list-ordered": "list-decimal",
+    /* Slightly under body size so mono stays readable without dominating the line;
+     * padding is in em of the chip font so the pill tracks the size bump. */
     "md-inline-code":
-      "font-mono text-[0.88em] px-[0.4em] py-[0.12em] rounded-1.5 bg-white-faint text-fg",
+      "font-mono text-[0.93em] px-[0.42em] py-[0.14em] rounded-1.5 bg-white-faint text-fg",
     "md-pre":
       "m-0 px-3.5 py-3 overflow-x-auto rounded-shell bg-white-faint font-mono text-12px leading-relaxed text-fg [&>code]:(font-inherit whitespace-pre)",
     "md-link":
@@ -235,10 +260,10 @@ export const timelineShortcuts: Record<string, string> = {
     /* mx-0 kills the UA `margin-inline: 40px` that pushed quotes off the text column. */
     "md-blockquote":
       "m-0 pl-[0.9em] border-l-2 border-line-strong text-fg-secondary",
-    /* Thematic breaks keep vertical air only — no painted rule.
-     * Full-width hairlines are reserved for the Worked-for shell-toggle header;
-     * agent answers often emit `---` and those must not read as chrome. */
-    "md-hr": "mx-0 my-[0.55em] h-0 border-none",
+    /* Thematic breaks: fully hidden for now (agent `---` must not read as shell
+     * chrome). If product later wants real section rules, delete only `hidden`
+     * below — the rest already keeps height 0 / no border as a soft fallback. */
+    "md-hr": "hidden mx-0 my-[0.55em] h-0 border-none",
     "md-del": "text-fg-muted line-through",
     "md-img": "m-0 max-w-full h-auto rounded-soft",
     /* GFM tables — frame lives on the wrapper so the radius clips the corners

@@ -1,22 +1,21 @@
 /**
  * Unified entry hook for the chat timeline surface.
- * Owns session-store selects, find-in-conversation state, stick-to-bottom, and
- * derived render units. Presentation lives in TimelineView (pure).
+ * Owns session-store selects, stick-to-bottom, and derived render units.
+ * Presentation lives in TimelineView (pure).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { ToolCallCard } from "@grok-desktop/acp-core";
 import { timelineContentKey } from "@/lib/timelineContentKey";
 import { buildTimelineRenderUnits } from "@/lib/timelinePipeline";
-import { searchTimeline } from "@/lib/timelineSearch";
 import { isTurnLive } from "@/lib/turnGrouping";
 import { useSessionStore } from "@/store/sessionStore";
 import { useTimelineEntranceBaseline } from "./useTimelineEntranceBaseline";
 import { useTimelineStickToBottom } from "./useTimelineStickToBottom";
 
 /**
- * Timeline orchestration: store + find + scroll + grouped units.
- * @returns Props bundle for {@link TimelineView} plus scroll/find handlers.
+ * Timeline orchestration: store + scroll + grouped units.
+ * @returns Props bundle for {@link TimelineView} plus scroll handlers.
  */
 export function useTimelineWidget() {
   const timeline = useSessionStore((s) => s.session.timeline);
@@ -27,17 +26,10 @@ export function useTimelineWidget() {
     (s) => s.viewingSessionId ?? s.session.id ?? s.activeSessionId,
   );
   const restoringSessionId = useSessionStore((s) => s.restoringSessionId);
-  const [findOpen, setFindOpen] = useState(false);
-  const [findQuery, setFindQuery] = useState("");
-  const [findIndex, setFindIndex] = useState(0);
 
   const units = useMemo(
     () => buildTimelineRenderUnits(timeline, toolCalls),
     [timeline, toolCalls],
-  );
-  const hits = useMemo(
-    () => searchTimeline(timeline, findQuery),
-    [timeline, findQuery],
   );
   const toolStatusSig = useMemo(
     () =>
@@ -63,19 +55,6 @@ export function useTimelineWidget() {
     restoringSessionId,
   );
 
-  // ⌘F conversation search (F-STREAM-14)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        setFindOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  const activeHit = hits[findIndex];
   const isRestoring =
     timeline.length === 0 && restoringSessionId === sessionId;
   const isEmpty = timeline.length === 0;
@@ -88,16 +67,8 @@ export function useTimelineWidget() {
     seededUnitKeys,
     isRestoring,
     isEmpty,
-    findOpen,
-    findQuery,
-    findIndex,
-    hits,
-    activeHit,
     scrollRef,
     handleScroll,
-    setFindOpen,
-    setFindQuery,
-    setFindIndex,
     isTurnLive,
   };
 }

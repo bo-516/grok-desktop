@@ -14,6 +14,8 @@ export { TurnStepView } from "./TurnStepView";
 export { TurnAnswerView } from "./TurnAnswerView";
 export type { TurnAnswerViewProps } from "./TurnAnswerView";
 export { ToolCardView } from "./ToolCardView";
+export { SubagentGroupWidget } from "./SubagentGroupWidget";
+export { SubagentStepView } from "./SubagentStepView";
 export { EditSummaryRowView } from "./EditSummaryRowView";
 export type { EditSummaryRowViewProps } from "./EditSummaryRowView";
 export { ToolLocationListView } from "./ToolLocationListView";
