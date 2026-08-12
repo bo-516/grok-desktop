@@ -1,0 +1,16 @@
+[
+  {
+    "name": "local-fs",
+    "transport": "stdio",
+    "target": "npx -y @modelcontextprotocol/server-filesystem /home/u/proj",
+    "enabled": true,
+    "scope": "project",
+    "env": {
+      "API_KEY": "secret-should-not-leak",
+      "DEBUG": "1"
+    },
+    "headers": {
+      "Authorization": "Bearer secret"
+    }
+  }
+]

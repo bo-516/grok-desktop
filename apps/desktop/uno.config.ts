@@ -169,6 +169,8 @@ export default defineConfig({
       "rail-right": "var(--rail-right-width)",
       "side-panel": "400px",
       palette: "520px",
+      "env-sheet": "960px",
+      "env-nav": "200px",
     },
     height: {
       topnav: "var(--topnav-height)",

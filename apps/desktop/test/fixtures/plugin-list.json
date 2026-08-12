@@ -1,0 +1,11 @@
+[
+  {
+    "status": "installed",
+    "name": "browser-use",
+    "repo_key": "grok-efc2b28e",
+    "version": "0.1.0",
+    "path": "/home/u/.grok/installed-plugins/grok-efc2b28e",
+    "source": "/home/u/.grok/marketplace-cache/ec6e0cda53cc9c87/grok",
+    "marketplace": "plugins"
+  }
+]
