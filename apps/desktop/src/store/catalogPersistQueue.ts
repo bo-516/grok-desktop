@@ -4,6 +4,15 @@
  * so a long session/load replay does not block the main thread with hundreds of
  * synchronous setItem calls. Call flushCatalogNow on visibility hidden,
  * beforeunload, and session switch so the latest snapshot is not lost.
+ *
+ * `enqueueCatalogPersist` NEVER writes synchronously. A full catalog is
+ * JSON.stringify + setItem of megabytes (≈5ms at 450 sessions), and the enqueue
+ * call sites are the interactive ones — first send of a New chat, the forceNew
+ * handshake, every inbound session update. Writing inline put that ~5ms inside
+ * the same task as the store update that starts the send animations, which drops
+ * the frame and shows up as the whole shell (rail included) stuttering. The
+ * write is now always scheduled: tail-throttled onto a timer, then handed to an
+ * idle callback so it lands between frames instead of in front of one.
  */
 
 import {
@@ -25,6 +34,11 @@ export type CatalogPersistClock = {
   setTimeout: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   /** Cancel a pending delayed flush. */
   clearTimeout: (id: ReturnType<typeof setTimeout>) => void;
+  /**
+   * Run the write when the browser is idle. Optional: a clock without it (the
+   * fake clocks in tests) runs the write straight from the throttle timer.
+   */
+  requestIdle?: (fn: () => void) => void;
 };
 
 /** Production clock bound to the real global timers. */
@@ -32,6 +46,25 @@ const defaultClock: CatalogPersistClock = {
   now: () => Date.now(),
   setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
   clearTimeout: (id) => globalThis.clearTimeout(id),
+  /**
+   * `timeout` caps the wait so a busy tab still persists; the setTimeout branch
+   * covers shells without requestIdleCallback (older WKWebView).
+   */
+  requestIdle: (fn) => {
+    const ric = (
+      globalThis as {
+        requestIdleCallback?: (
+          cb: () => void,
+          opts?: { timeout: number },
+        ) => unknown;
+      }
+    ).requestIdleCallback;
+    if (typeof ric === "function") {
+      ric(fn, { timeout: CATALOG_PERSIST_THROTTLE_MS });
+      return;
+    }
+    globalThis.setTimeout(fn, 0);
+  },
 };
 
 /** Active clock; tests may replace via setCatalogPersistClockForTests. */
@@ -42,6 +75,13 @@ let pendingCatalog: SessionRecord[] | null = null;
 
 /** Handle for the scheduled tail flush; null when no timer is armed. */
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * True between the throttle timer firing and the idle write running. Keeps
+ * `enqueueCatalogPersist` from arming a second timer for a write that is
+ * already on its way — the pending catalog is replaced instead.
+ */
+let idleQueued = false;
 
 /**
  * Timestamp of the last successful disk write (ms).
@@ -65,6 +105,7 @@ export function setCatalogPersistClockForTests(
     clock.clearTimeout(pendingTimer);
     pendingTimer = null;
   }
+  idleQueued = false;
   pendingCatalog = null;
   lastWriteAt = -CATALOG_PERSIST_THROTTLE_MS;
   clock = next ?? defaultClock;
@@ -81,6 +122,7 @@ export function flushCatalogNow(catalog?: SessionRecord[]): void {
     clock.clearTimeout(pendingTimer);
     pendingTimer = null;
   }
+  idleQueued = false;
   pendingCatalog = null;
   if (!toWrite) {
     return;
@@ -92,27 +134,34 @@ export function flushCatalogNow(catalog?: SessionRecord[]): void {
 /**
  * Schedule a tail-throttled localStorage write of `catalog`.
  * Multiple calls within CATALOG_PERSIST_THROTTLE_MS keep only the latest catalog.
+ *
+ * Always asynchronous — see the module header: the caller is on the send /
+ * inbound-update path and must not pay for a multi-megabyte serialize.
  * @param catalog Already-normalized records to persist (last write wins).
  */
 export function enqueueCatalogPersist(catalog: SessionRecord[]): void {
   ensurePersistHooks();
   pendingCatalog = catalog;
-  const now = clock.now();
-  const elapsed = now - lastWriteAt;
-  if (elapsed >= CATALOG_PERSIST_THROTTLE_MS && pendingTimer === null) {
-    // Outside the quiet window and nothing scheduled: write immediately.
-    flushCatalogNow(catalog);
+  if (pendingTimer !== null || idleQueued) {
+    // A write is already on its way; pendingCatalog was updated above — last wins.
     return;
   }
-  if (pendingTimer !== null) {
-    // Timer already armed; pendingCatalog was updated above — last wins.
-    return;
-  }
-  // Inside the window: arm a single tail timer for the remaining quiet time.
-  const delay = Math.max(0, CATALOG_PERSIST_THROTTLE_MS - elapsed);
+  // Outside the quiet window the delay is 0, but the write still leaves this
+  // task: the point is to keep it out of the frame that started the update.
+  const delay = Math.max(0, CATALOG_PERSIST_THROTTLE_MS - (clock.now() - lastWriteAt));
   pendingTimer = clock.setTimeout(() => {
     pendingTimer = null;
-    flushCatalogNow();
+    const idle = clock.requestIdle;
+    if (!idle) {
+      flushCatalogNow();
+      return;
+    }
+    idleQueued = true;
+    idle(() => {
+      if (idleQueued) {
+        flushCatalogNow();
+      }
+    });
   }, delay);
 }
 
@@ -148,6 +197,7 @@ export function resetCatalogPersistHooksForTests(): void {
     clock.clearTimeout(pendingTimer);
     pendingTimer = null;
   }
+  idleQueued = false;
   pendingCatalog = null;
   lastWriteAt = -CATALOG_PERSIST_THROTTLE_MS;
 }

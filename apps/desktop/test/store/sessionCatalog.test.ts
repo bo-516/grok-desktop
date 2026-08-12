@@ -38,6 +38,9 @@ describe("sessionCatalog", () => {
     assert.equal(isWeakSessionTitle("Chat 019fd6c4"), true);
     assert.equal(isWeakSessionTitle("(no summary)"), true);
     assert.equal(isWeakSessionTitle("no summary"), true);
+    assert.equal(isWeakSessionTitle("Untitled chat"), true);
+    assert.equal(isWeakSessionTitle("untitled"), true);
+    assert.equal(isWeakSessionTitle("Untitled session"), true);
     assert.equal(
       isWeakSessionTitle("UI UX Design Agent Style Codex Claude"),
       false,

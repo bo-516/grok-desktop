@@ -86,6 +86,9 @@ describe("catalog persist T1/T2", () => {
     const catalog = normalizeCatalog([rec]);
     storage.setItemCalls = 0;
     persistNormalizedCatalog(catalog);
+    // Enqueue is never synchronous (see queue header) — flush to observe it.
+    assert.equal(storage.setItemCalls, 0);
+    flushCatalogNow();
     assert.equal(storage.setItemCalls, 1);
     const parsed = JSON.parse(storage.lastValue ?? "[]") as SessionRecord[];
     assert.equal(parsed[0]?.title, "Chat a");
@@ -168,17 +171,41 @@ describe("catalog persist T1/T2", () => {
       },
     });
     storage.setItemCalls = 0;
-    // First write immediate.
+    // No write inside the caller's task — only a scheduled one.
     enqueueCatalogPersist([sampleRecord("a", 1)]);
-    assert.equal(storage.setItemCalls, 1);
-    // Second within window — pending only.
+    assert.equal(storage.setItemCalls, 0);
+    // Second while the first is still pending — last catalog wins.
     now = 100;
     enqueueCatalogPersist([sampleRecord("a", 2)]);
-    assert.equal(storage.setItemCalls, 1);
+    assert.equal(storage.setItemCalls, 0);
     flushCatalogNow();
-    assert.equal(storage.setItemCalls, 2);
+    assert.equal(storage.setItemCalls, 1);
     const parsed = JSON.parse(storage.lastValue ?? "[]") as SessionRecord[];
     assert.equal(parsed[0]?.updatedAt, 3); // 1+2 from sampleRecord
+  });
+
+  it("发送/新会话路径不做同步落盘(jitter)", () => {
+    // Regression guard: a full catalog serialize inside the enqueue task drops
+    // the frame that starts the send animations (rail + canvas both stutter).
+    let now = 0;
+    const timers: (() => void)[] = [];
+    setCatalogPersistClockForTests({
+      now: () => now,
+      setTimeout: (fn) => {
+        timers.push(fn);
+        return timers.length as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimeout: () => {
+        /* */
+      },
+    });
+    storage.setItemCalls = 0;
+    // Cold queue (outside the throttle window) is the send / forceNew case.
+    enqueueCatalogPersist([sampleRecord("cold", 1)]);
+    assert.equal(storage.setItemCalls, 0, "enqueue must not write inline");
+    assert.equal(timers.length, 1, "write must be scheduled");
+    timers[0]?.();
+    assert.equal(storage.setItemCalls, 1);
   });
 
   it("QuotaExceeded surfaces console.warn", () => {
