@@ -136,6 +136,7 @@ export async function readDiskSessionRow(
   let updatedAt: string | undefined;
   let createdAt: string | undefined;
   let sessionKind: string | undefined;
+  let parentSessionId: string | undefined;
   try {
     const raw = await readFile(path.join(sessionDir, "summary.json"), "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -173,6 +174,16 @@ export async function readDiskSessionRow(
     if (kindRaw) {
       sessionKind = kindRaw;
     }
+    // Peer forks store parent_session_id on summary (not only under subagents/).
+    const parentRaw =
+      typeof parsed.parent_session_id === "string"
+        ? parsed.parent_session_id.trim()
+        : typeof parsed.parentSessionId === "string"
+          ? parsed.parentSessionId.trim()
+          : "";
+    if (parentRaw) {
+      parentSessionId = parentRaw;
+    }
   } catch {
     // summary optional — still list the folder when mtime is available
   }
@@ -194,6 +205,7 @@ export async function readDiskSessionRow(
     updatedAt,
     createdAt,
     sessionKind,
+    parentSessionId,
   };
 }
 
@@ -262,8 +274,9 @@ export async function listSessionsFromDisk(opts: {
   }
 
   for (const row of rows) {
+    // Subagent meta index fills parent when summary omitted it.
     const parentId = parentByChild.get(row.id);
-    if (parentId) {
+    if (parentId && !row.parentSessionId) {
       row.parentSessionId = parentId;
     }
   }

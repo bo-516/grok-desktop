@@ -26,6 +26,7 @@ import {
   handleCli,
   handleSetMode,
   handleSetModel,
+  handleForkSession,
   handleTokenUsage,
   type SessionOpDeps,
 } from "./wsSessionOps.js";
@@ -234,6 +235,17 @@ export async function dispatchClientMsg(
   }
   if (msg.type === "token_usage") {
     await handleTokenUsage(opDeps, ws, msg.sessionId, msg.requestId);
+    return;
+  }
+  if (msg.type === "fork_session") {
+    await handleForkSession(
+      opDeps,
+      ws,
+      msg.sessionId,
+      msg.requestId,
+      msg.sourceCwd,
+      msg.newCwd,
+    );
     return;
   }
   if (msg.type === "restart_session") {

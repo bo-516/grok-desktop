@@ -109,6 +109,19 @@ export type ClientMsg =
   | { type: "set_mode"; sessionId?: string; modeId: string }
   | { type: "compact"; sessionId?: string; instruction?: string }
   | { type: "token_usage"; sessionId?: string; requestId: string }
+  /**
+   * Fork the source session into a peer (`_x.ai/session/fork`).
+   * Replies on `cli_result` with `{ newSessionId, … }`.
+   */
+  | {
+      type: "fork_session";
+      requestId: string;
+      sessionId?: string;
+      /** Source workspace; defaults to the runtime cwd when omitted. */
+      sourceCwd?: string;
+      /** Child workspace; defaults to sourceCwd (same-folder fork). */
+      newCwd?: string;
+    }
   /** Restart process with new SPAWN config + session/load (J-06). */
   | {
       type: "restart_session";
@@ -144,10 +157,66 @@ export type ClientMsg =
         | "plugin"
         | "marketplace"
         | "mcp_stderr_log"
-        | "import_claude";
+        | "import_claude"
+        | "prompts_get"
+        | "prompts_set"
+        | "prompts_clear"
+        | "prompts_move";
       args?: Record<string, unknown>;
       cwd?: string;
     };
+
+/** Which layer a prompt entry lives in; also selects the on-disk file. */
+export type PromptScope = "global" | "project" | "projectLocal";
+
+/** Optional bucket used only to render override badges across scopes. */
+export type PromptCategory =
+  | "language"
+  | "name"
+  | "style"
+  | "workflow"
+  | "custom";
+
+/** One user-authored instruction line. */
+export type PromptEntry = {
+  /** Client-side identity for list keys / drag; NOT persisted to disk. */
+  id: string;
+  /** Single-line instruction text, already normalized. */
+  text: string;
+  /** false renders the entry but keeps it out of the model's active lines. */
+  enabled: boolean;
+  /** Optional; omitted when the user did not pick one. */
+  category?: PromptCategory;
+};
+
+/** One scope's on-disk state as read back by the bridge. */
+export type PromptScopeState = {
+  scope: PromptScope;
+  /** Absolute path the bridge would write; present even when the file is absent. */
+  path: string;
+  /** false when the file does not exist yet. */
+  exists: boolean;
+  /**
+   * true when the file exists but is NOT ours (no managed marker).
+   * UI must render read-only + "外部文件" and disable editing for this scope.
+   */
+  foreign: boolean;
+  entries: PromptEntry[];
+  bytes: number;
+};
+
+/** Reply of prompts_get. */
+export type PromptsSnapshot = {
+  /** Resolved once per call so the UI can show it in the section header. */
+  projectRoot: string | null;
+  /** true when projectRoot is a git repo (drives the "会进 git" badge). */
+  gitRepo: boolean;
+  /** true when .git/info/exclude already hides *.local.md. */
+  localExcluded: boolean;
+  global: PromptScopeState;
+  project: PromptScopeState;
+  projectLocal: PromptScopeState;
+};
 
 /** bridge → browser. */
 export type ServerMsg =

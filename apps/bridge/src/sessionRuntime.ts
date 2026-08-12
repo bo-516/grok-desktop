@@ -114,7 +114,8 @@ export function buildSpawnExtraArgs(
   if (cfg?.noSubagents) {
     args.push("--no-subagents");
   }
-  if (cfg?.rules) {
+  // Whitespace-only rules are not useful and must not emit a bare/empty --rules.
+  if (cfg?.rules && cfg.rules.trim()) {
     args.push("--rules", cfg.rules);
   }
   if (cfg?.disableWebSearch) {
@@ -285,6 +286,15 @@ export async function createSessionRuntime(
         await client.compact(sessionId, instruction);
       },
       tokenUsage: async () => client.tokenUsage(sessionId),
+      forkSession: async (opts) => {
+        const sourceCwd = (opts?.sourceCwd ?? cwd).trim() || cwd;
+        const newCwd = (opts?.newCwd ?? sourceCwd).trim() || sourceCwd;
+        return client.forkSession({
+          sourceSessionId: sessionId,
+          sourceCwd,
+          newCwd,
+        });
+      },
       dispose,
     };
     return runtime;

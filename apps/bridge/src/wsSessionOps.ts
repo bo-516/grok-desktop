@@ -9,12 +9,16 @@ import { dispatchCliCommand } from "./cliDispatch.js";
 import type { ClientMsg, ServerMsg } from "./protocol.js";
 import type { RuntimePool } from "./runtimePool.js";
 
-/** Minimal runtime surface used by set_model / set_mode / token_usage. */
+/** Minimal runtime surface used by set_model / set_mode / token_usage / fork. */
 export type SessionOpRuntime = {
   sessionId: string;
   setModel?: (modelId: string) => Promise<void>;
   setMode?: (modeId: string) => Promise<void>;
   tokenUsage?: () => Promise<unknown>;
+  forkSession?: (opts?: {
+    sourceCwd?: string;
+    newCwd?: string;
+  }) => Promise<unknown>;
 };
 
 /** Closures injected from createBridgeHandlers. */
@@ -138,6 +142,55 @@ export async function handleTokenUsage(
   }
   try {
     const data = await rt.tokenUsage();
+    send(ws, {
+      type: "cli_result",
+      result: { requestId, ok: true, data },
+    });
+  } catch (e) {
+    send(ws, {
+      type: "cli_result",
+      result: {
+        requestId,
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      },
+    });
+  }
+}
+
+/**
+ * `_x.ai/session/fork` → `cli_result` envelope with `newSessionId`.
+ * @param deps Pool + send + requireRuntime.
+ * @param ws Reply socket.
+ * @param sessionId Optional target (defaults to focused runtime).
+ * @param requestId Client correlation id.
+ * @param sourceCwd Optional source workspace override.
+ * @param newCwd Optional child workspace (same as source for non-worktree).
+ */
+export async function handleForkSession(
+  deps: SessionOpDeps,
+  ws: WebSocket,
+  sessionId: string | undefined,
+  requestId: string,
+  sourceCwd?: string,
+  newCwd?: string,
+): Promise<void> {
+  const { pool, send, requireRuntime } = deps;
+  const rt = requireRuntime(sessionId);
+  pool.touch(rt.sessionId);
+  if (!rt.forkSession) {
+    send(ws, {
+      type: "cli_result",
+      result: {
+        requestId,
+        ok: false,
+        error: "fork_session not available",
+      },
+    });
+    return;
+  }
+  try {
+    const data = await rt.forkSession({ sourceCwd, newCwd });
     send(ws, {
       type: "cli_result",
       result: { requestId, ok: true, data },

@@ -29,6 +29,15 @@ export type PooledRuntime = {
   setMode?: (modeId: string) => Promise<void>;
   compact?: (instruction?: string) => Promise<void>;
   tokenUsage?: () => Promise<unknown>;
+  /**
+   * Branch this session into a peer via `_x.ai/session/fork`.
+   * @param opts Optional source/new cwd overrides; defaults to this runtime cwd.
+   * @returns Raw agent result containing `newSessionId`.
+   */
+  forkSession?: (opts?: {
+    sourceCwd?: string;
+    newCwd?: string;
+  }) => Promise<unknown>;
   dispose: () => void;
 };
 

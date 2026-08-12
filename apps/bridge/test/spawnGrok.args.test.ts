@@ -54,4 +54,32 @@ describe("buildSpawnExtraArgs", () => {
     assert.ok(args.includes("--max-turns"));
     assert.ok(args.includes("5"));
   });
+
+  it("A-01: rules appear as --rules before agent (global flag position)", () => {
+    const extra = buildSpawnExtraArgs({ rules: "be brief" }, false);
+    const args = buildGrokAgentArgs({ cwd: "/tmp", extraArgs: extra });
+    const rulesIdx = args.indexOf("--rules");
+    const agentIdx = args.indexOf("agent");
+    assert.ok(rulesIdx >= 0, "missing --rules");
+    assert.equal(args[rulesIdx + 1], "be brief");
+    assert.ok(rulesIdx < agentIdx, "--rules must be global (before agent)");
+  });
+
+  it("A-02: empty / whitespace rules omit --rules", () => {
+    for (const rules of ["", "   ", "\t"]) {
+      const extra = buildSpawnExtraArgs({ rules }, false);
+      assert.equal(extra.includes("--rules"), false, `rules=${JSON.stringify(rules)}`);
+    }
+  });
+
+  it("A-03: rules with newline/quotes/CJK stay one argv element", () => {
+    const text = 'line1\n"quoted" 中文';
+    const extra = buildSpawnExtraArgs({ rules: text }, false);
+    const args = buildGrokAgentArgs({ cwd: "/tmp", extraArgs: extra });
+    const rulesIdx = args.indexOf("--rules");
+    assert.ok(rulesIdx >= 0);
+    assert.equal(args[rulesIdx + 1], text);
+    // Not split across multiple argv slots.
+    assert.equal(args.filter((a) => a === text).length, 1);
+  });
 });
