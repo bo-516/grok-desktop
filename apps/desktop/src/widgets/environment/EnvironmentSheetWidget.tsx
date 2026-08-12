@@ -15,6 +15,7 @@ import { EnvironmentOverviewView } from "./EnvironmentOverviewView";
 import { EnvironmentMcpView } from "./EnvironmentMcpView";
 import { EnvironmentSkillsView } from "./EnvironmentSkillsView";
 import { EnvironmentStubPageView } from "./EnvironmentStubPageView";
+import { PromptsPageWidget } from "@/widgets/prompts";
 import { useEnvironmentWidget } from "./useEnvironmentWidget";
 
 export type EnvironmentSheetWidgetProps = {
@@ -211,16 +212,7 @@ function renderPage(model: ReturnType<typeof useEnvironmentWidget>) {
         />
       );
     case "rules":
-      return (
-        <EnvironmentStubPageView
-          page="rules"
-          title="Rules"
-          count={model.snapshot?.instructions.length ?? 0}
-          onRefresh={model.refresh}
-          loading={model.loading}
-          loadedLabel={model.loadedLabel}
-        />
-      );
+      return <PromptsPageWidget />;
     case "compat":
       return (
         <EnvironmentStubPageView

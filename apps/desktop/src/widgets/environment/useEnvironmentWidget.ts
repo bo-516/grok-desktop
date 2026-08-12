@@ -113,9 +113,8 @@ export function useEnvironmentWidget(args: UseEnvironmentWidgetArgs) {
       },
       {
         id: "rules",
-        label: "Rules",
+        label: "Rules & prompts",
         count: snapshot?.instructions.length,
-        soon: true,
       },
       {
         id: "compat",

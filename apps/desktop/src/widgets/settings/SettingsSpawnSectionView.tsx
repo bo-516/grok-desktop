@@ -86,6 +86,26 @@ export function SettingsSpawnSectionView(props: SettingsSpawnSectionViewProps) {
         </label>
       </div>
       <p className="side-panel-hint">Deny always wins over allow.</p>
+
+      <div className="settings-prompts-link">
+        <p className="side-panel-hint m-0">
+          Long-lived preferences (language, name, workflow) live in Agent
+          environment — not as session SPAWN flags.
+        </p>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => {
+            window.dispatchEvent(
+              new CustomEvent("grok-desktop:open-environment", {
+                detail: "rules",
+              }),
+            );
+          }}
+        >
+          提示词 → 打开 Agent environment · Rules
+        </button>
+      </div>
     </section>
   );
 }
