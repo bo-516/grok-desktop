@@ -6,6 +6,7 @@
 
 import type { TimelineItem, ToolCallCard } from "@grok-desktop/acp-core";
 import { buildFileDiff } from "./diffCore";
+import { fragmentsAreContinuous } from "./diffFullFile";
 import { buildTimelineRenderUnits } from "./timelinePipeline";
 import {
   normalizeLocations,
@@ -18,7 +19,9 @@ export type ChangeSetFileStatus =
   | "ok"
   | "failed"
   | "no_baseline"
-  | "no_diff_data";
+  | "no_diff_data"
+  /** Multi-fragment merge is untrustworthy (windows do not chain). */
+  | "stale";
 
 /** One path in a turn/session change set. */
 export type ChangeSetFile = {
@@ -131,6 +134,8 @@ export function buildChangeSetFromToolCalls(
     toolCallIds: string[];
     anyFailed: boolean;
     noDiffData: boolean;
+    /** True when successive fragments do not chain (merged pair is unusable). */
+    discontinuous: boolean;
   };
   const byPath = new Map<string, Acc>();
 
@@ -150,6 +155,7 @@ export function buildChangeSetFromToolCalls(
           toolCallIds: [],
           anyFailed: false,
           noDiffData: false,
+          discontinuous: false,
         };
       if (!existing) {
         byPath.set(frag.path, acc);
@@ -159,6 +165,22 @@ export function buildChangeSetFromToolCalls(
       }
       if (frag.failed) {
         acc.anyFailed = true;
+      }
+      /*
+       * Continuity: next fragment's oldText must sit inside the prior head
+       * (line-boundary). Otherwise base/head are not one coherent file pair.
+       */
+      if (
+        acc.hasNew &&
+        frag.oldText !== undefined &&
+        !fragmentsAreContinuous(acc.headText, frag.oldText)
+      ) {
+        acc.discontinuous = true;
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn(
+            `[changeSet] discontinuous multi-fragment merge for ${frag.path} — treating as stale`,
+          );
+        }
       }
       if (frag.oldText !== undefined && !acc.hasOld) {
         acc.baseText = frag.oldText;
@@ -182,6 +204,7 @@ export function buildChangeSetFromToolCalls(
           toolCallIds: [],
           anyFailed: false,
           noDiffData: true,
+          discontinuous: false,
         };
       if (!existing) {
         byPath.set(bare.path, acc);
@@ -212,12 +235,16 @@ export function buildChangeSetFromToolCalls(
       });
       continue;
     }
-    // Missing oldText on the first fragment → treat as no baseline (whole-file add).
+    // Discontinuous multi-window merge → stale (do not trust as one file pair).
+    // Failed still wins over stale so the user sees the tool error first.
     const status: ChangeSetFileStatus = acc.anyFailed
       ? "failed"
-      : !acc.hasOld && acc.hasNew
-        ? "no_baseline"
-        : "ok";
+      : acc.discontinuous
+        ? "stale"
+        : !acc.hasOld && acc.hasNew
+          ? "no_baseline"
+          : "ok";
+    // Stale pairs still get a diff for display, but UI banners Apply-disable.
     const diff = buildFileDiff(acc.baseText, acc.headText);
     files.push({
       path: acc.path,

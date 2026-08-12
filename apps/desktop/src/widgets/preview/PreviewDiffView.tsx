@@ -1,13 +1,42 @@
 /**
- * Stateless structured diff body: dual gutters, hunks, collapsible gaps,
- * and a degraded banner when the engine bailed.
+ * Stateless structured diff body: expandable gaps, single-column gutters,
+ * word emph, and optional per-change-run accept/reject (single-paint review).
+ * No @@ hunk headers — fold bands are the separators.
  */
 
 import cs from "classnames";
 import type { CodeLine } from "@/lib/codeHighlight";
-import type { DiffGap, DiffHunkBlock, FileDiff } from "@/lib/diffCore";
-import { diffRowTokens } from "@/lib/diffLineTokens";
-import { CodeLineView } from "@/widgets/shared";
+import {
+  changeRunIndexByRowKey,
+  changeRunsFromFileDiff,
+  diffRowKey,
+  type ChangeRun,
+} from "@/lib/diffChangeRuns";
+import type { DiffGap, DiffHunkBlock, DiffRow, FileDiff } from "@/lib/diffCore";
+import {
+  expandGap,
+  gapRevealKey,
+  revealAll,
+  stepRevealBottom,
+  stepRevealTop,
+  type GapBandPosition,
+  type GapReveal,
+} from "@/lib/diffGapExpand";
+import type { HunkDecision } from "@/lib/diffHunkApply";
+import type { EmphRange } from "@/lib/diffWordRanges";
+import { DiffGapBandView } from "./DiffGapBandView";
+import { DiffRowView } from "./DiffRowView";
+
+export type PreviewDiffReviewProps = {
+  /** Decision keyed by change-run index (createDiffReview order). */
+  decisionByIndex: Record<number, HunkDecision>;
+  /**
+   * Set decision for one run.
+   * @param index Change-run index.
+   * @param decision Accept or reject.
+   */
+  onDecide: (index: number, decision: "accept" | "reject") => void;
+};
 
 export type PreviewDiffViewProps = {
   /** Structured file diff from buildFileDiff. */
@@ -17,20 +46,68 @@ export type PreviewDiffViewProps = {
   /**
    * Tokens for the whole pre-edit file, indexed by 0-based line. Whole-file
    * (not per-row) on purpose: a diff row taken alone loses the multi-line
-   * context TextMate needs, so a line inside a block comment or template
-   * literal would be mis-colored.
+   * context TextMate needs.
    */
   oldLines?: CodeLine[];
   /** Tokens for the whole post-edit file, indexed by 0-based line. */
   newLines?: CodeLine[];
+  /** New-side source lines (for gap expand text). */
+  newTextLines: string[];
+  /** Old-side source lines (fallback for expand). */
+  oldTextLines: string[];
+  /** Per-gap reveal amounts; key = gapRevealKey(gap). */
+  revealByGap: Record<string, GapReveal>;
+  /**
+   * Update reveal for one gap.
+   * @param key gapRevealKey.
+   * @param next Next top/bottom amounts.
+   */
+  onRevealChange: (key: string, next: GapReveal) => void;
+  /** Dual old/new line-number columns. */
+  dualGutter?: boolean;
+  /** Soft-wrap code text. */
+  wrap?: boolean;
+  /** Fragment-relative gutters (`~` prefix) when disk is not aligned. */
+  relativeLineNumbers?: boolean;
+  /** Optional banner above the scroll (alignment / degraded). */
+  banner?: string | null;
+  /** rowKey → line-local emph ranges. */
+  emphByRowKey?: Map<string, EmphRange[]>;
+  /** Optional single-paint review chrome on change runs. */
+  review?: PreviewDiffReviewProps;
+  /** Change-run index currently focused by keyboard jump. */
+  focusedRunIndex?: number | null;
 };
 
 /**
- * Render one FileDiff as dual-gutter unified hunks with foldable gaps.
- * @param props Structured diff + optional path label.
+ * Render one FileDiff with expandable gaps and optional review actions.
+ * @param props Structured diff + expand/review wiring from the widget shell.
  */
 export function PreviewDiffView(props: PreviewDiffViewProps) {
-  const { fileDiff, path, oldLines, newLines } = props;
+  const {
+    fileDiff,
+    path,
+    oldLines,
+    newLines,
+    newTextLines,
+    oldTextLines,
+    revealByGap,
+    onRevealChange,
+    dualGutter,
+    wrap,
+    relativeLineNumbers,
+    banner,
+    emphByRowKey,
+    review,
+    focusedRunIndex,
+  } = props;
+
+  const runs = changeRunsFromFileDiff(fileDiff);
+  const runByRow = changeRunIndexByRowKey(runs);
+  /** First row key of each run — only that row gets Accept/Reject chrome. */
+  const firstKeyOfRun = firstRowKeys(runs);
+  const blockCount = fileDiff.blocks.length;
+
   return (
     <div className="preview-diff" data-kind="preview-diff">
       {fileDiff.degraded ? (
@@ -38,77 +115,198 @@ export function PreviewDiffView(props: PreviewDiffViewProps) {
           Diff is too large — showing whole-file replace (degraded).
         </div>
       ) : null}
+      {banner ? (
+        <div className="preview-banner preview-banner-warn" role="status">
+          {banner}
+        </div>
+      ) : null}
       {path ? <div className="preview-diff-path">{path}</div> : null}
       {fileDiff.blocks.length === 0 ? (
         <div className="preview-empty">No changes</div>
       ) : (
-        /* Keys come from the block's own line span, not its array index: spans
-         * are strictly increasing and unique within a file diff, so a re-diff
-         * that inserts a hunk does not remount every block after it. */
-        fileDiff.blocks.map((block) =>
-          block.kind === "gap" ? (
-            <GapRow
-              key={`g-${block.oldStart}-${block.newStart}`}
-              gap={block}
-            />
-          ) : (
-            <HunkBlock
-              key={`h-${block.oldStart}-${block.newStart}`}
-              hunk={block}
-              oldLines={oldLines}
-              newLines={newLines}
-            />
-          ),
-        )
+        <div
+          className={cs("preview-diff-scroll", {
+            "preview-diff-scroll-nowrap": !wrap,
+          })}
+        >
+          {fileDiff.blocks.map((block, index) =>
+            block.kind === "gap" ? (
+              <GapBlock
+                key={`g-${block.oldStart}-${block.newStart}`}
+                gap={block}
+                position={gapPosition(index, blockCount)}
+                newTextLines={newTextLines}
+                oldTextLines={oldTextLines}
+                reveal={revealByGap[gapRevealKey(block)]}
+                onRevealChange={onRevealChange}
+                oldLines={oldLines}
+                newLines={newLines}
+                dualGutter={dualGutter}
+                wrap={wrap}
+                relativeLineNumbers={relativeLineNumbers}
+              />
+            ) : (
+              <HunkRows
+                key={`h-${block.oldStart}-${block.newStart}`}
+                hunk={block}
+                oldLines={oldLines}
+                newLines={newLines}
+                dualGutter={dualGutter}
+                wrap={wrap}
+                relativeLineNumbers={relativeLineNumbers}
+                emphByRowKey={emphByRowKey}
+                review={review}
+                runByRow={runByRow}
+                firstKeyOfRun={firstKeyOfRun}
+                focusedRunIndex={focusedRunIndex}
+              />
+            ),
+          )}
+        </div>
       )}
     </div>
   );
 }
 
 /**
- * Unified-diff marker column character for one row.
- * @param type Row kind from buildFileDiff.
- * @returns "+", "−" (figure dash, matching the gutter width), or a space for
- *   context rows so every row occupies the same marker cell.
+ * Map block index to fold-band icon position.
+ * @param index 0-based index in fileDiff.blocks.
+ * @param blockCount Total blocks.
  */
-function diffRowMark(type: "same" | "add" | "del"): string {
-  if (type === "add") {
-    return "+";
+function gapPosition(index: number, blockCount: number): GapBandPosition {
+  if (index === 0) {
+    return "leading";
   }
-  if (type === "del") {
-    return "−";
+  if (index === blockCount - 1) {
+    return "trailing";
   }
-  return " ";
+  return "middle";
 }
 
 /**
- * Collapsed unmodified span control (display only in S1 — always shows count).
- * @param props Gap block metadata.
+ * Map each run index to its first painted row key.
+ * @param runs Ordered change runs.
  */
-function GapRow(props: { gap: DiffGap }) {
-  const { gap } = props;
+function firstRowKeys(runs: ChangeRun[]): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const run of runs) {
+    const first = run.rowKeys[0];
+    if (first !== undefined) {
+      map.set(run.index, first);
+    }
+  }
+  return map;
+}
+
+/**
+ * Expand one gap into head rows / remaining band / tail rows.
+ */
+function GapBlock(props: {
+  gap: DiffGap;
+  position: GapBandPosition;
+  newTextLines: string[];
+  oldTextLines: string[];
+  reveal?: GapReveal;
+  onRevealChange: (key: string, next: GapReveal) => void;
+  oldLines?: CodeLine[];
+  newLines?: CodeLine[];
+  dualGutter?: boolean;
+  wrap?: boolean;
+  relativeLineNumbers?: boolean;
+}) {
+  const {
+    gap,
+    position,
+    newTextLines,
+    oldTextLines,
+    reveal,
+    onRevealChange,
+    oldLines,
+    newLines,
+    dualGutter,
+    wrap,
+    relativeLineNumbers,
+  } = props;
+  const key = gapRevealKey(gap);
+  const { head, remaining, tail } = expandGap(
+    gap,
+    newTextLines,
+    oldTextLines,
+    reveal,
+  );
+
   return (
-    <div
-      className="preview-diff-gap"
-      data-kind="diff-gap"
-      title={`Unmodified lines starting at old ${gap.oldStart} / new ${gap.newStart}`}
-    >
-      {gap.count} unmodified lines
-    </div>
+    <>
+      {head.map((row) => (
+        <DiffRowView
+          key={diffRowKey(row)}
+          row={row}
+          oldLines={oldLines}
+          newLines={newLines}
+          dualGutter={dualGutter}
+          wrap={wrap}
+          relativeLineNumbers={relativeLineNumbers}
+        />
+      ))}
+      {remaining ? (
+        <DiffGapBandView
+          gap={remaining}
+          position={position}
+          reveal={reveal}
+          onRevealTop={() =>
+            onRevealChange(key, stepRevealTop(gap.count, reveal))
+          }
+          onRevealBottom={() =>
+            onRevealChange(key, stepRevealBottom(gap.count, reveal))
+          }
+          onRevealAll={() => onRevealChange(key, revealAll(gap.count))}
+        />
+      ) : null}
+      {tail.map((row) => (
+        <DiffRowView
+          key={diffRowKey(row)}
+          row={row}
+          oldLines={oldLines}
+          newLines={newLines}
+          dualGutter={dualGutter}
+          wrap={wrap}
+          relativeLineNumbers={relativeLineNumbers}
+        />
+      ))}
+    </>
   );
 }
 
 /**
- * One hunk with dual gutters and add/del/same rows.
- * @param props Hunk block from FileDiff plus whole-file tokens for both sides;
- *   omitting the tokens renders the hunk as plain text.
+ * Paint hunk rows (no @@ header) with optional review chrome on run starts.
  */
-function HunkBlock(props: {
+function HunkRows(props: {
   hunk: DiffHunkBlock;
   oldLines?: CodeLine[];
   newLines?: CodeLine[];
+  dualGutter?: boolean;
+  wrap?: boolean;
+  relativeLineNumbers?: boolean;
+  emphByRowKey?: Map<string, EmphRange[]>;
+  review?: PreviewDiffReviewProps;
+  runByRow: Map<string, number>;
+  firstKeyOfRun: Map<number, string>;
+  focusedRunIndex?: number | null;
 }) {
-  const { hunk, oldLines, newLines } = props;
+  const {
+    hunk,
+    oldLines,
+    newLines,
+    dualGutter,
+    wrap,
+    relativeLineNumbers,
+    emphByRowKey,
+    review,
+    runByRow,
+    firstKeyOfRun,
+    focusedRunIndex,
+  } = props;
+
   return (
     <div
       className="preview-diff-hunk"
@@ -116,36 +314,46 @@ function HunkBlock(props: {
       data-old-start={hunk.oldStart}
       data-new-start={hunk.newStart}
     >
-      <div className="preview-diff-hunk-head">
-        @@ −{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@
-      </div>
-      {/* Type + dual line numbers already identify a row uniquely: every row
-        * consumes a number on at least one side, so no two rows in a hunk can
-        * collide and the array index adds nothing but churn on re-diff. */}
-      {hunk.rows.map((row) => (
-        <div
-          key={`${row.type}:${row.oldNo ?? ""}:${row.newNo ?? ""}`}
-          className={cs("preview-diff-row", {
-            "preview-diff-row-add": row.type === "add",
-            "preview-diff-row-del": row.type === "del",
-          })}
-          data-type={row.type}
-        >
-          <span className="preview-diff-oldno">
-            {row.oldNo !== undefined ? row.oldNo : ""}
-          </span>
-          <span className="preview-diff-newno">
-            {row.newNo !== undefined ? row.newNo : ""}
-          </span>
-          <span className="preview-diff-mark">{diffRowMark(row.type)}</span>
-          <span className="preview-diff-text">
-            <CodeLineView
-              text={row.text}
-              tokens={diffRowTokens(row, oldLines, newLines)}
-            />
-          </span>
-        </div>
-      ))}
+      {hunk.rows.map((row) => {
+        const key = diffRowKey(row);
+        const runIndex = runByRow.get(key);
+        const isFirst =
+          runIndex !== undefined && firstKeyOfRun.get(runIndex) === key;
+        const decision =
+          review && runIndex !== undefined
+            ? (review.decisionByIndex[runIndex] ?? "pending")
+            : undefined;
+        const reviewRun =
+          review && isFirst && runIndex !== undefined
+            ? {
+                index: runIndex,
+                decision: decision ?? "pending",
+                onDecide: review.onDecide,
+              }
+            : undefined;
+        return (
+          <DiffRowView
+            key={key}
+            row={row}
+            oldLines={oldLines}
+            newLines={newLines}
+            dualGutter={dualGutter}
+            wrap={wrap}
+            relativeLineNumbers={relativeLineNumbers}
+            emph={emphByRowKey?.get(key)}
+            runDecision={decision}
+            reviewRun={reviewRun}
+            focused={
+              focusedRunIndex !== null &&
+              focusedRunIndex !== undefined &&
+              runIndex === focusedRunIndex
+            }
+          />
+        );
+      })}
     </div>
   );
 }
+
+/** Re-export row type for tests that import the view module. */
+export type { DiffRow };

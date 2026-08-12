@@ -63,6 +63,39 @@ describe("changeSet aggregation", () => {
     // v0 → v2 is one line rewrite
     assert.equal(f.added, 1);
     assert.equal(f.removed, 1);
+    assert.equal(f.status, "ok");
+  });
+
+  it("discontinuous multi-window fragments mark status stale", () => {
+    const toolCalls: Record<string, ToolCallCard> = {
+      t1: card({
+        toolCallId: "t1",
+        content: [
+          {
+            type: "diff",
+            path: "src/b.ts",
+            oldText: "window-a-old\n",
+            newText: "window-a-new\n",
+          },
+        ],
+      }),
+      t2: card({
+        toolCallId: "t2",
+        content: [
+          {
+            type: "diff",
+            path: "src/b.ts",
+            // next old is not a subsequence of prior new → cannot merge safely
+            oldText: "window-b-old\n",
+            newText: "window-b-new\n",
+          },
+        ],
+      }),
+    };
+    const set = buildChangeSetFromToolCalls(toolCalls, ["t1", "t2"]);
+    assert.equal(set.files[0]!.status, "stale");
+    assert.equal(set.files[0]!.baseText, "window-a-old\n");
+    assert.equal(set.files[0]!.headText, "window-b-new\n");
   });
 
   it("missing oldText marks no_baseline", () => {
