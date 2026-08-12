@@ -9,7 +9,8 @@ Matches the frozen relay WebSocket protocol in
 
 - Spawns real `grok agent stdio` only — no mock agent product path
 - Does **not** port timeline reduce; forwards raw `session_update` to the UI
-- T3 features (`set_model`, `set_mode`, `compact`, `token_usage`, `cli`, …) return an explicit error with a **switch to Node bridge** hint
+- T3 features that are not yet ported (`set_model`, `set_mode`, `compact`, `token_usage`, and most `cli` commands) return an explicit error with a **switch to Node bridge** hint
+- CLI channel **is** ported for Environment: `sessions_list`, `inspect`, `mcp_list`, `mcp_doctor`
 
 ## Build
 
@@ -95,9 +96,16 @@ internal/session/    disk list, workspace entries, crash recovery seeds
 | bridge → UI | `state` | hydrate only (start, reconnect, get_state, permission) |
 | UI → bridge | `get_state` | on-demand full snapshot |
 
-## T3 (not implemented)
+## T3 (partial)
 
-Requests `set_model`, `set_mode`, `compact`, `token_usage`, and `cli` respond with:
+| Request | Status |
+|---|---|
+| `cli` → `sessions_list` | disk walk under `~/.grok/sessions` |
+| `cli` → `inspect` / `mcp_list` / `mcp_doctor` | one-shot `grok` via `spawn.RunGrokCli` (Environment sheet) |
+| `cli` → other commands | unsupported (Node hint) |
+| `set_model`, `set_mode`, `compact`, `token_usage` | unsupported (Node hint) |
+
+Unsupported paths respond with:
 
 ```text
 <feature> is not available on the Go bridge (switch to Node bridge for this feature)

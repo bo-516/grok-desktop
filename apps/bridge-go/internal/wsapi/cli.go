@@ -6,12 +6,21 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 )
 
 // sessionsListLimit caps rows returned by sessions_list. Mirrors the Node
 // bridge's cliCommands.sessionsList so both bridges truncate history at the
 // same depth; ListSessionsFromDisk clamps anything above 2000 on its own.
 const sessionsListLimit = 500
+
+// Timeouts for one-shot CLI channel commands (ms). Match Node cliCommands so
+// Environment sheet UX is the same on either bridge.
+const (
+	inspectTimeoutMs   = 45_000
+	mcpListTimeoutMs   = 30_000
+	mcpDoctorTimeoutMs = 120_000
+)
 
 // handleCli answers one `cli` channel request on the reply socket ws, reading
 // requestId / command / args / cwd out of the raw client frame msg. Missing or
@@ -59,19 +68,35 @@ func (h *Handlers) handleCli(ws *websocket.Conn, msg map[string]any) error {
 }
 
 // dispatchCliCommand routes command (a ClientMsg.cli id such as
-// `sessions_list`) to its Go implementation and returns the payload for
-// cli_result.data. args is the free-form bag from the UI and may be nil, so
-// ported commands must read it defensively; cwd is the resolved workspace for
-// commands that scope to one project, and is ignored by sessions_list on
-// purpose (see sessionsList).
+// `sessions_list` / `inspect`) to its Go implementation and returns the
+// payload for cli_result.data. args is the free-form bag from the UI and may
+// be nil, so ported commands must read it defensively; cwd is the resolved
+// workspace for commands that scope to one project, and is ignored by
+// sessions_list on purpose (see sessionsList).
 //
-// Only commands that need no `grok` CLI subprocess are ported. Everything else
-// returns an error naming that one command, so the UI can point at the missing
-// feature rather than reporting the whole channel as dead.
+// Ported surface today:
+//   - sessions_list — pure disk walk (no CLI subprocess)
+//   - inspect / mcp_list / mcp_doctor — one-shot `grok` via spawn.RunGrokCli
+//     (Environment sheet load + doctor; mirrors Node cliCommands)
+//
+// Everything else returns an error naming that one command, so the UI can
+// point at the missing feature rather than reporting the whole channel as dead.
 func dispatchCliCommand(command string, args map[string]any, cwd string) (any, error) {
 	switch command {
 	case "sessions_list":
 		return sessionsList()
+	case "inspect":
+		return inspectJSON(cwd)
+	case "mcp_list":
+		return mcpList(cwd)
+	case "mcp_doctor":
+		name := ""
+		if args != nil {
+			if n, ok := args["name"].(string); ok {
+				name = n
+			}
+		}
+		return mcpDoctor(name, cwd)
 	default:
 		return nil, fmt.Errorf(
 			"cli command %q is not available on the Go bridge%s",
@@ -91,10 +116,10 @@ func dispatchCliCommand(command string, args map[string]any, cwd string) (any, e
 // session's workspace would collapse the side-nav to one group and hide every
 // other project's history (same reasoning as the Node cliCommands.sessionsList).
 //
-// Unlike Node there is no `grok sessions list` fallback — this bridge runs no
-// CLI subprocess — so an unreadable or absent tree yields an empty list. That
-// is safe: mergeRemoteSessionsIntoCatalog leaves the local catalog untouched on
-// empty input, so a bad read can never wipe the rail.
+// Unlike Node there is no `grok sessions list` fallback — this path is disk
+// only — so an unreadable or absent tree yields an empty list. That is safe:
+// mergeRemoteSessionsIntoCatalog leaves the local catalog untouched on empty
+// input, so a bad read can never wipe the rail.
 func sessionsList() (any, error) {
 	rows, err := session.ListSessionsFromDisk(sessionsListLimit, "", "")
 	if err != nil {
@@ -105,4 +130,91 @@ func sessionsList() (any, error) {
 		rows = []session.DiskSessionRow{}
 	}
 	return map[string]any{"sessions": rows}, nil
+}
+
+// inspectJSON runs `grok inspect --json` for the Environment sheet snapshot.
+// On non-zero exit or non-JSON stdout it falls back to plain `grok inspect`
+// and returns `{raw: stdout}`, matching Node cliCommands.inspectJson so
+// normalizeInspect can still surface a degraded view.
+//
+// @param cwd Project workspace for project-scoped rules / MCP / skills.
+// @returns Parsed inspect object, or `{raw: string}` on plain fallback.
+func inspectJSON(cwd string) (any, error) {
+	result, err := spawn.RunGrokCli([]string{"inspect", "--json"}, cwd, inspectTimeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	if (result.Code != nil && *result.Code == 0) && result.JSON != nil {
+		return result.JSON, nil
+	}
+	plain, err := spawn.RunGrokCli([]string{"inspect"}, cwd, inspectTimeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	if err := spawn.AssertCliOk(plain, "inspect"); err != nil {
+		return nil, err
+	}
+	return map[string]any{"raw": plain.Stdout}, nil
+}
+
+// mcpList runs `grok mcp list --json` for config-defined MCP servers.
+// Environment merges this with inspect.mcpServers (plugin-provided servers
+// only appear in inspect). Falls back to plain text on JSON failure.
+//
+// @param cwd Optional project cwd for project-scope config discovery.
+// @returns Parsed list/object, or `{raw: string}` on plain fallback.
+func mcpList(cwd string) (any, error) {
+	result, err := spawn.RunGrokCli([]string{"mcp", "list", "--json"}, cwd, mcpListTimeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	if (result.Code != nil && *result.Code == 0) && result.JSON != nil {
+		return result.JSON, nil
+	}
+	plain, err := spawn.RunGrokCli([]string{"mcp", "list"}, cwd, mcpListTimeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	if err := spawn.AssertCliOk(plain, "mcp list"); err != nil {
+		return nil, err
+	}
+	return map[string]any{"raw": plain.Stdout}, nil
+}
+
+// mcpDoctor runs `grok mcp doctor <name> --json` for one server health check.
+// On JSON failure returns a soft envelope `{ok, raw, code}` so the UI can show
+// the diagnostic text without treating the channel as dead (same as Node).
+//
+// @param name Server id; empty name still invokes the CLI (it will error).
+// @param cwd Optional project cwd.
+// @returns Doctor JSON, or a soft `{ok, raw, code}` map.
+func mcpDoctor(name, cwd string) (any, error) {
+	result, err := spawn.RunGrokCli(
+		[]string{"mcp", "doctor", name, "--json"},
+		cwd,
+		mcpDoctorTimeoutMs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if (result.Code != nil && *result.Code == 0) && result.JSON != nil {
+		return result.JSON, nil
+	}
+	plain, err := spawn.RunGrokCli(
+		[]string{"mcp", "doctor", name},
+		cwd,
+		mcpDoctorTimeoutMs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	code := 1
+	if plain.Code != nil {
+		code = *plain.Code
+	}
+	return map[string]any{
+		"ok":   code == 0,
+		"raw":  plain.Stdout + plain.Stderr,
+		"code": code,
+	}, nil
 }

@@ -4,11 +4,56 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
 )
+
+// writeFakeGrokCLI drops a shell/batch script that answers inspect / mcp
+// subcommands with JSON. Used so dispatchCliCommand tests never touch the
+// real grok binary.
+func writeFakeGrokCLI(t *testing.T, dir string) string {
+	t.Helper()
+	var path, body string
+	if runtime.GOOS == "windows" {
+		path = filepath.Join(dir, "fake-grok.bat")
+		// %* is all args; match on the joined command line.
+		body = "@echo off\r\n" +
+			"echo %* | findstr /C:\"inspect\" >nul && echo {\"skills\":[],\"mcpServers\":[]} && exit /b 0\r\n" +
+			"echo %* | findstr /C:\"list\" >nul && echo [] && exit /b 0\r\n" +
+			"echo %* | findstr /C:\"doctor\" >nul && echo {\"ok\":true,\"name\":\"x\"} && exit /b 0\r\n" +
+			"echo unknown >&2\r\nexit /b 1\r\n"
+	} else {
+		path = filepath.Join(dir, "fake-grok")
+		body = `#!/bin/sh
+# Minimal grok stand-in for Environment CLI channel tests.
+case "$*" in
+  *inspect*)
+    echo '{"skills":[],"mcpServers":[],"agents":[]}'
+    exit 0
+    ;;
+  *mcp*list*)
+    echo '[]'
+    exit 0
+    ;;
+  *mcp*doctor*)
+    echo '{"ok":true,"name":"browser-use"}'
+    exit 0
+    ;;
+  *)
+    echo "unexpected: $*" >&2
+    exit 1
+    ;;
+esac
+`
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake grok: %v", err)
+	}
+	return path
+}
 
 // writeSessionFixture lays down one `<home>/sessions/<encoded-cwd>/<id>/summary.json`
 // so sessionsList has a real tree to walk. workspace is the decoded absolute
@@ -88,14 +133,60 @@ func TestSessionsListEmptyHomeReturnsNoRows(t *testing.T) {
 // Unported commands must name themselves in the error so the UI can tell the
 // user which feature needs the Node bridge, not just that "cli" is dead.
 func TestDispatchCliCommandUnsupported(t *testing.T) {
-	_, err := dispatchCliCommand("mcp_list", nil, "")
+	_, err := dispatchCliCommand("worktree_list", nil, "")
 	if err == nil {
 		t.Fatal("want error for unported command")
 	}
-	if !strings.Contains(err.Error(), "mcp_list") {
+	if !strings.Contains(err.Error(), "worktree_list") {
 		t.Fatalf("error must name the command, got %q", err)
 	}
 	if !strings.Contains(err.Error(), NodeBridgeHint) {
 		t.Fatalf("error must carry the Node bridge hint, got %q", err)
+	}
+}
+
+// Environment sheet load path: inspect + mcp_list must succeed on the Go
+// bridge (regression for the red banner that told users to switch to Node).
+func TestDispatchInspectAndMcpList(t *testing.T) {
+	bin := writeFakeGrokCLI(t, t.TempDir())
+	t.Setenv("GROK_BIN", bin)
+
+	insp, err := dispatchCliCommand("inspect", nil, t.TempDir())
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	inspMap, ok := insp.(map[string]any)
+	if !ok {
+		t.Fatalf("want inspect object, got %T", insp)
+	}
+	if _, ok := inspMap["skills"]; !ok {
+		t.Fatalf("inspect missing skills: %#v", inspMap)
+	}
+
+	list, err := dispatchCliCommand("mcp_list", nil, t.TempDir())
+	if err != nil {
+		t.Fatalf("mcp_list: %v", err)
+	}
+	// JSON array unmarshals as []any.
+	if _, ok := list.([]any); !ok {
+		t.Fatalf("want mcp list array, got %T %#v", list, list)
+	}
+}
+
+// mcp_doctor must accept a name arg and return doctor JSON (or soft envelope).
+func TestDispatchMcpDoctor(t *testing.T) {
+	bin := writeFakeGrokCLI(t, t.TempDir())
+	t.Setenv("GROK_BIN", bin)
+
+	data, err := dispatchCliCommand("mcp_doctor", map[string]any{"name": "browser-use"}, "")
+	if err != nil {
+		t.Fatalf("mcp_doctor: %v", err)
+	}
+	m, ok := data.(map[string]any)
+	if !ok {
+		t.Fatalf("want map, got %T", data)
+	}
+	if m["ok"] != true {
+		t.Fatalf("want ok=true, got %#v", m)
 	}
 }
