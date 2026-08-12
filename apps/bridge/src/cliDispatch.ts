@@ -3,6 +3,13 @@
  */
 
 import * as cli from "./cliCommands.js";
+import type { PromptEntry, PromptScope } from "./userPromptsFormat.js";
+import {
+  promptsClear,
+  promptsGet,
+  promptsMove,
+  promptsSet,
+} from "./userPrompts.js";
 
 /**
  * Run a named CLI channel command.
@@ -118,7 +125,48 @@ export async function dispatchCliCommand(
       );
       return { code: result.code, stdout: result.stdout, stderr: result.stderr };
     }
+    case "prompts_get":
+      // Paths derived only from GROK_HOME + project root of cwd — ignore any path args.
+      return promptsGet(cwd);
+    case "prompts_set": {
+      const scope = String(args.scope ?? "") as PromptScope;
+      const entries = coercePromptEntries(args.entries);
+      return promptsSet(scope, entries, cwd);
+    }
+    case "prompts_clear": {
+      const scope = String(args.scope ?? "") as PromptScope;
+      return promptsClear(scope, cwd);
+    }
+    case "prompts_move": {
+      const from = String(args.from ?? "") as PromptScope;
+      const to = String(args.to ?? "") as PromptScope;
+      const entryIndex = Number(args.entryIndex);
+      return promptsMove(from, to, entryIndex, cwd);
+    }
     default:
       throw new Error(`unknown cli command: ${command}`);
   }
+}
+
+/**
+ * Coerce free-form CLI args.entries into PromptEntry[].
+ * @param raw Unknown bag from the client.
+ */
+function coercePromptEntries(raw: unknown): PromptEntry[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((item, i) => {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const category =
+      typeof o.category === "string" && o.category
+        ? (o.category as PromptEntry["category"])
+        : undefined;
+    return {
+      id: typeof o.id === "string" && o.id ? o.id : `e${i}`,
+      text: String(o.text ?? ""),
+      enabled: o.enabled !== false,
+      ...(category ? { category } : {}),
+    };
+  });
 }
