@@ -1,9 +1,11 @@
-// Package spawn starts and reaps `grok agent stdio` process trees.
-package spawn
+// Package envfilter sanitizes process environment maps for grok agent children.
+// Product rule F-CFG-05: never dump the full host process env into the child.
+package envfilter
 
 import "os"
 
 // AlwaysPassEnv is the product-required + standard runtime env whitelist (F-CFG-05).
+// Keys listed here always survive filtering when present in the source map.
 var AlwaysPassEnv = []string{
 	"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP",
 	"LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "SHELL",
@@ -18,6 +20,7 @@ var AlwaysPassEnv = []string{
 // FilterEnvForGrokChild filters source env to the whitelist + GROK_*/XAI_* + extras.
 // source: full process env map; extraAllow: session-opted keys from SPAWN config.
 // Returns a sanitized env map suitable for the agent child (never dumps full process env).
+// Missing keys in source are simply omitted (not set to empty).
 func FilterEnvForGrokChild(source map[string]string, extraAllow []string) map[string]string {
 	allow := make(map[string]bool, len(AlwaysPassEnv)+len(extraAllow))
 	for _, k := range AlwaysPassEnv {
@@ -38,6 +41,7 @@ func FilterEnvForGrokChild(source map[string]string, extraAllow []string) map[st
 }
 
 // EnvironMap converts os.Environ() KEY=VAL slices into a map.
+// Keys without '=' are skipped. First '=' splits key from value.
 func EnvironMap() map[string]string {
 	out := make(map[string]string)
 	for _, e := range os.Environ() {
@@ -52,6 +56,7 @@ func EnvironMap() map[string]string {
 }
 
 // MapToEnviron converts a map to KEY=VAL slice for exec.Cmd.Env.
+// Order is map-iteration order (not sorted).
 func MapToEnviron(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k, v := range m {

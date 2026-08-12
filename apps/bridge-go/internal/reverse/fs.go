@@ -1,3 +1,5 @@
+// Package reverse implements agent→client reverse services (fs + terminal).
+// Path sandbox and read guards live in pkg/workspacepath (shared pure helpers).
 package reverse
 
 import (
@@ -6,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
 // ReadWorkspaceFileResult is the guarded embed-read outcome.
@@ -42,7 +46,7 @@ func HandleReverseRequest(method string, params any, workspaceAbs string, termin
 	switch method {
 	case "fs/read_text_file":
 		pathStr, _ := p["path"].(string)
-		abs, err := ResolveWorkspacePath(workspaceAbs, pathStr)
+		abs, err := workspacepath.ResolveWorkspacePath(workspaceAbs, pathStr)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +58,7 @@ func HandleReverseRequest(method string, params any, workspaceAbs string, termin
 
 	case "fs/write_text_file":
 		pathStr, _ := p["path"].(string)
-		abs, err := ResolveWorkspacePath(workspaceAbs, pathStr)
+		abs, err := workspacepath.ResolveWorkspacePath(workspaceAbs, pathStr)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +122,7 @@ func ReadWorkspaceFileForEmbed(workspaceAbs, relativePath string) ReadWorkspaceF
 	if !resolved.ok {
 		return resolved.result
 	}
-	if resolved.bytes > MaxEmbedFileBytes {
+	if resolved.bytes > workspacepath.MaxEmbedFileBytes {
 		return ReadWorkspaceFileResult{OK: false, Bytes: resolved.bytes, Reason: "too_large"}
 	}
 	buf, err := os.ReadFile(resolved.abs)
@@ -130,7 +134,7 @@ func ReadWorkspaceFileForEmbed(workspaceAbs, relativePath string) ReadWorkspaceF
 
 // ReadWorkspaceFileForPreview truncates oversize files instead of hard-failing.
 func ReadWorkspaceFileForPreview(workspaceAbs, relativePath string, maxBytes int) PreviewWorkspaceFileResult {
-	ceiling := MaxPreviewFileBytes
+	ceiling := workspacepath.MaxPreviewFileBytes
 	if maxBytes > 0 && maxBytes < ceiling {
 		ceiling = maxBytes
 	}
@@ -180,10 +184,10 @@ type resolvedFile struct {
 }
 
 func resolveReadableFile(workspaceAbs, relativePath string) resolvedFile {
-	if IsSensitiveWorkspacePath(relativePath) {
+	if workspacepath.IsSensitiveWorkspacePath(relativePath) {
 		return resolvedFile{result: ReadWorkspaceFileResult{OK: false, Bytes: 0, Reason: "sensitive"}}
 	}
-	abs, err := ResolveWorkspacePath(workspaceAbs, relativePath)
+	abs, err := workspacepath.ResolveWorkspacePath(workspaceAbs, relativePath)
 	if err != nil {
 		reason := "error"
 		if strings.Contains(strings.ToLower(err.Error()), "outside") {
@@ -202,15 +206,15 @@ func resolveReadableFile(workspaceAbs, relativePath string) resolvedFile {
 }
 
 func decodeTextResult(buf []byte, relativePath string) ReadWorkspaceFileResult {
-	if IsBinaryBuffer(buf) {
+	if workspacepath.IsBinaryBuffer(buf) {
 		return ReadWorkspaceFileResult{OK: false, Bytes: len(buf), Reason: "binary"}
 	}
 	content := string(buf)
-	if IsBinaryUtf8Replacement(content, len(buf)) {
+	if workspacepath.IsBinaryUtf8Replacement(content, len(buf)) {
 		return ReadWorkspaceFileResult{OK: false, Bytes: len(buf), Reason: "binary"}
 	}
 	return ReadWorkspaceFileResult{
-		OK: true, Content: content, MimeType: GuessTextMimeType(relativePath), Bytes: len(buf),
+		OK: true, Content: content, MimeType: workspacepath.GuessTextMimeType(relativePath), Bytes: len(buf),
 	}
 }
 

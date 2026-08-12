@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/envfilter"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/jsonrpc"
 )
 
 // DisposeKillGrace is the SIGTERM→SIGKILL grace period for the agent tree.
@@ -27,9 +29,9 @@ type Options struct {
 
 // Process is a live grok agent stdio child with line transport.
 type Process struct {
-	Cmd       *exec.Cmd
-	Transport *StdioTransport
-	UseGroup  bool
+	Cmd         *exec.Cmd
+	Transport   *StdioTransport
+	UseGroup    bool
 	disposeOnce sync.Once
 }
 
@@ -147,15 +149,15 @@ func SpawnGrokAgent(opts Options) (*Process, error) {
 	}
 	args := BuildGrokAgentArgs(opts)
 
-	envSrc := EnvironMap()
+	envSrc := envfilter.EnvironMap()
 	for k, v := range opts.Env {
 		envSrc[k] = v
 	}
-	childEnv := FilterEnvForGrokChild(envSrc, nil)
+	childEnv := envfilter.FilterEnvForGrokChild(envSrc, nil)
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = opts.Cwd
-	cmd.Env = MapToEnviron(childEnv)
+	cmd.Env = envfilter.MapToEnviron(childEnv)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -202,20 +204,20 @@ func (p *Process) Dispose() {
 
 // StdioTransport implements acp.Transport over process pipes.
 type StdioTransport struct {
-	stdin       io.WriteCloser
-	mu          sync.Mutex
-	lineHandlers []func(string)
+	stdin         io.WriteCloser
+	mu            sync.Mutex
+	lineHandlers  []func(string)
 	closeHandlers []func(*int)
-	errHandlers  []func(string)
-	onDispose   func()
-	closed      bool
-	splitter    *acp.LineSplitter
+	errHandlers   []func(string)
+	onDispose     func()
+	closed        bool
+	splitter      *jsonrpc.LineSplitter
 }
 
 // NewStdioTransport wires stdout line framing and stderr/close fan-out.
 func NewStdioTransport(stdin io.WriteCloser, stdout, stderr io.Reader, cmd *exec.Cmd) *StdioTransport {
 	t := &StdioTransport{stdin: stdin}
-	t.splitter = acp.NewLineSplitter(func(line string) {
+	t.splitter = jsonrpc.NewLineSplitter(func(line string) {
 		t.mu.Lock()
 		handlers := append([]func(string){}, t.lineHandlers...)
 		t.mu.Unlock()

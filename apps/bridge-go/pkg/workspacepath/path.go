@@ -1,6 +1,6 @@
-// Package reverse implements agent→client reverse services (fs + terminal)
-// and workspace path sandbox helpers matching Node workspacePath.ts.
-package reverse
+// Package workspacepath implements workspace path sandbox helpers matching
+// Node workspacePath.ts (resolve under root, reject escapes and symlink leaks).
+package workspacepath
 
 import (
 	"fmt"

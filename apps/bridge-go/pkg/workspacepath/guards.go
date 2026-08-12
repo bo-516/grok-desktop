@@ -1,4 +1,4 @@
-package reverse
+package workspacepath
 
 import (
 	"path/filepath"
@@ -26,6 +26,7 @@ var sensitiveBasenameREs = []*regexp.Regexp{
 }
 
 // IsSensitiveWorkspacePath reports whether a relative path looks like a secret.
+// relativePath may use / or \ separators; only the basename is matched.
 func IsSensitiveWorkspacePath(relativePath string) bool {
 	base := filepath.Base(strings.ReplaceAll(relativePath, "\\", "/"))
 	for _, re := range sensitiveBasenameREs {
@@ -37,6 +38,7 @@ func IsSensitiveWorkspacePath(relativePath string) bool {
 }
 
 // GuessTextMimeType returns a text mime for embedded/preview resource blocks.
+// Unknown extensions fall back to text/plain so UI can still display them.
 func GuessTextMimeType(relativePath string) string {
 	ext := strings.ToLower(filepath.Ext(relativePath))
 	switch ext {
@@ -56,6 +58,7 @@ func GuessTextMimeType(relativePath string) string {
 }
 
 // IsBinaryBuffer detects NUL bytes or high density of control chars.
+// Used before treating file contents as embeddable UTF-8 text.
 func IsBinaryBuffer(buf []byte) bool {
 	for _, b := range buf {
 		if b == 0 {
@@ -77,12 +80,12 @@ func IsBinaryBuffer(buf []byte) bool {
 }
 
 // IsBinaryUtf8Replacement reports high U+FFFD density after UTF-8 decode.
+// content: decoded string; byteLength: original byte count (for density ratio).
 func IsBinaryUtf8Replacement(content string, byteLength int) bool {
 	if byteLength <= 0 || !strings.ContainsRune(content, '\uFFFD') {
 		return false
 	}
 	count := strings.Count(content, "\uFFFD")
-	// content length is runes-ish via utf8; use rune count for density.
 	n := utf8.RuneCountInString(content)
 	if n == 0 {
 		return false

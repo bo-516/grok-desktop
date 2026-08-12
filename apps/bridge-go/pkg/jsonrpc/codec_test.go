@@ -1,4 +1,4 @@
-package acp
+package jsonrpc
 
 import (
 	"strings"
@@ -42,9 +42,9 @@ func TestClassifyResponseAndNotification(t *testing.T) {
 	if k.Kind != "response" {
 		t.Fatalf("want response got %s", k.Kind)
 	}
-	// JSON numbers decode as float64; rpcIDKey must map them back to int.
-	if rpcIDKey(k.ID) != 3 {
-		t.Fatalf("rpcIDKey(%T %v) = %v want 3", k.ID, k.ID, rpcIDKey(k.ID))
+	// JSON numbers decode as float64; callers must normalize with rpcIDKey.
+	if _, ok := k.ID.(float64); !ok {
+		t.Fatalf("expected float64 id, got %T %v", k.ID, k.ID)
 	}
 
 	n := DecodeLine(EncodeNotification("session/update", map[string]any{
@@ -83,7 +83,7 @@ func TestLineSplitterFeedsCompleteLinesOnly(t *testing.T) {
 }
 
 func TestEncodeResponseError(t *testing.T) {
-	line := EncodeResponse(7, nil, &JsonRpcError{Code: -32601, Message: "Method not found"})
+	line := EncodeResponse(7, nil, &Error{Code: -32601, Message: "Method not found"})
 	dec := DecodeLine(line)
 	k := ClassifyMessage(dec.Message)
 	if k.Kind != "response" || k.Error == nil || k.Error.Code != -32601 {

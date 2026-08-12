@@ -1,4 +1,4 @@
-package acp
+package jsonrpc
 
 import (
 	"encoding/json"
@@ -44,7 +44,7 @@ func EncodeNotification(method string, params any) string {
 
 // EncodeResponse builds a JSON-RPC success or error response for reverse requests.
 // When rpcErr is non-nil, result is ignored and the error form is written.
-func EncodeResponse(id any, result any, rpcErr *JsonRpcError) string {
+func EncodeResponse(id any, result any, rpcErr *Error) string {
 	if rpcErr != nil {
 		return EncodeMessage(map[string]any{
 			"jsonrpc": "2.0",
@@ -67,9 +67,10 @@ func EncodeResponse(id any, result any, rpcErr *JsonRpcError) string {
 }
 
 // DecodeResult is the outcome of parsing one NDJSON line.
+// OK is false for empty / non-JSON / non-object lines (tolerant — agent noise never panics).
 type DecodeResult struct {
 	OK      bool
-	Message JsonRpcMessage
+	Message Message
 	Error   string
 	Raw     string
 }
@@ -89,23 +90,24 @@ func DecodeLine(line string) DecodeResult {
 	if !ok {
 		return DecodeResult{OK: false, Error: "message is not an object", Raw: line}
 	}
-	return DecodeResult{OK: true, Message: JsonRpcMessage(obj)}
+	return DecodeResult{OK: true, Message: Message(obj)}
 }
 
 // MessageKind classifies a decoded envelope.
+// Kind is one of request | response | notification | unknown.
 type MessageKind struct {
-	Kind   string // request | response | notification | unknown
+	Kind   string
 	ID     any
 	Method string
 	Params any
 	Result any
-	Error  *JsonRpcError
-	Raw    JsonRpcMessage
+	Error  *Error
+	Raw    Message
 }
 
 // ClassifyMessage splits a decoded message into request / response / notification.
 // Agent→client reverse calls have both id and method.
-func ClassifyMessage(message JsonRpcMessage) MessageKind {
+func ClassifyMessage(message Message) MessageKind {
 	m := map[string]any(message)
 	_, hasID := m["id"]
 	method, _ := m["method"].(string)
@@ -120,9 +122,9 @@ func ClassifyMessage(message JsonRpcMessage) MessageKind {
 		}
 	}
 	if hasID && method == "" {
-		var rpcErr *JsonRpcError
+		var rpcErr *Error
 		if errObj, ok := m["error"].(map[string]any); ok {
-			rpcErr = &JsonRpcError{}
+			rpcErr = &Error{}
 			if c, ok := errObj["code"].(float64); ok {
 				rpcErr.Code = int(c)
 			}

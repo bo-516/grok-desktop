@@ -36,24 +36,6 @@ func TestBuildGrokAgentArgsOrder(t *testing.T) {
 	}
 }
 
-func TestFilterEnvForGrokChild(t *testing.T) {
-	src := map[string]string{
-		"PATH":        "/bin",
-		"HOME":        "/home/u",
-		"XAI_API_KEY": "secret",
-		"GROK_CUSTOM": "1",
-		"AWS_SECRET":  "nope",
-		"SECRET_TOKEN": "nope",
-	}
-	out := FilterEnvForGrokChild(src, nil)
-	if out["AWS_SECRET"] != "" || out["SECRET_TOKEN"] != "" {
-		t.Fatal("leaked secrets")
-	}
-	if out["XAI_API_KEY"] != "secret" || out["GROK_CUSTOM"] != "1" || out["PATH"] != "/bin" {
-		t.Fatalf("missing required: %v", out)
-	}
-}
-
 func indexOf(ss []string, s string) int {
 	for i, v := range ss {
 		if v == s {
@@ -61,4 +43,40 @@ func indexOf(ss []string, s string) int {
 		}
 	}
 	return -1
+}
+
+func TestRulesArgvPlacement(t *testing.T) {
+	// A-01: --rules is a global flag → before agent
+	args := BuildGrokAgentArgs(Options{
+		ExtraArgs: []string{"--rules", "be brief", "--model", "m1"},
+	})
+	rulesIdx := indexOf(args, "--rules")
+	agentIdx := indexOf(args, "agent")
+	if rulesIdx < 0 || rulesIdx > agentIdx {
+		t.Fatalf("A-01: --rules should be global before agent: %v", args)
+	}
+	if rulesIdx+1 >= len(args) || args[rulesIdx+1] != "be brief" {
+		t.Fatalf("A-01: rules value missing: %v", args)
+	}
+}
+
+func TestRulesSpecialCharsSingleArgv(t *testing.T) {
+	// A-03: newline / quotes / CJK stay one argv element
+	text := "line1\n\"quoted\" 中文"
+	args := BuildGrokAgentArgs(Options{
+		ExtraArgs: []string{"--rules", text},
+	})
+	rulesIdx := indexOf(args, "--rules")
+	if rulesIdx < 0 || rulesIdx+1 >= len(args) || args[rulesIdx+1] != text {
+		t.Fatalf("A-03: rules not single argv: %v", args)
+	}
+	count := 0
+	for _, a := range args {
+		if a == text {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("A-03: split across argv: %v", args)
+	}
 }

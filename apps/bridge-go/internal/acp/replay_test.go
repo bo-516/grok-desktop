@@ -21,8 +21,8 @@ func (t *fakeTransport) Write(line string) {
 	t.writes = append(t.writes, line)
 	t.mu.Unlock()
 }
-func (t *fakeTransport) OnLine(h func(line string))  { t.onLine = h }
-func (t *fakeTransport) OnClose(h func(code *int))   { t.onClose = h }
+func (t *fakeTransport) OnLine(h func(line string))    { t.onLine = h }
+func (t *fakeTransport) OnClose(h func(code *int))     { t.onClose = h }
 func (t *fakeTransport) OnStderr(h func(chunk string)) {}
 func (t *fakeTransport) Dispose()                      {}
 func (t *fakeTransport) inject(line string) {
@@ -134,7 +134,7 @@ func TestReplayBufferCap(t *testing.T) {
 	var endCounts []int
 	var begins int
 	client := acp.NewClient(acp.ClientOptions{
-		Transport: tr,
+		Transport:     tr,
 		OnReplayBegin: func(sessionID string) { begins++ },
 		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
 			endCounts = append(endCounts, count)

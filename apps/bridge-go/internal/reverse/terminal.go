@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
 // TerminalHandle tracks one agent-spawned shell process.
@@ -53,7 +55,7 @@ func (r *TerminalRegistry) Create(workspaceAbs string, params TerminalCreatePara
 	}
 	workCwd := filepath.Clean(workspaceAbs)
 	if params.Cwd != "" {
-		abs, err := ResolveWorkspacePath(workspaceAbs, params.Cwd)
+		abs, err := workspacepath.ResolveWorkspacePath(workspaceAbs, params.Cwd)
 		if err != nil {
 			return nil, err
 		}
