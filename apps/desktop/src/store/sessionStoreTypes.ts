@@ -36,6 +36,16 @@ export type SessionStore = {
   catalog: SessionRecord[];
   activeSessionId: string | null;
   viewingSessionId: string | null;
+  /**
+   * True when the open canvas is a harness-spawned subagent chat.
+   * Sending into it would fight the parent's orchestrator, so the composer
+   * disables and the top-nav shows a breadcrumb back to the parent.
+   * Derived once in selectSessionAction / newSession; consumers must not
+   * re-derive from sessionKind in each widget.
+   */
+  viewingSubagent: boolean;
+  /** Parent chat id for the breadcrumb; undefined when the link is unknown. */
+  viewingParentSessionId?: string;
   poolEntries: PoolEntry[];
   environment: EnvironmentInfo | null;
   /**

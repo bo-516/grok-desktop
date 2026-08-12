@@ -5,6 +5,7 @@
 
 import { createSessionState, markDisconnected } from "@grok-desktop/acp-core";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
+import { isSubagentSessionKind } from "@/lib/sessionActions";
 import {
   loadWorkspacePrefs,
   rememberAndActivateWorkspace,
@@ -98,6 +99,8 @@ export async function newSessionAction(
       localDraft: true,
       creatingSession: false,
       restoringSessionId: null,
+      viewingSubagent: false,
+      viewingParentSessionId: undefined,
       bridgeInfo: "New chat — send a message to start",
       session: createSessionState({
         id: "",
@@ -113,6 +116,8 @@ export async function newSessionAction(
     lastError: null,
     localDraft: true,
     creatingSession: false,
+    viewingSubagent: false,
+    viewingParentSessionId: undefined,
     bridgeInfo: "New chat — send a message to start",
     session: createSessionState({
       id: "",
@@ -211,6 +216,9 @@ export function selectSessionAction(
     creatingSession: false,
     restoringSessionId: coldRestore ? id : null,
     bridgeInfo: inPool ? `live · ${rec.title}` : `Opened · ${rec.title}`,
+    // Store-derived readonly mode: one place, many consumers (composer / top-nav).
+    viewingSubagent: isSubagentSessionKind(rec.sessionKind),
+    viewingParentSessionId: rec.parentSessionId,
   });
 
   // Already in pool or current live focus: only run start hit-path / push state.
@@ -297,6 +305,8 @@ export function removeSessionAction(
         session: INITIAL_SESSION,
         localDraft: false,
         creatingSession: false,
+        viewingSubagent: false,
+        viewingParentSessionId: undefined,
       });
     }
     return;

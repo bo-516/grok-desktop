@@ -1,5 +1,5 @@
 /**
- * Shared right-drawer shell for Settings / Extensions / Overview / Tasks.
+ * Shared right-drawer shell for Settings / Environment / Overview / Tasks.
  *
  * Purpose: fixed elevated panel + dimmed backdrop so content is readable and
  * dismissible (Close, backdrop click, Escape). Optional sticky footer for Apply.

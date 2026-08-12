@@ -43,11 +43,28 @@ export function isSubagentSessionKind(kind: string | undefined): boolean {
 }
 
 /**
- * Filter catalog rows for the session rail: hide harness subagent kinds,
- * then optionally apply the search query. Subagent rows remain in the full
- * catalog so selectSession(childSessionId) still resolves.
+ * Whether a catalog row has content worth listing on the session rail.
+ * Local messages (non-empty timeline) always count. Remote `sessions_list`
+ * rows keep an empty timeline until hydrate — a non-weak title is treated as
+ * proof of on-disk content so those chats stay visible. Empty drafts /
+ * untitled ghosts (weak title + no timeline) are excluded.
+ * @param rec Catalog session row.
+ * @returns True when the row should appear in the rail list.
+ */
+export function sessionHasRailContent(rec: SessionRecord): boolean {
+  if ((rec.timeline?.length ?? 0) > 0) {
+    return true;
+  }
+  return !isWeakSessionTitle(rec.title);
+}
+
+/**
+ * Filter catalog rows for the session rail: hide harness subagent kinds and
+ * empty (no-message) drafts, then optionally apply the search query.
+ * Subagent rows remain in the full catalog so selectSession(childSessionId)
+ * still resolves.
  * @param catalog Full session catalog (including subagent rows).
- * @param query Free-text search over title and workspace; empty = all user chats.
+ * @param query Free-text search over title and workspace; empty = all listed chats.
  * @returns Rows safe to group/render in the rail.
  */
 export function filterCatalogForSessionRail(
@@ -55,7 +72,8 @@ export function filterCatalogForSessionRail(
   query = "",
 ): SessionRecord[] {
   const userChats = catalog.filter(
-    (s) => !isSubagentSessionKind(s.sessionKind),
+    (s) =>
+      !isSubagentSessionKind(s.sessionKind) && sessionHasRailContent(s),
   );
   const q = query.trim().toLowerCase();
   if (!q) {

@@ -26,13 +26,17 @@ export const sideNavShortcuts: Record<string, string> = {
     "shrink-0 inline-flex items-center justify-center min-w-7 h-7 px-1.5 rounded-kbd bg-kbd text-fg-muted font-sans text-11px font-normal tracking-normal leading-none",
   "side-nav-kbd-btn":
     "border-none cursor-pointer min-w-7 h-7 hover:(text-fg bg-white-soft) focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] rounded-kbd)",
-  /* Count badge: Tasks streaming on trigger / menu row */
+  /* Count badge: cross-session streaming on trigger / Overview menu row */
   "side-nav-nav-badge":
     "shrink-0 inline-flex items-center justify-center min-w-4.5 h-4.5 px-1 rounded-pill bg-white-soft text-fg-muted text-10px font-medium tabular-nums",
-  /* Workspace menu (user chip → Settings / Tasks / …) opens upward */
-  "side-nav-workspace-menu": "relative w-full",
+  /*
+   * Workspace menu (user chip → Settings / Overview / …) opens upward over the
+   * footer quota. z-10 keeps the whole chip+popover above the density track;
+   * overflow-hidden clips item paint to the shell radius.
+   */
+  "side-nav-workspace-menu": "relative z-10 w-full",
   "side-nav-workspace-menu-list":
-    "absolute left-0 right-0 bottom-[calc(100%+6px)] z-80 m-0 p-1.5 list-none min-w-0 rounded-shell border border-line-subtle bg-elevated shadow-popover animate-overlay-in",
+    "absolute left-0 right-0 bottom-[calc(100%+6px)] z-80 m-0 p-1.5 list-none min-w-0 overflow-hidden rounded-shell border border-line-subtle bg-elevated shadow-popover animate-overlay-in",
   "side-nav-workspace-menu-item":
     "flex w-full items-center justify-between gap-3 border-none rounded-8px bg-transparent px-2.5 py-2 text-left text-12px text-fg transition-colors duration-fast ease-soft hover:bg-white-faint",
   "side-nav-workspace-menu-label": "min-w-0 font-medium",
@@ -197,6 +201,11 @@ export const sideNavShortcuts: Record<string, string> = {
     "mt-auto px-3.5 pt-2.5 pb-1 border-t border-line-subtle flex flex-col gap-2.5",
   "side-nav-quota":
     "grid grid-cols-[1fr_auto] grid-rows-[auto_auto] gap-x-2 gap-y-1.5 px-0.5 items-center",
+  /*
+   * Menu open: keep layout (chip anchor stable) but drop paint so the light
+   * density track cannot show under the upward workspace popover.
+   */
+  "side-nav-quota-suppressed": "invisible pointer-events-none",
   "side-nav-quota-label": "text-11px text-fg-muted",
   "side-nav-quota-value": "text-11px text-fg-secondary tabular-nums",
   "side-nav-quota-track":

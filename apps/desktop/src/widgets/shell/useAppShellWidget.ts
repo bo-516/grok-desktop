@@ -12,15 +12,19 @@ import {
   saveContextDrawerPrefs,
   type DrawerLayout,
 } from "../../lib/contextDrawerPrefs";
+import { countRunningSubagents } from "../../lib/agentCards";
 import { loadTheme, type ThemeId } from "../../lib/theme";
 import { usePreviewStore } from "../../store/previewStore";
 import { useSessionStore } from "../../store/sessionStore";
 import {
+  contextRailAfterSessionChange,
+  contextRailHasContent,
   contextRailWidthPx,
   shouldAutoOpenPlanRail,
   toggleContextRail,
   toggleExclusivePanel,
   type ContextRailId,
+  type EnvironmentPageId,
   type PanelId,
 } from "./shellPanels";
 import { useShellChromeEvents } from "./useShellChromeEvents";
@@ -76,6 +80,9 @@ export function useAppShellWidget() {
   const lastSessionId = useRef<string | null>(null);
 
   const [activePanel, setActivePanel] = useState<PanelId | null>(null);
+  /** Deep-link page for the Environment sheet (reset on close not required). */
+  const [environmentPage, setEnvironmentPage] =
+    useState<EnvironmentPageId>("overview");
   const [contextRail, setContextRail] = useState<ContextRailId | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
@@ -115,6 +122,7 @@ export function useAppShellWidget() {
     setPaletteOpen,
     onRequestRewind: requestRewind,
     onNewSession,
+    setEnvironmentPage,
   });
 
   const canvasQueueId = sessionId.trim() || viewingSessionId?.trim() || "";
@@ -139,10 +147,21 @@ export function useAppShellWidget() {
       window.removeEventListener("grok-desktop:theme-changed", onTheme);
   }, []);
 
+  /**
+   * On session switch (new chat or catalog pick): close plan/agents by default
+   * and clear the "user dismissed rail" latch so a later plan arrival can
+   * auto-open again in the new session. Skips the initial mount (previous id
+   * is null) so we do not thrash state before first paint.
+   */
   useEffect(() => {
-    if (session.id !== lastSessionId.current) {
-      lastSessionId.current = session.id;
-      userClosedRail.current = false;
+    if (session.id === lastSessionId.current) {
+      return;
+    }
+    const previousId = lastSessionId.current;
+    lastSessionId.current = session.id;
+    userClosedRail.current = false;
+    if (previousId !== null) {
+      setContextRail((rail) => contextRailAfterSessionChange(rail));
     }
   }, [session.id]);
 
@@ -180,6 +199,13 @@ export function useAppShellWidget() {
   const authOk = environment?.ok !== false;
   const envKnown = environment !== null;
   const planCount = session.plan?.length ?? 0;
+  /**
+   * Running subagents in the *current* session — rail badge source.
+   * Deliberately not poolEntries: that counts other chats' streams and was
+   * the bug behind the old workspace Tasks badge.
+   */
+  const runningSubagents = countRunningSubagents(session.subagents);
+  const subagentCount = Object.keys(session.subagents ?? {}).length;
   const syncLabel = syncChipLabel({ live, status: session.status });
   const viewportWidth = viewportAllowsPush
     ? DRAWER_PUSH_MIN_WIDTH
@@ -190,16 +216,31 @@ export function useAppShellWidget() {
   );
   const layoutClamped =
     drawerLayoutPref === "push" && drawerEffectiveLayout === "overlay";
-  const contextRailOpen = contextRail === "plan" || contextRail === "preview";
+  const contextRailOpen =
+    contextRail === "plan" ||
+    contextRail === "preview" ||
+    contextRail === "agents";
   const planRailOpen = contextRail === "plan";
+  const agentsRailOpen = contextRail === "agents";
   const previewRailOpen = contextRail === "preview";
   /**
-   * Push only when the open rail has real content. An empty Plan (or empty
-   * Preview) uses overlay so the transcript is not squeezed for "No plan yet".
+   * Agent-surface card count (subagents + background tasks). Used only for
+   * push-vs-overlay: empty Agents must not steal space, but Plan content must
+   * keep push while the user is on the Agents tab (shared drawer).
    */
-  const railHasContent =
-    (planRailOpen && planCount > 0) ||
-    (previewRailOpen && previewTarget != null);
+  const agentItemCount =
+    subagentCount + Object.keys(session.backgroundTasks ?? {}).length;
+  /**
+   * Push only when the open rail has real content. Plan|Agents share content
+   * across tabs (see contextRailHasContent); empty companion / preview uses
+   * overlay so the transcript is not squeezed by a blank drawer.
+   */
+  const railHasContent = contextRailHasContent(
+    contextRail,
+    planCount,
+    agentItemCount,
+    previewTarget != null,
+  );
   const pushMode =
     contextRailOpen &&
     railHasContent &&
@@ -212,16 +253,26 @@ export function useAppShellWidget() {
   const closePanel = useCallback(() => setActivePanel(null), []);
   const toggleContext = useCallback(() => {
     setContextRail((rail) => {
-      const next = toggleContextRail(rail, "plan");
+      // Prefer reopening the last non-preview surface; default plan.
+      const target: ContextRailId =
+        rail === "agents" || rail === "plan" ? rail : "plan";
+      const next = toggleContextRail(rail === "preview" ? null : rail, target);
       if (next === null) {
         userClosedRail.current = true;
       }
-      if (next === "plan") {
+      if (next === "plan" || next === "agents") {
         closePreview();
       }
       return next;
     });
   }, [closePreview]);
+  const selectContextTab = useCallback(
+    (next: "plan" | "agents") => {
+      closePreview();
+      setContextRail(next);
+    },
+    [closePreview],
+  );
   const closeContextRail = useCallback(() => {
     userClosedRail.current = true;
     closePreview();
@@ -253,10 +304,13 @@ export function useAppShellWidget() {
     envKnown,
     syncLabel,
     planCount,
+    runningSubagents,
     activePanel,
+    environmentPage,
     contextRail,
     contextRailOpen,
     planRailOpen,
+    agentsRailOpen,
     previewRailOpen,
     railWidthPx,
     paletteOpen,
@@ -269,6 +323,7 @@ export function useAppShellWidget() {
     togglePanel,
     closePanel,
     toggleContext,
+    selectContextTab,
     closeContextRail,
     requestDelete,
     requestRewind,

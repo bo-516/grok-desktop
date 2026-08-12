@@ -25,10 +25,13 @@ import { useComposerWidget } from "./useComposerWidget";
  */
 export function ComposerWidget() {
   const widget = useComposerWidget();
-  const idlePlaceholder =
-    widget.timelineLength > 0
-      ? "Continue the conversation…"
-      : "Ask Grok anything";
+  let idlePlaceholder = "Ask Grok anything";
+  if (widget.viewingSubagent) {
+    idlePlaceholder =
+      "Subagent session is read-only · return to the parent to continue";
+  } else if (widget.timelineLength > 0) {
+    idlePlaceholder = "Continue the conversation…";
+  }
   /** Listening owns the field chrome so Mic state and the textarea stay in sync. */
   const placeholder = widget.dictating ? "Listening…" : idlePlaceholder;
   /** Single reserved status row — text/tone only; never mounts/unmounts. */

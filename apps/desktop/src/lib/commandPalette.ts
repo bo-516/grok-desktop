@@ -66,11 +66,32 @@ export function defaultPaletteActions(): PaletteItem[] {
       runValue: "open_settings",
     },
     {
-      id: "action:extensions",
+      id: "action:environment",
       kind: "setting",
-      label: "Open extensions / inspect",
-      description: "MCP, skills, hooks, plugins",
-      runValue: "open_extensions",
+      label: "Environment",
+      description: "Agent environment — MCP, skills, plugins, hooks",
+      runValue: "open_environment",
+    },
+    {
+      id: "action:env-mcp",
+      kind: "setting",
+      label: "MCP servers",
+      description: "Open Environment on MCP servers",
+      runValue: "open_env_mcp",
+    },
+    {
+      id: "action:env-skills",
+      kind: "setting",
+      label: "Skills",
+      description: "Open Environment on Skills",
+      runValue: "open_env_skills",
+    },
+    {
+      id: "action:env-plugins",
+      kind: "setting",
+      label: "Plugins",
+      description: "Open Environment on Plugins",
+      runValue: "open_env_plugins",
     },
     {
       id: "action:overview",
@@ -80,11 +101,11 @@ export function defaultPaletteActions(): PaletteItem[] {
       runValue: "open_overview",
     },
     {
-      id: "action:tasks",
+      id: "action:agents",
       kind: "setting",
-      label: "Background tasks",
-      description: "Terminals, loops, /tasks",
-      runValue: "open_tasks",
+      label: "Session agents",
+      description: "Subagents and background tasks for this chat",
+      runValue: "open_agents",
     },
     {
       id: "action:theme",
@@ -177,14 +198,47 @@ export function prefillComposer(text: string): void {
 }
 
 /**
- * Open a chrome drawer by id (settings / extensions / overview / tasks).
+ * Open a chrome drawer by id (settings / environment / overview).
  * @param panel Panel id consumed by App open-panel listener.
  */
 export function openAppPanel(
-  panel: "settings" | "extensions" | "overview" | "tasks",
+  panel: "settings" | "environment" | "overview",
 ): void {
   window.dispatchEvent(
     new CustomEvent("grok-desktop:open-panel", { detail: panel }),
+  );
+}
+
+/**
+ * Open the Environment sheet, optionally on a specific page.
+ * @param page Page id; defaults to overview when omitted.
+ */
+export function openEnvironment(
+  page?:
+    | "overview"
+    | "mcp"
+    | "skills"
+    | "agents"
+    | "plugins"
+    | "marketplaces"
+    | "hooks"
+    | "rules"
+    | "compat",
+): void {
+  window.dispatchEvent(
+    new CustomEvent("grok-desktop:open-environment", {
+      detail: page ?? "overview",
+    }),
+  );
+}
+
+/**
+ * Open a session context rail surface (plan / agents / preview).
+ * @param rail Rail id consumed by useShellChromeEvents open-rail listener.
+ */
+export function openAppRail(rail: "plan" | "agents" | "preview"): void {
+  window.dispatchEvent(
+    new CustomEvent("grok-desktop:open-rail", { detail: rail }),
   );
 }
 

@@ -91,13 +91,10 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
    * Workspace-folder groups: project-name first-char order stays fixed.
    * Inside each folder: pin → drag → last message recency (`updatedAt`
    * desc). Pin never reorders the folder list itself.
+   * Subagents and empty (no-message / untitled) drafts are stripped by
+   * {@link filterCatalogForSessionRail} so the list only shows real chats.
    */
   const groups = useMemo(() => {
-    /**
-     * Harness-spawned subagent chats stay in `catalog` (selectSessionAction
-     * resolves drill-down targets through it) but must not appear as
-     * user-owned conversations in the rail.
-     */
     const filtered = filterCatalogForSessionRail(catalog, query);
     const byProject = groupSessionsByProject(filtered);
     return orderGroupsBySessionPin(
@@ -111,6 +108,15 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     railPrefs.pinnedSessions,
     railPrefs.sessionOrderByWorkspace,
   ]);
+
+  /**
+   * Rail-visible session count (no search). Footer "Sessions N" uses this so
+   * empty drafts / subagents do not inflate the density cue.
+   */
+  const catalogLength = useMemo(
+    () => filterCatalogForSessionRail(catalog).length,
+    [catalog],
+  );
 
   const selectedId = viewingSessionId ?? activeSessionId;
   /**
@@ -306,7 +312,7 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     streamingCount,
     live,
     liveCount,
-    catalogLength: catalog.length,
+    catalogLength,
     selectedWorkspace,
     newSession,
     runCli,

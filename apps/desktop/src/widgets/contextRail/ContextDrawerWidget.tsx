@@ -1,7 +1,7 @@
 /**
- * Full-height non-modal plan companion drawer (always mounted).
- * Chrome owns open/close, layout preference footer, and Escape;
- * PlanPanelView is display-only body content.
+ * Full-height non-modal session companion drawer (always mounted).
+ * Chrome owns open/close, Plan | Agents tabs, layout preference footer, and Escape.
+ * Body content is PlanPanelView or AgentsRailWidget by active tab.
  */
 
 import type { PlanEntry } from "@grok-desktop/acp-core";
@@ -10,13 +10,22 @@ import { X } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { Checkbox } from "@/components/ui/Checkbox";
 import type { DrawerLayout } from "@/lib/contextDrawerPrefs";
+import type { ContextRailId } from "@/widgets/shell/shellPanels";
+import { AgentsRailWidget } from "@/widgets/agentsRail";
 import { PlanPanelView } from "../PlanPanelView";
 
 export type ContextDrawerWidgetProps = {
   /** Whether the drawer is slid in (still mounted when false). */
   open: boolean;
+  /**
+   * Which session surface is active: plan checklist or agents list.
+   * Preview uses its own drawer; this chrome is shared by plan + agents only.
+   */
+  rail: Extract<ContextRailId, "plan" | "agents"> | null;
   /** Plan entries from the live session; empty still shows empty state. */
   plan: PlanEntry[] | undefined;
+  /** Running subagent count for the Agents tab badge (current session only). */
+  runningSubagents: number;
   /**
    * Effective layout after narrow-window clamp (drives shadow + push chrome).
    * When "overlay", drawer paints shadow-modal; push mode is flush.
@@ -35,6 +44,11 @@ export type ContextDrawerWidgetProps = {
   /** Close the drawer (user dismiss — shell remembers for auto-open). */
   onClose: () => void;
   /**
+   * Switch between Plan and Agents without closing the drawer.
+   * @param next Tab the user selected.
+   */
+  onSelectTab: (next: "plan" | "agents") => void;
+  /**
    * Persist layout preference when the user toggles the footer checkbox.
    * @param layout Next preferred layout (push | overlay).
    */
@@ -42,14 +56,16 @@ export type ContextDrawerWidgetProps = {
 };
 
 /**
- * Always-mounted right drawer with head chrome, plan body, and layout footer.
+ * Always-mounted right drawer with Plan|Agents tabs, body, and layout footer.
  * Closed state uses inert + off-screen translate so exit motion and aria-controls work.
- * @param props Open flag, plan data, layout prefs, and close/change handlers.
+ * @param props Open flag, rail tab, plan/agents data, layout prefs, handlers.
  * @returns Aside with id=context-rail for aria-controls from the top-nav toggle.
  */
 export function ContextDrawerWidget(props: ContextDrawerWidgetProps) {
-  const count = props.plan?.length ?? 0;
+  const planCount = props.plan?.length ?? 0;
   const isOverlay = props.effectiveLayout === "overlay";
+  const activeTab: "plan" | "agents" =
+    props.rail === "agents" ? "agents" : "plan";
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key !== "Escape") {
@@ -75,29 +91,62 @@ export function ContextDrawerWidget(props: ContextDrawerWidgetProps) {
       onKeyDown={onKeyDown}
     >
       <div className="context-drawer-head">
-        <h2 className="context-drawer-title">
-          <span>Plan</span>
-          {count > 0 ? (
-            <span
-              className="context-drawer-count"
-              aria-label={`${count} steps`}
-            >
-              {count}
-            </span>
-          ) : null}
-        </h2>
+        <div className="context-drawer-tabs" role="tablist" aria-label="Session rail">
+          <button
+            type="button"
+            role="tab"
+            className={cs("context-drawer-tab", {
+              "context-drawer-tab-active": activeTab === "plan",
+            })}
+            aria-selected={activeTab === "plan"}
+            onClick={() => props.onSelectTab("plan")}
+          >
+            Plan
+            {planCount > 0 ? (
+              <span
+                className="context-drawer-count"
+                aria-label={`${planCount} steps`}
+              >
+                {planCount}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={cs("context-drawer-tab", {
+              "context-drawer-tab-active": activeTab === "agents",
+            })}
+            aria-selected={activeTab === "agents"}
+            onClick={() => props.onSelectTab("agents")}
+          >
+            Agents
+            {props.runningSubagents > 0 ? (
+              <span
+                className="context-drawer-count"
+                aria-label={`${props.runningSubagents} running`}
+              >
+                {props.runningSubagents}
+              </span>
+            ) : null}
+          </button>
+        </div>
         <button
           type="button"
           className="context-drawer-close"
           onClick={props.onClose}
-          aria-label="Close plan rail"
+          aria-label="Close session rail"
           title="Close"
         >
           <X size={16} strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
       <div className="context-drawer-body">
-        <PlanPanelView entries={props.plan} />
+        {activeTab === "agents" ? (
+          <AgentsRailWidget />
+        ) : (
+          <PlanPanelView entries={props.plan} />
+        )}
       </div>
       <div className="context-drawer-footer">
         <Checkbox

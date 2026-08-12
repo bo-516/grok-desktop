@@ -109,6 +109,11 @@ export function connectLiveBridge(
     spawnConfig?: SessionSpawnConfig,
     alwaysApprove?: boolean,
   ) => boolean;
+  /**
+   * Prefill the client reduce bucket (optimistic user row / seed canvas).
+   * @param session Canvas session snapshot; must carry a non-empty id.
+   */
+  seedSession: (session: SessionState) => void;
   cli: (
     command: string,
     args?: Record<string, unknown>,

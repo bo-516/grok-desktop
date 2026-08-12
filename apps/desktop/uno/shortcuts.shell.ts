@@ -46,7 +46,7 @@ export const shellShortcuts: Record<string, string> = {
     /* Session ⋯ overflow menu (fork/rewind/media slash) */
     "top-nav-menu": "relative shrink-0",
     "top-nav-menu-list":
-      "absolute right-0 top-[calc(100%+6px)] z-80 m-0 p-1.5 list-none min-w-52 max-h-[min(70vh,420px)] overflow-y-auto rounded-shell border border-line-subtle bg-elevated shadow-popover animate-overlay-in",
+      "absolute right-0 top-[calc(100%+6px)] z-80 m-0 p-1.5 list-none min-w-64 max-h-[min(70vh,420px)] overflow-y-auto rounded-shell border border-line-subtle bg-elevated shadow-popover animate-overlay-in",
     "top-nav-menu-item":
       "flex w-full items-center justify-between gap-3 border-none rounded-8px bg-transparent px-2.5 py-2 text-left text-12px text-fg transition-colors duration-fast ease-soft hover:bg-white-faint",
     "top-nav-menu-item-danger": "text-danger hover:bg-danger-muted",

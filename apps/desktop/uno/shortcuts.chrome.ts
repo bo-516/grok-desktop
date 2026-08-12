@@ -37,6 +37,11 @@ export const chromeShortcuts: Record<string, string> = {
      */
     "context-drawer-head":
       "flex items-center justify-between gap-2 h-topnav px-3.5 shrink-0 border-b border-line-subtle bg-titlebar",
+    "context-drawer-tabs":
+      "flex items-center gap-0.5 min-w-0 flex-1",
+    "context-drawer-tab":
+      "inline-flex items-center gap-1.5 border-none bg-transparent px-2 py-1 rounded-control text-12px font-medium text-fg-muted cursor-pointer transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg)",
+    "context-drawer-tab-active": "bg-white-soft text-fg",
     "context-drawer-title":
       "m-0 flex items-center gap-1.5 min-w-0 flex-1 text-13px font-medium tracking-tight text-fg text-left",
     "context-drawer-count":
@@ -47,6 +52,24 @@ export const chromeShortcuts: Record<string, string> = {
       "flex-1 min-h-0 flex flex-col overflow-hidden",
     "context-drawer-footer":
       "shrink-0 border-t border-line-subtle px-3.5 py-3 bg-surface",
+    /* Session-scoped Agents rail (L2) */
+    "agents-rail":
+      "flex flex-col flex-1 min-h-0 overflow-y-auto",
+    "agents-rail-section":
+      "flex flex-col gap-2 px-3.5 py-3 border-b border-line-subtle last:border-b-0",
+    "agents-rail-section-title":
+      "m-0 text-10px font-semibold uppercase tracking-wide text-fg-muted",
+    "agents-rail-goal-line":
+      "m-0 text-12px text-fg-secondary",
+    "agents-rail-goal-objective":
+      "m-0 text-11px text-fg-muted line-clamp-3",
+    "agents-rail-round": "flex flex-col gap-1.5",
+    "agents-rail-round-title":
+      "m-0 text-11px font-medium text-fg-secondary",
+    "agents-rail-list": "m-0 p-0 list-none flex flex-col gap-1",
+    "agents-rail-row":
+      "w-full text-left text-12px leading-snug text-fg px-1.5 py-1 rounded-control",
+    "agents-rail-row-disabled": "text-fg-muted cursor-default",
     /* Plan panel — display-only checklist (no approval dock) */
     "plan-panel": "flex flex-col flex-1 min-h-0",
     "plan-empty":
@@ -111,7 +134,7 @@ export const chromeShortcuts: Record<string, string> = {
     "modal-actions": "flex flex-row justify-end gap-2",
 
     /*
-     * Side drawers (Settings / Extensions / Overview / Tasks).
+     * Side drawers (Settings / Environment / Overview / Tasks).
      * Fixed overlay + elevated dark surface + explicit text-fg — without these
      * the panel was a bare flex child (native white form chrome + light text =
      * white-out / "can't close" UX).
@@ -243,6 +266,75 @@ export const chromeShortcuts: Record<string, string> = {
     "palette-desc":
       "min-w-0 flex-1 text-fg-muted text-11px overflow-hidden text-ellipsis whitespace-nowrap",
     "palette-empty": "px-3 py-6 text-center text-12px text-fg-muted",
+
+    /*
+     * Environment sheet (Agent environment) — wide two-pane modal catalog.
+     * Grammar matches palette-panel (elevated + modal shadow), not side-panel.
+     */
+    "env-sheet":
+      "w-env-sheet max-w-[92vw] h-[min(640px,86vh)] max-h-[86vh] flex flex-col overflow-hidden bg-elevated text-fg border border-line-subtle rounded-modal shadow-modal animate-modal-in",
+    "env-sheet-head":
+      "flex items-center justify-between gap-3 shrink-0 px-4 py-3 border-b border-line-subtle",
+    "env-sheet-title":
+      "m-0 text-14px font-medium tracking-tight text-fg",
+    "env-sheet-body":
+      "flex flex-1 min-h-0 min-w-0",
+    "env-nav":
+      "w-env-nav shrink-0 flex flex-col gap-0.5 p-2 border-r border-line-subtle overflow-y-auto",
+    "env-nav-item":
+      "flex w-full items-center gap-2 border-none rounded-8px bg-transparent px-2.5 py-2 text-left text-12px text-fg-secondary cursor-pointer transition-colors duration-fast ease-soft hover:(bg-white-faint text-fg)",
+    "env-nav-item-active":
+      "bg-white-soft text-fg font-medium",
+    "env-nav-label": "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+    "env-nav-count":
+      "shrink-0 text-10px font-normal text-fg-muted tabular-nums px-1.5 py-0.5 rounded-pill bg-white-faint",
+    "env-page":
+      "flex flex-1 min-w-0 min-h-0 flex-col",
+    "env-toolbar":
+      "flex flex-wrap items-center gap-2 shrink-0 px-3 py-2.5 border-b border-line-subtle",
+    "env-toolbar-search":
+      "min-w-0 flex-1 max-w-xs",
+    "env-toolbar-meta":
+      "shrink-0 text-11px text-fg-muted",
+    "env-list":
+      "m-0 p-2 list-none flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5",
+    "env-row":
+      "flex flex-col gap-0.5 rounded-8px px-2.75 py-2 transition-colors duration-fast ease-soft hover:bg-white-soft",
+    "env-row-main":
+      "flex items-center gap-2 min-w-0",
+    "env-row-meta":
+      "flex items-center gap-2 min-w-0 pl-4 text-11px text-fg-muted",
+    "env-row-name":
+      "min-w-0 flex-1 font-medium text-12px text-fg overflow-hidden text-ellipsis whitespace-nowrap",
+    "env-row-desc":
+      "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+    "env-row-actions":
+      "shrink-0 flex items-center gap-1 opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 focus-within:opacity-100",
+    "env-chip":
+      "shrink-0 text-10px uppercase tracking-wide text-fg-muted px-1.5 py-0.5 rounded-pill bg-white-faint border border-line-subtle",
+    "env-status-dot":
+      "shrink-0 w-2 h-2 rounded-full",
+    "env-status-healthy": "bg-success",
+    "env-status-failing": "bg-danger",
+    "env-status-disabled": "bg-fg-muted opacity-50",
+    "env-status-unchecked":
+      "bg-transparent border border-line-strong",
+    "env-empty":
+      "flex flex-col items-center justify-center gap-1.5 px-4 py-10 text-center",
+    "env-empty-title":
+      "m-0 text-13px font-medium text-fg",
+    "env-empty-hint":
+      "m-0 text-12px text-fg-muted max-w-sm",
+    "env-overview-grid":
+      "grid grid-cols-2 gap-2 p-3",
+    "env-overview-card":
+      "flex flex-col gap-1 rounded-card border border-line-subtle bg-white-faint px-3 py-2.5 text-left cursor-pointer transition-colors duration-fast ease-soft hover:bg-white-soft",
+    "env-overview-card-label":
+      "m-0 text-10px font-semibold uppercase tracking-wide text-fg-muted",
+    "env-overview-card-value":
+      "m-0 text-18px font-medium tabular-nums text-fg",
+    "env-overview-meta":
+      "flex flex-col gap-1.5 px-3 pb-3 text-12px text-fg-secondary",
 
     /* Multi-session overview rows */
     "overview-bucket":

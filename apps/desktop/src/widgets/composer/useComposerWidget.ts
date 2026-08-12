@@ -166,19 +166,25 @@ export function useComposerWidget() {
       window.removeEventListener("grok-desktop:prefill-composer", onPrefill);
   }, [setDraft, showNotice, textareaRef]);
 
+  const viewingSubagent = useSessionStore((state) => state.viewingSubagent);
   const streaming = status === "streaming";
   const waitingPermission = status === "waiting_permission";
-  const canType = connectionMode !== "connecting";
+  const canType = connectionMode !== "connecting" && !viewingSubagent;
   /**
    * Images alone only count as sendable when the agent advertises image input.
    * Unsupported thumbs still render for local preview; send stays disabled until
    * there is wire-ready content (text / mentions / capable images).
+   * Harness subagent sessions are store-derived readonly — never send into them.
    */
   const hasSendableContent =
     completion.draft.trim().length > 0 ||
     (media.attachments.length > 0 && media.imageCapable);
   const canSend =
-    canType && !waitingPermission && hasSendableContent && !streaming;
+    canType &&
+    !waitingPermission &&
+    hasSendableContent &&
+    !streaming &&
+    !viewingSubagent;
 
   const dictation = useComposerDictation({
     draft: completion.draft,
@@ -395,6 +401,7 @@ export function useComposerWidget() {
     attachments: media.attachments,
     canSend,
     canType,
+    viewingSubagent,
     cancelTurn,
     closeMenu: bar.closeMenu,
     closeModeMenu: bar.closeModeMenu,

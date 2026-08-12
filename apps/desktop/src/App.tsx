@@ -12,16 +12,36 @@ import { PermissionModalView } from "./widgets/PermissionModalView";
 import { SessionRailWidget } from "@/widgets/sessionRail";
 import { TopNavWidget } from "./widgets/TopNavWidget";
 import { CommandPaletteWidget } from "./widgets/CommandPaletteWidget";
-import { ExtensionsPanelWidget } from "./widgets/ExtensionsPanelWidget";
+import { EnvironmentSheetWidget } from "@/widgets/environment";
 import { SettingsPanelWidget } from "./widgets/SettingsPanelWidget";
 import { MultiSessionOverviewWidget } from "./widgets/MultiSessionOverviewWidget";
-import { TasksPanelWidget } from "./widgets/TasksPanelWidget";
 import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
 import { ContextDrawerWidget } from "@/widgets/contextRail";
 import { PreviewDrawerWidget } from "@/widgets/preview";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
+import type { ContextRailId } from "./widgets/shell/shellPanels";
+
+/**
+ * Active Plan|Agents tab for the shared context drawer.
+ * Agents wins when both flags are somehow true (mutual exclusion is the norm).
+ * @param agentsRailOpen Whether the agents context rail is selected.
+ * @param planRailOpen Whether the plan context rail is selected.
+ * @returns `"agents"` | `"plan"` | null when neither is open.
+ */
+function contextDrawerRail(
+  agentsRailOpen: boolean,
+  planRailOpen: boolean,
+): Extract<ContextRailId, "plan" | "agents"> | null {
+  if (agentsRailOpen) {
+    return "agents";
+  }
+  if (planRailOpen) {
+    return "plan";
+  }
+  return null;
+}
 
 /**
  * Root shell: rails, top bar, timeline, composer, drawers, palette.
@@ -62,6 +82,7 @@ export function App() {
           contextRailOpen={shell.contextRailOpen}
           pushMode={shell.pushMode}
           planCount={shell.planCount}
+          runningSubagents={shell.runningSubagents}
           onToggleContextRail={shell.toggleContext}
           onRequestRewind={shell.requestRewind}
           onRequestDelete={shell.requestDelete}
@@ -99,12 +120,15 @@ export function App() {
           </section>
 
           <ContextDrawerWidget
-            open={shell.planRailOpen}
+            open={shell.planRailOpen || shell.agentsRailOpen}
+            rail={contextDrawerRail(shell.agentsRailOpen, shell.planRailOpen)}
             plan={shell.session.plan}
+            runningSubagents={shell.runningSubagents}
             effectiveLayout={shell.drawerEffectiveLayout}
             pushPreferred={shell.drawerLayoutPref === "push"}
             layoutClamped={shell.layoutClamped}
             onClose={shell.closeContextRail}
+            onSelectTab={shell.selectContextTab}
             onLayoutChange={shell.setDrawerLayout}
           />
           <PreviewDrawerWidget
@@ -112,9 +136,10 @@ export function App() {
             effectiveLayout={shell.drawerEffectiveLayout}
             onClose={shell.closeContextRail}
           />
-          <ExtensionsPanelWidget
-            open={shell.activePanel === "extensions"}
+          <EnvironmentSheetWidget
+            open={shell.activePanel === "environment"}
             onClose={shell.closePanel}
+            initialPage={shell.environmentPage}
           />
           <SettingsPanelWidget
             open={shell.activePanel === "settings"}
@@ -122,10 +147,6 @@ export function App() {
           />
           <MultiSessionOverviewWidget
             open={shell.activePanel === "overview"}
-            onClose={shell.closePanel}
-          />
-          <TasksPanelWidget
-            open={shell.activePanel === "tasks"}
             onClose={shell.closePanel}
           />
         </div>

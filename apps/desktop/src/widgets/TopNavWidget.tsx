@@ -23,7 +23,12 @@ export type TopNavWidgetProps = {
   pushMode: boolean;
   /** Plan step count for the context-drawer badge (0 hides badge). */
   planCount: number;
-  /** Toggle right context drawer (plan). */
+  /**
+   * Running subagents in the current session (Agents badge contribution).
+   * Combined with planCount for the top-nav ⧉ chip.
+   */
+  runningSubagents?: number;
+  /** Toggle right context drawer (plan / agents). */
   onToggleContextRail: () => void;
   /** Open rewind confirm. */
   onRequestRewind: () => void;
@@ -40,13 +45,20 @@ export type TopNavWidgetProps = {
 
 /**
  * Stateful top chrome: title, sync, context drawer toggle, session menu.
+ * When viewing a harness subagent, shows a breadcrumb back to the parent.
  * @param props Shell state from useAppShellWidget.
  * @returns Fixed top-nav header.
  */
 export function TopNavWidget(props: TopNavWidgetProps) {
   const session = useSessionStore((s) => s.session);
-  const badge =
-    props.planCount > 0 ? String(props.planCount) : null;
+  const viewingSubagent = useSessionStore((s) => s.viewingSubagent);
+  const viewingParentSessionId = useSessionStore(
+    (s) => s.viewingParentSessionId,
+  );
+  const selectSession = useSessionStore((s) => s.selectSession);
+  const running = props.runningSubagents ?? 0;
+  const badgeTotal = props.planCount + running;
+  const badge = badgeTotal > 0 ? String(badgeTotal) : null;
 
   return (
     <header
@@ -68,8 +80,26 @@ export function TopNavWidget(props: TopNavWidgetProps) {
             ☰
           </button>
         ) : null}
-        <span className="top-nav-session-title" title={props.title}>
-          {props.title}
+        {viewingSubagent && viewingParentSessionId ? (
+          <button
+            type="button"
+            className="top-nav-back-btn btn-ghost"
+            onClick={() => selectSession(viewingParentSessionId)}
+            title="Return to parent session"
+            aria-label="Return to parent session"
+          >
+            ← Parent
+          </button>
+        ) : null}
+        <span
+          className="top-nav-session-title"
+          title={
+            viewingSubagent
+              ? `Subagent · ${props.title}`
+              : props.title
+          }
+        >
+          {viewingSubagent ? `Subagent · ${props.title}` : props.title}
         </span>
         <span
           className={cs("top-nav-sync", {
@@ -91,8 +121,8 @@ export function TopNavWidget(props: TopNavWidgetProps) {
             className={cs("top-nav-icon-btn", "top-nav-context-btn", {
               "top-nav-link-active": props.contextRailOpen,
             })}
-            title="Toggle plan / context rail (⌘\\)"
-            aria-label="Toggle context rail"
+            title="Toggle session rail (⌘\\)"
+            aria-label="Toggle session rail"
             aria-expanded={props.contextRailOpen}
             aria-controls="context-rail"
             onClick={props.onToggleContextRail}

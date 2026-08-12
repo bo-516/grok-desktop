@@ -4,12 +4,15 @@
  */
 
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   readAllUnoShortcuts,
   readBaseStyles,
   readDesktopRoot,
   readSrc,
+  SRC_ROOT,
   srcExists,
 } from "../helpers/sourceFiles";
 
@@ -157,15 +160,17 @@ describe("UI surface presence", () => {
     assert.match(top, /top-nav/);
   });
 
-  it("surfaces command palette, extensions, settings, plan display-only, confirm", () => {
+  it("surfaces command palette, environment sheet, settings, plan display-only, confirm", () => {
     const app = readSrc("App.tsx");
     assert.match(app, /CommandPaletteWidget/);
-    assert.match(app, /ExtensionsPanelWidget/);
+    assert.match(app, /EnvironmentSheetWidget/);
+    assert.doesNotMatch(app, /ExtensionsPanelWidget/);
     assert.match(app, /SettingsPanelWidget/);
     assert.match(app, /ConfirmDialogView/);
     assert.match(app, /buildConfirmPrompt/);
     const shellHook = readSrc("widgets/shell/useAppShellWidget.ts");
     assert.match(shellHook, /activePanel|toggleExclusivePanel|PanelId/);
+    assert.match(shellHook, /environmentPage/);
     const shell = readSrc("widgets/SidePanelShell.tsx");
     assert.match(shell, /side-panel-backdrop/);
     assert.match(shell, /side-panel-close/);
@@ -173,6 +178,12 @@ describe("UI surface presence", () => {
     // Modal focus: enter trap + restore; skip Escape under stacked alertdialog.
     assert.match(shell, /focusInitialIn|trapFocusTab|restoreFocus/);
     assert.match(shell, /alertdialog/);
+    // Environment sheet is a modal catalog, not the 400px side drawer.
+    const envSheet = readSrc("widgets/environment/EnvironmentSheetWidget.tsx");
+    assert.match(envSheet, /env-sheet/);
+    assert.match(envSheet, /Agent environment/);
+    assert.match(envSheet, /role="dialog"/);
+    assert.doesNotMatch(envSheet, /JSON\.stringify/);
     const confirm = readSrc("widgets/ConfirmDialogView.tsx");
     assert.match(confirm, /onCancel/);
     assert.match(confirm, /Escape/);
@@ -196,8 +207,9 @@ describe("UI surface presence", () => {
     const app = readSrc("App.tsx");
     assert.match(app, /ContextDrawerWidget/);
     assert.match(app, /PreviewDrawerWidget/);
-    assert.match(app, /open=\{shell\.planRailOpen\}/);
+    assert.match(app, /planRailOpen \|\| shell\.agentsRailOpen|open=\{shell\.planRailOpen/);
     assert.match(app, /open=\{shell\.previewRailOpen\}/);
+    assert.match(app, /selectContextTab|onSelectTab/);
     assert.doesNotMatch(app, /contextRail === "plan" \? </);
     assert.match(app, /main-body-railed/);
     assert.match(app, /from "@\/widgets\/contextRail"/);
@@ -225,6 +237,19 @@ describe("UI surface presence", () => {
     assert.match(shellHook, /loadContextDrawerPrefs|saveContextDrawerPrefs/);
     assert.match(shellHook, /effectiveDrawerLayout|DRAWER_PUSH_MIN_WIDTH/);
     assert.match(shellHook, /matchMedia/);
+    // Plan|Agents share push content so tab switches do not jump main width.
+    assert.match(shellHook, /contextRailHasContent/);
+    assert.match(shellHook, /agentItemCount/);
+    assert.match(shellHook, /backgroundTasks/);
+    // Reject the old per-active-tab content checks (caused Plan→Agents resize).
+    assert.doesNotMatch(
+      shellHook,
+      /planRailOpen\s*&&\s*planCount\s*>\s*0/,
+    );
+    assert.doesNotMatch(
+      shellHook,
+      /agentsRailOpen\s*&&\s*subagentCount\s*>\s*0/,
+    );
 
     const prefs = readSrc("lib/contextDrawerPrefs.ts");
     assert.match(prefs, /export function normalizeContextDrawerPrefs/);
@@ -274,6 +299,12 @@ describe("UI surface presence", () => {
     const panels = readSrc("widgets/shell/shellPanels.ts");
     assert.match(panels, /ContextRailId\s*=\s*"plan"\s*\|\s*"preview"/);
     assert.match(panels, /contextRailWidthPx/);
+    assert.match(panels, /export function contextRailHasContent/);
+    // Shared companion: either Plan or Agents content drives both tabs.
+    assert.match(
+      panels,
+      /rail === "plan" \|\| rail === "agents"[\s\S]*?planCount > 0 \|\| agentItemCount > 0/,
+    );
 
     const previewDrawer = readSrc("widgets/preview/PreviewDrawerWidget.tsx");
     assert.match(previewDrawer, /id="preview-rail"/);
@@ -288,6 +319,9 @@ describe("UI surface presence", () => {
     const shellPanelsSrc = readSrc("widgets/shell/shellPanels.ts");
     // Preview rail must not be auto-stolen by plan open.
     assert.match(shellPanelsSrc, /contextRail !== null/);
+    // Session switch closes plan/agents companion by default.
+    assert.match(shellPanelsSrc, /export function contextRailAfterSessionChange/);
+    assert.match(shellHook, /contextRailAfterSessionChange/);
   });
 
   it("Uno shortcuts define side-panel and btn-ghost (no white-out drawers)", () => {
@@ -340,7 +374,7 @@ describe("UI surface presence", () => {
     // Labels that used to live in top-nav chrome — allow doc comments only
     assert.doesNotMatch(
       top,
-      />(?:Chat|Tasks|Overview|Extensions|Settings)</,
+      />(?:Chat|Tasks|Overview|Extensions|Environment|Settings)</,
     );
     assert.doesNotMatch(top, /Plan ·/);
     // Composer owns mode chrome
@@ -530,11 +564,14 @@ describe("UI surface presence", () => {
     assert.match(sbx, /Linux/);
   });
 
-  it("overview, tasks, tool group, fork/rewind surfaces exist", () => {
+  it("overview, agents rail, tool group, fork/rewind surfaces exist", () => {
     const app = readSrc("App.tsx");
     assert.match(app, /MultiSessionOverviewWidget/);
-    assert.match(app, /TasksPanelWidget/);
+    assert.doesNotMatch(app, /TasksPanelWidget/);
+    assert.match(app, /ContextDrawerWidget/);
     assert.match(app, /buildRewindCommand/);
+    const agents = readSrc("widgets/agentsRail/AgentsRailWidget.tsx");
+    assert.match(agents, /AgentsRailView/);
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
     assert.match(menu, /buildForkCommand|runSessionMenuAction/);
     const timeline = readSrc("widgets/timeline/TimelineView.tsx");
@@ -734,17 +771,22 @@ describe("UI surface presence", () => {
       /"project-switcher-menu":[\s\S]*?bottom-\[calc\(100%/,
     );
     // Footer: session density + workspace menu (Settings / Tasks / …).
+    // Quota lives with the menu view so open can suppress the light track.
     const footer = readSrc("widgets/SessionRailFooterView.tsx");
     assert.match(footer, /SessionRailWorkspaceMenuWidget/);
-    assert.match(footer, /side-nav-quota/);
+    assert.match(footer, /catalogLength/);
     const workspaceMenu = readSrc("widgets/SessionRailWorkspaceMenuView.tsx");
     assert.match(workspaceMenu, /aria-label="Workspace"/);
     assert.match(workspaceMenu, /side-nav-workspace-menu/);
+    assert.match(workspaceMenu, /side-nav-quota/);
+    assert.match(workspaceMenu, /side-nav-quota-suppressed/);
     const workspaceWidget = readSrc(
       "widgets/SessionRailWorkspaceMenuWidget.tsx",
     );
-    assert.match(workspaceWidget, /detail:\s*panel|open-panel/);
-    assert.match(workspaceWidget, /settings|tasks|overview|extensions/);
+    assert.match(workspaceWidget, /detail:\s*panel|open-panel|open-environment/);
+    assert.match(workspaceWidget, /settings|overview|environment/);
+    assert.doesNotMatch(workspaceWidget, /"tasks"/);
+    assert.doesNotMatch(workspaceWidget, /"extensions"/);
     assert.match(workspaceWidget, /reconnect/);
     const groupView = readSrc("widgets/SessionRailProjectGroupView.tsx");
     assert.match(groupView, /project-group-name/);
@@ -836,7 +878,7 @@ describe("UI surface presence", () => {
       /"sess-row-pinned":[\s\S]*?\[&_\.sess-pin\]:\(opacity-100/,
     );
     assert.match(shortcuts, /"sess-time":[\s\S]*?group-hover:opacity-0/);
-    assert.match(shortcuts, /"sess-meta":[\s\S]*?w-\[32px\]/);
+    assert.match(shortcuts, /"sess-meta":[\s\S]*?w-\[24px\]/);
     // Remove is a narrow right-aligned control, not a full-slot inset fill.
     assert.match(
       shortcuts,
@@ -1050,16 +1092,77 @@ describe("UI surface presence", () => {
     assert.match(events, /key\.toLowerCase\(\) === "n"/);
     assert.match(events, /key === ",/);
     assert.match(events, /Backslash|\\\\/);
-    // Workspace menu dispatches open-panel (Settings / Tasks / Overview / Extensions).
+    // Workspace menu dispatches open-panel / open-environment (Settings / Overview / Environment).
+    // Tasks is session-scoped and lives on the context rail (Agents tab).
     const workspaceMenuWidget = readSrc(
       "widgets/SessionRailWorkspaceMenuWidget.tsx",
     );
-    assert.match(workspaceMenuWidget, /open-panel/);
+    assert.match(workspaceMenuWidget, /open-panel|open-environment/);
     assert.match(workspaceMenuWidget, /settings/);
-    assert.match(workspaceMenuWidget, /tasks/);
+    assert.doesNotMatch(workspaceMenuWidget, /"tasks"/);
     assert.match(workspaceMenuWidget, /overview/);
-    assert.match(workspaceMenuWidget, /extensions/);
+    assert.match(workspaceMenuWidget, /environment/);
+    assert.doesNotMatch(workspaceMenuWidget, /"extensions"/);
     const palette = readSrc("lib/commandPalette.ts");
-    assert.match(palette, /open_settings|open_extensions|open_overview|open_tasks/);
+    assert.match(
+      palette,
+      /open_settings|open_environment|open_overview|open_agents/,
+    );
+    assert.match(palette, /open_env_mcp|open_env_skills/);
+    assert.match(palette, /export function openEnvironment/);
+    assert.doesNotMatch(palette, /open_extensions/);
+    assert.doesNotMatch(palette, /open_tasks/);
+    // Environment chrome shortcuts + D5 regression (no example.com MCP writer).
+    const chrome = readAllUnoShortcuts();
+    assert.match(chrome, /"env-sheet":/);
+    assert.match(chrome, /"env-row":/);
+    assert.match(chrome, /"env-status-dot":/);
+    assert.match(readSrc("widgets/shell/shellPanels.ts"), /"environment"/);
+    assert.doesNotMatch(
+      readSrc("widgets/shell/shellPanels.ts"),
+      /"extensions"/,
+    );
+    // No JSON.stringify dumps under environment widgets; no example-http writer in src.
+    const envDir = join(SRC_ROOT, "widgets/environment");
+    for (const name of readdirSync(envDir)) {
+      if (!name.endsWith(".ts") && !name.endsWith(".tsx")) {
+        continue;
+      }
+      const text = readFileSync(join(envDir, name), "utf8");
+      assert.doesNotMatch(
+        text,
+        /JSON\.stringify/,
+        `${name} must not dump JSON`,
+      );
+    }
+    // Walk desktop src for D5 / hooks_trust regressions (product source only).
+    const srcHits: string[] = [];
+    const stack = [SRC_ROOT];
+    while (stack.length) {
+      const dir = stack.pop()!;
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, ent.name);
+        if (ent.isDirectory()) {
+          stack.push(p);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(ent.name)) {
+          continue;
+        }
+        const text = readFileSync(p, "utf8");
+        if (
+          /example-http|example\.com/.test(text) ||
+          text.includes("hooks_trust") ||
+          text.includes("ExtensionsPanelWidget")
+        ) {
+          srcHits.push(p.slice(SRC_ROOT.length + 1));
+        }
+      }
+    }
+    assert.deepEqual(
+      srcHits,
+      [],
+      `unexpected D5/extensions remnants: ${srcHits.join(", ")}`,
+    );
   });
 });

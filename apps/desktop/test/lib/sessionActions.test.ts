@@ -199,4 +199,44 @@ describe("sessionActions", () => {
     assert.equal(canSelectCatalogSession(catalog, "child-1"), true);
     assert.equal(canSelectCatalogSession(catalog, "missing"), false);
   });
+
+  it("filterCatalogForSessionRail hides empty untitled drafts", () => {
+    const catalog: SessionRecord[] = [
+      localRec({
+        id: "with-msgs",
+        title: "Untitled chat",
+        workspace: "/ws",
+        timeline: [
+          {
+            kind: "user",
+            id: "u1",
+            blocks: [{ type: "text", text: "hello" }],
+          },
+        ],
+      }),
+      localRec({
+        id: "empty-untitled",
+        title: "Untitled chat",
+        workspace: "/ws",
+        timeline: [],
+      }),
+      localRec({
+        id: "empty-chat-id",
+        title: "Chat 019fd68e",
+        workspace: "/ws",
+        timeline: [],
+      }),
+      localRec({
+        id: "remote-summary",
+        title: "Count slowly from 1 to 100",
+        workspace: "/ws",
+        timeline: [],
+      }),
+    ];
+    const rail = filterCatalogForSessionRail(catalog);
+    assert.deepEqual(
+      rail.map((r) => r.id).sort(),
+      ["remote-summary", "with-msgs"],
+    );
+  });
 });

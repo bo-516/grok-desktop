@@ -62,6 +62,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   catalog: [],
   activeSessionId: null,
   viewingSessionId: null,
+  viewingSubagent: false,
+  viewingParentSessionId: undefined,
   poolEntries: [],
   environment: null,
   /** True after New chat until first send or selectSession. */

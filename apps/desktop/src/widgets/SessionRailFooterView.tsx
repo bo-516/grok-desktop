@@ -1,10 +1,9 @@
 /**
- * Session rail footer: local session density cue + workspace menu chip
- * (Settings / Tasks / Overview / Extensions / Reconnect). Stateless shell —
- * menu open state lives in {@link SessionRailWorkspaceMenuWidget}.
+ * Session rail footer shell: density cue + workspace menu chip
+ * (Settings / Overview / Environment / Reconnect). Stateless —
+ * open state and quota suppress live in {@link SessionRailWorkspaceMenuWidget}.
  */
 
-import type { CSSProperties } from "react";
 import { SessionRailWorkspaceMenuWidget } from "./SessionRailWorkspaceMenuWidget";
 
 export type SessionRailFooterViewProps = {
@@ -36,23 +35,8 @@ export function SessionRailFooterView(props: SessionRailFooterViewProps) {
 
   return (
     <div className="side-nav-footer">
-      <div className="side-nav-quota" title="Local session count">
-        <span className="side-nav-quota-label">Sessions</span>
-        <span className="side-nav-quota-value">{catalogLength}</span>
-        <div className="side-nav-quota-track" aria-hidden="true">
-          <div
-            className="side-nav-quota-fill"
-            style={
-              {
-                /* width only — catalog density cue, not a color token */
-                width: `${Math.min(100, Math.max(8, catalogLength * 8))}%`,
-              } satisfies CSSProperties
-            }
-          />
-        </div>
-      </div>
-
       <SessionRailWorkspaceMenuWidget
+        catalogLength={catalogLength}
         streamingCount={streamingCount}
         live={live}
         liveCount={liveCount}

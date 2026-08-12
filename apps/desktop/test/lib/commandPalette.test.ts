@@ -30,4 +30,19 @@ describe("commandPalette", () => {
     const hits = filterPaletteItems(items, "hello");
     assert.equal(hits[0]?.kind, "session");
   });
+
+  it("exposes open_agents and no longer open_tasks", () => {
+    const actions = defaultPaletteActions();
+    assert.ok(actions.some((a) => a.runValue === "open_agents"));
+    assert.ok(!actions.some((a) => a.runValue === "open_tasks"));
+  });
+
+  it("exposes Environment plus MCP/Skills/Plugins page openers", () => {
+    const actions = defaultPaletteActions();
+    assert.ok(actions.some((a) => a.runValue === "open_environment"));
+    assert.ok(actions.some((a) => a.runValue === "open_env_mcp"));
+    assert.ok(actions.some((a) => a.runValue === "open_env_skills"));
+    assert.ok(actions.some((a) => a.runValue === "open_env_plugins"));
+    assert.ok(!actions.some((a) => a.runValue === "open_extensions"));
+  });
 });

@@ -59,8 +59,10 @@ describe("selectSession navigation for subagent drill-down", () => {
     const nav = readSrc("store/sessionStoreNavigation.ts");
     // Early-return is solely "not in catalog" — must not check sessionKind.
     assert.match(nav, /catalog\.find\(\(s\) => s\.id === id\)/);
-    assert.doesNotMatch(nav, /sessionKind/);
     assert.match(nav, /if \(!rec\) \{\s*return;/s);
+    // After find succeeds, sessionKind drives readonly drill-down flags only.
+    assert.match(nav, /viewingSubagent:\s*isSubagentSessionKind\(rec\.sessionKind\)/);
+    assert.match(nav, /viewingParentSessionId:\s*rec\.parentSessionId/);
   });
 
   it("rail filter lives in product path and uses filterCatalogForSessionRail", () => {
@@ -69,10 +71,10 @@ describe("selectSession navigation for subagent drill-down", () => {
     assert.doesNotMatch(rail, /subagentVisibility/);
   });
 
-  it("Tasks panel reads session.subagents not title-regex module", () => {
-    const tasks = readSrc("widgets/TasksPanelWidget.tsx");
-    assert.match(tasks, /session\.subagents/);
-    assert.match(tasks, /listOrchestrationSubagentCards/);
-    assert.doesNotMatch(tasks, /subagentVisibility|listSubagentCards/);
+  it("Agents rail reads session.subagents not title-regex module", () => {
+    const agents = readSrc("widgets/agentsRail/AgentsRailWidget.tsx");
+    assert.match(agents, /session\.subagents/);
+    assert.match(agents, /groupSubagentsByRound/);
+    assert.doesNotMatch(agents, /subagentVisibility|buildListTasksCommand|buildKillTaskCommand/);
   });
 });

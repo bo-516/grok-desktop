@@ -11,6 +11,8 @@ import {
   defaultPaletteActions,
   filterPaletteItems,
   openAppPanel,
+  openAppRail,
+  openEnvironment,
   prefillComposer,
   sessionsToPaletteItems,
   type PaletteItem,
@@ -95,8 +97,20 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
       void runCli("auth_login");
       return;
     }
-    if (item.runValue === "open_extensions") {
-      openAppPanel("extensions");
+    if (item.runValue === "open_environment") {
+      openEnvironment("overview");
+      return;
+    }
+    if (item.runValue === "open_env_mcp") {
+      openEnvironment("mcp");
+      return;
+    }
+    if (item.runValue === "open_env_skills") {
+      openEnvironment("skills");
+      return;
+    }
+    if (item.runValue === "open_env_plugins") {
+      openEnvironment("plugins");
       return;
     }
     if (item.runValue === "open_settings") {
@@ -107,8 +121,8 @@ export function CommandPaletteWidget(props: CommandPaletteWidgetProps) {
       openAppPanel("overview");
       return;
     }
-    if (item.runValue === "open_tasks") {
-      openAppPanel("tasks");
+    if (item.runValue === "open_agents") {
+      openAppRail("agents");
       return;
     }
     if (item.runValue === "open_rewind") {

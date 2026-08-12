@@ -4,11 +4,29 @@
  * open two drawers at once without an explicit replace.
  */
 
-/** Side-drawer panels opened from footer / ⌘K / events. */
-export type PanelId = "settings" | "extensions" | "overview" | "tasks";
+/**
+ * Exclusive chrome panels opened from footer / ⌘K / events (workspace / app scope).
+ * `environment` is a centered modal sheet; settings/overview remain side drawers.
+ */
+export type PanelId = "settings" | "environment" | "overview";
 
-/** Right context rail content: plan checklist or code/diff preview. */
-export type ContextRailId = "plan" | "preview";
+/**
+ * Environment sheet page ids for deep links (mirrors environmentStore).
+ * Kept here so shell events do not import the store module.
+ */
+export type EnvironmentPageId =
+  | "overview"
+  | "mcp"
+  | "skills"
+  | "agents"
+  | "plugins"
+  | "marketplaces"
+  | "hooks"
+  | "rules"
+  | "compat";
+
+/** Right context rail content: plan, agents, or code/diff preview. */
+export type ContextRailId = "plan" | "preview" | "agents";
 
 /** Plan rail default width in px (matches --rail-right-width). */
 export const PLAN_RAIL_WIDTH = 280;
@@ -90,4 +108,50 @@ export function shouldAutoOpenPlanRail(
     return false;
   }
   return planLength > 0;
+}
+
+/**
+ * Context rail after a session id change (new chat or catalog switch).
+ * Plan|Agents are session-scoped companions and close by default so an empty
+ * "No plan yet" drawer does not follow the user into the next chat. Preview
+ * is left alone — it is file/diff chrome, not chat-bound.
+ * @param current Rail open before the session switch, or null when closed.
+ * @returns null when plan/agents were open; otherwise `current` unchanged.
+ */
+export function contextRailAfterSessionChange(
+  current: ContextRailId | null,
+): ContextRailId | null {
+  if (current === "plan" || current === "agents") {
+    return null;
+  }
+  return current;
+}
+
+/**
+ * Whether the open context rail should reserve main-column push space.
+ *
+ * Plan and Agents share one companion drawer: content on *either* surface
+ * keeps push true for both tabs so switching Plan ↔ Agents does not jump
+ * the transcript width. An empty Plan+Agents pair (or empty Preview) stays
+ * overlay so a blank drawer does not squeeze the chat.
+ *
+ * @param rail Active context rail id, or null when closed.
+ * @param planCount Plan step count for the current session (0 = empty plan).
+ * @param agentItemCount Subagent + background-task card count for Agents.
+ * @param previewHasTarget True when preview has an open file/diff target.
+ * @returns True when push layout may apply padding for this open rail.
+ */
+export function contextRailHasContent(
+  rail: ContextRailId | null,
+  planCount: number,
+  agentItemCount: number,
+  previewHasTarget: boolean,
+): boolean {
+  if (rail === "preview") {
+    return previewHasTarget;
+  }
+  if (rail === "plan" || rail === "agents") {
+    return planCount > 0 || agentItemCount > 0;
+  }
+  return false;
 }

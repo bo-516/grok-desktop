@@ -35,7 +35,7 @@ export type SessionRailProjectGroupViewProps = {
   collapsed: boolean;
   /**
    * When true (and not collapsed), show every session past the preview cap.
-   * Owned by rail prefs — not local useState — so remount keeps the choice.
+   * Owned by rail prefs — not local component state — so remount keeps the choice.
    */
   previewExpanded: boolean;
   /** Toggle full collapse for this workspace (persisted by parent). */

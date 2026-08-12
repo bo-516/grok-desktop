@@ -48,9 +48,9 @@ body,
    * shadow in the app computed to `none`. Transparent defaults make the
    * composition valid without painting anything on their own.
    */
-  --un-ring-offset-shadow: 0 0 #0000;
-  --un-ring-shadow: 0 0 #0000;
-  --un-shadow: 0 0 #0000;
+  --un-ring-offset-shadow: 0 0 transparent;
+  --un-ring-shadow: 0 0 transparent;
+  --un-shadow: 0 0 transparent;
 }
 
 button,

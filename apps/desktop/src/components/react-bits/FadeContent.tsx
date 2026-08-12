@@ -62,7 +62,16 @@ export function FadeContent(props: FadeContentProps) {
   } = props;
   const ref = useRef<HTMLDivElement>(null);
   const reduceMotion = prefersReducedMotion();
-  const skipAnim = immediate || reduceMotion;
+  /**
+   * Latched at mount: an entrance that has already started must be allowed to
+   * finish. `immediate` flipping false → true mid-transition drops the duration
+   * to 0ms, which snaps the row to its end state — visible as a jump on the
+   * message you just sent, because promoting a New chat draft to a real session
+   * id reseeds the timeline entrance baseline while that bubble is still fading
+   * in. Mounting with `immediate` already true still skips the animation.
+   */
+  const skipAnimRef = useRef(immediate || reduceMotion);
+  const skipAnim = skipAnimRef.current;
   const [visible, setVisible] = useState(skipAnim);
 
   useEffect(() => {
