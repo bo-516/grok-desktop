@@ -7,6 +7,9 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { createGenerator } from "unocss";
+import unoConfigModule from "../../uno.config";
+import { appShortcuts } from "../../uno/shortcuts";
 import {
   readAllUnoShortcuts,
   readBaseStyles,
@@ -198,8 +201,8 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(tool, /SpotlightCard/);
     assert.match(tool, /EditSummaryRowView/);
     assert.match(tool, /openPreview/);
-    assert.doesNotMatch(tool, /DiffReviewView/);
-    const diff = readSrc("widgets/preview/DiffReviewView.tsx");
+    assert.doesNotMatch(tool, /DiffReview(View|Widget)/);
+    const diff = readSrc("widgets/preview/DiffReviewWidget.tsx");
     assert.match(diff, /applyHunkDecisions/);
   });
 
@@ -310,8 +313,12 @@ describe("UI surface presence", () => {
     assert.match(previewDrawer, /id="preview-rail"/);
     assert.match(previewDrawer, /preview-resize-handle|setWidth|clampPreviewWidth/);
     assert.match(previewDrawer, /usePreviewSource/);
-    // Remount DiffReviewView when switching targets (avoids stale hunk state).
+    // Remount DiffReviewWidget when switching targets (avoids stale hunk state).
     assert.match(previewDrawer, /key=\{`\$\{source\.toolCallId\}:\$\{source\.path\}`\}/);
+    // Single paint: drawer mounts only DiffReviewWidget (no sibling diff body).
+    assert.match(previewDrawer, /DiffReviewWidget/);
+    assert.doesNotMatch(previewDrawer, /PreviewDiffWidget/);
+    assert.doesNotMatch(previewDrawer, /preview-diff-stack/);
 
     const previewSource = readSrc("widgets/preview/usePreviewSource.ts");
     assert.match(previewSource, /buildTurnChangeSetById/);
@@ -424,7 +431,7 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(top, /aria-selected/);
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
     assert.match(menu, /danger:\s*true/);
-    assert.match(menu, /buildForkCommand|runSessionMenuAction/);
+    assert.match(menu, /forkSession|runSessionMenuAction/);
   });
 
   it("narrow shell collapses rail off-canvas and keeps top-nav full-bleed", () => {
@@ -437,11 +444,28 @@ describe("UI surface presence", () => {
     assert.match(shortcuts, /"top-nav-rail-btn":/);
     // Narrow shell lives only in Uno (no duplicate base.css media query).
     assert.doesNotMatch(base, /@media \(max-width:\s*639px\)/);
+    /*
+     * Both slide states must be plain rules from uno.config. presetUno's own
+     * `translate-x-[-100%]` / `translate-x-0` compose through --un-translate-*
+     * vars that only its (disabled) preflight defines, so they resolved to
+     * `transform: none` and the drawer sat fully on screen at every width with
+     * the hamburger moving nothing. See the generated-CSS guard at the bottom
+     * of this file for the check that covers the whole transform family.
+     */
+    // Scoped to the shortcut's own class list — the surrounding comment names
+    // the broken spellings on purpose, so a whole-file negative would trip.
+    const sideNavClasses =
+      sideNav.match(/"side-nav":\s*\n?\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(sideNavClasses, /max-\[900px\]:translate-x-full-left/);
     assert.match(
-      sideNav,
-      /"side-nav":[\s\S]*?max-\[900px\]:translate-x-\[-100%\]/,
+      sideNavClasses,
+      /max-\[900px\]:data-\[open=true\]:translate-x-none/,
     );
-    assert.match(sideNav, /max-\[900px\]:data-\[open=true\]:translate-x-0/);
+    assert.doesNotMatch(sideNavClasses, /translate-x-\[-100%\]|translate-x-0\b/);
+    assert.match(
+      readDesktopRoot("uno.config.ts"),
+      /\["translate-x-full-left",\s*\{\s*transform:\s*"translateX\(-100%\)"\s*\}\]/,
+    );
     const top = readSrc("widgets/TopNavWidget.tsx");
     assert.match(top, /onToggleRail|top-nav-rail-btn/);
     const rail = readSrc("widgets/sessionRail/SessionRailView.tsx");
@@ -573,7 +597,7 @@ describe("UI surface presence", () => {
     const agents = readSrc("widgets/agentsRail/AgentsRailWidget.tsx");
     assert.match(agents, /AgentsRailView/);
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
-    assert.match(menu, /buildForkCommand|runSessionMenuAction/);
+    assert.match(menu, /forkSession|runSessionMenuAction/);
     const timeline = readSrc("widgets/timeline/TimelineView.tsx");
     const hook = readSrc("widgets/timeline/useTimelineWidget.ts");
     const pipeline = readSrc("lib/timelinePipeline.ts");
@@ -601,13 +625,22 @@ describe("UI surface presence", () => {
     assert.match(paletteLib, /imagine-video|prefillComposer/);
     const composer = readSrc("widgets/composer/useComposerWidget.ts");
     assert.match(composer, /grok-desktop:prefill-composer/);
-    const diff = readSrc("widgets/preview/DiffReviewView.tsx");
+    const diff = readSrc("widgets/preview/DiffReviewWidget.tsx");
     assert.match(diff, /applyHunkDecisions/);
     assert.match(diff, /writeWorkspaceFile|Accept|Reject/);
+    // Review shell no longer owns legacy row chrome (single paint via PreviewDiff).
+    assert.doesNotMatch(diff, /diff-line|diff-gutter/);
     const themeCss = readSrc("styles/defineColor.css");
     assert.match(themeCss, /data-theme="light"/);
     assert.match(themeCss, /--seed-brand/);
     assert.match(themeCss, /color-mix\(in oklch/);
+    // Diff seeds decoupled from success/danger; row wash hard-capped at 10%.
+    assert.match(themeCss, /--seed-diff-add/);
+    assert.match(
+      themeCss,
+      /--color-diff-add-bg[\s\S]{0,160}?--seed-diff-add-wash\)\s+10%/,
+    );
+    assert.match(themeCss, /data-theme="light"[\s\S]*?--seed-diff-add:/);
     assert.match(themeCss, /data-palette="blue"/);
     assert.match(themeCss, /#057aff|#057AFF/i);
     assert.match(themeCss, /#a550a6|#A550A6/i);
@@ -621,7 +654,32 @@ describe("UI surface presence", () => {
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
     const appearance = readSrc("widgets/settings/SettingsAppearanceSectionView.tsx");
     assert.match(settings, /pickPalette/);
-    assert.match(appearance, /COLOR_PALETTE_OPTIONS|UI color/);
+    assert.match(appearance, /COLOR_PALETTE_OPTIONS|UI color|Appearance/);
+    // F-CTX-01: Settings toggle + composer ring left of Send.
+    assert.match(appearance, /Show context usage|showContextUsage/);
+    assert.match(settings, /saveContextUsagePrefs|showContextUsage/);
+    const composerWidget = readSrc("widgets/composer/ComposerWidget.tsx");
+    assert.match(composerWidget, /ComposerContextUsageView|contextUsageDisplay/);
+    const contextPrefs = readSrc("lib/contextUsagePrefs.ts");
+    assert.match(contextPrefs, /showContextUsage|CONTEXT_USAGE_PREFS_KEY/);
+    /*
+     * The usage tip must center on the ring. presetUno's own translate/scale
+     * utilities compose through --un-* vars that only its preflight defines,
+     * and preflight is off here, so they resolve to `transform:none` and the
+     * bubble parks its left edge on the ring center. Every transform in a
+     * shortcut has to come from a plain rule in uno.config.
+     */
+    const composerShortcutSrc = readDesktopRoot("uno/shortcuts.composer.ts");
+    const usageTip =
+      composerShortcutSrc.match(/"composer-usage-tip":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(usageTip, /\bleft-1\/2\b/);
+    assert.match(usageTip, /\btranslate-x-center\b/);
+    assert.doesNotMatch(usageTip, /-translate-x-1\/2/);
+    const unoConfig = readDesktopRoot("uno.config.ts");
+    assert.match(
+      unoConfig,
+      /\["translate-x-center",\s*\{\s*transform:\s*"translateX\(-50%\)"\s*\}\]/,
+    );
     const palette = readSrc("lib/colorPalette.ts");
     assert.match(palette, /applyPalette|loadPalette/);
     const compat = readSrc("lib/compatToggles.ts");
@@ -713,6 +771,14 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(railHook, /groupSessionsByTime/);
     assert.match(rail, /SessionRailProjectGroupView/);
     assert.match(rail, /SessionRailFooterView/);
+    // Chats with no workspace get their own section, not a "(no project)"
+    // folder inside PROJECTS (and not a silent drop from the rail).
+    assert.match(rail, /SessionRailNoProjectGroupView/);
+    assert.match(railHook, /splitNoProjectSessions/);
+    const loose = readSrc("widgets/SessionRailNoProjectGroupView.tsx");
+    assert.match(loose, /No project/);
+    assert.match(loose, /loose-group/);
+    assert.doesNotMatch(loose, /useSessionStore/);
     // Pin is per-session, not per folder.
     assert.match(railHook, /orderGroupsBySessionPin/);
     assert.match(railHook, /toggleCollapsedWorkspace|onToggleCollapse/);
@@ -826,7 +892,7 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(shortcuts, /"sess-status"/);
     assert.match(
       shortcuts,
-      /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-medium[\s\S]*?leading-snug/,
+      /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-normal[\s\S]*?leading-snug/,
     );
     assert.match(shortcuts, /"project-section-label":/);
     assert.match(shortcuts, /"project-group-sessions":/);
@@ -842,23 +908,24 @@ describe("UI surface presence", () => {
       assert.doesNotMatch(active, /inset_2px|before:\(content-/);
     }
     // Folder of the selected chat is marked so the current project reads when
-    // its row scrolls off / the group collapses: idle names sit at secondary
-    // ink, active lifts name + folder glyph + tree guide. Parent selectors
-    // only — same-element overrides lose on Uno emit order.
+    // its row scrolls off / the group collapses: all names sit at full primary
+    // ink; active lifts weight (font-medium) + folder glyph + tree guide.
+    // Parent selectors only — same-element overrides lose on Uno emit order.
     {
       const groupActive =
         shortcuts.match(/"project-group-active":\s*"([^"]+)"/)?.[1] ?? "";
-      assert.match(groupActive, /\[&_\.project-group-name\]:text-fg\b/);
+      assert.match(groupActive, /\[&_\.project-group-name\]:font-medium\b/);
+      assert.doesNotMatch(groupActive, /\[&_\.project-group-name\]:text-fg\b/);
       assert.match(groupActive, /\[&_\.project-group-folder\]:/);
       assert.match(
         groupActive,
         /\[&_\.project-group-sessions\]:before:bg-line-/,
       );
       assert.doesNotMatch(groupActive, /bg-white-|bg-sidebar/);
-      assert.match(
-        shortcuts,
-        /"project-group-name":[\s\S]*?text-fg-secondary/,
-      );
+      const groupName =
+        shortcuts.match(/"project-group-name":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.match(groupName, /\btext-fg\b/);
+      assert.doesNotMatch(groupName, /text-fg-secondary/);
       assert.match(groupView, /project-group-active/);
       assert.match(railHook, /selectedWorkspace/);
       assert.match(rail, /selectedWorkspace/);
@@ -902,12 +969,51 @@ describe("UI surface presence", () => {
     assert.match(tool, /openPreview/);
     // Large tool dumps collapse by default (Show full output).
     assert.match(tool, /Show full output|tool-content-collapsed|shouldCollapseToolText/);
-    assert.doesNotMatch(tool, /DiffReviewView/);
+    assert.doesNotMatch(tool, /DiffReview(View|Widget)/);
     assert.doesNotMatch(tool, /window\.open\(`file:\/\//);
-    const diff = readSrc("widgets/preview/DiffReviewView.tsx");
+    const diff = readSrc("widgets/preview/DiffReviewWidget.tsx");
     assert.match(diff, /mini-diff|applyHunkDecisions/);
+    // Interactive gap band + single-column row chrome ship in preview widgets.
+    const gapBand = readSrc("widgets/preview/DiffGapBandView.tsx");
+    assert.match(gapBand, /onRevealTop|onRevealBottom|onRevealAll/);
+    const diffView = readSrc("widgets/preview/PreviewDiffView.tsx");
+    assert.doesNotMatch(diffView, /preview-diff-hunk-head|@@ −/);
     const plan = readSrc("widgets/PlanPanelView.tsx");
     assert.match(plan, /No plan yet/);
+  });
+
+  it("diff full-file: Apply gate, gap positions, Changes prefs, single nowrap scroll", () => {
+    const review = readSrc("widgets/preview/DiffReviewWidget.tsx");
+    // Apply must go through whole-file check; never write a raw window fragment.
+    assert.match(review, /canApplyWholeFile|diskText === |fullFile/);
+    assert.match(review, /ensureFullFile|useDiffFullFile/);
+    assert.match(review, /applyDisabled|canApply/);
+
+    const band = readSrc("widgets/preview/DiffGapBandView.tsx");
+    assert.match(band, /position|leading|trailing/);
+    assert.match(band, /ChevronsUpDown/);
+    assert.match(band, /REVEAL_DUAL_ABOVE|data-gap-position/);
+
+    const list = readSrc("widgets/preview/PreviewChangeListView.tsx");
+    // Main Changes entry must surface wrap / dual / show-full prefs (not hideToolbar-only).
+    assert.match(list, /viewPrefs|onViewPrefsChange|DiffChangeListChrome/);
+    assert.match(list, /PathLabelView|toPathDisplay/);
+    assert.match(list, /hideToolbar/);
+    // hideToolbar is intentional when chrome owns prefs — chrome must still expose them.
+    const chrome = readSrc("widgets/preview/DiffFileSectionView.tsx");
+    // Show full file is a sticky toggle (preferFullFile) — off returns to change-only fragments.
+    assert.match(chrome, /Wrap|Dual|Show full file|onViewPrefsChange/);
+    assert.match(chrome, /preferFullFile/);
+    assert.match(chrome, /PathLabelView/);
+
+    const shortcuts = readDesktopRoot("uno/shortcuts.preview.ts");
+    // Horizontal scroll only on the shared container, not per-line text.
+    assert.doesNotMatch(
+      shortcuts,
+      /"preview-diff-text-nowrap":[^,]*overflow-x-auto/,
+    );
+    assert.match(shortcuts, /preview-diff-scroll-nowrap|preview-diff-text-nowrap":\s*"whitespace-pre min-w-max/);
+    assert.match(shortcuts, /preview-diff-row":[\s\S]*?text-12px/);
   });
 
   it("preview entry points: mention file tokens and tool locations open preview", () => {
@@ -924,6 +1030,65 @@ describe("UI surface presence", () => {
     assert.match(turn, /toolCallIds:\s*collectToolCallIdsFromTurn/);
     const store = readSrc("store/previewStore.ts");
     assert.match(store, /openPreview|closePreview|PreviewTarget/);
+  });
+
+  it("doc preview: file orchestrator, doc typography, no agent math (refactor-doc-preview)", () => {
+    // File branch goes through PreviewFileWidget, not hard-wired code-only.
+    const drawer = readSrc("widgets/preview/PreviewDrawerWidget.tsx");
+    assert.match(drawer, /PreviewFileWidget/);
+    assert.doesNotMatch(drawer, /PreviewCodeWidget/);
+    assert.match(drawer, /onFileToolbarChange|onToolbarChange|fileToolbar/);
+
+    const fileWidget = readSrc("widgets/preview/PreviewFileWidget.tsx");
+    assert.match(fileWidget, /previewFileKind/);
+    assert.match(fileWidget, /loadDocViewPrefs|saveDocViewPrefs|docViewPrefs/);
+    assert.match(fileWidget, /PreviewDocWidget/);
+    assert.match(fileWidget, /PreviewCodeWidget/);
+    assert.match(fileWidget, /DOC_RENDER_MAX_CHARS|focusLine/);
+
+    const docWidget = readSrc("widgets/preview/PreviewDocWidget.tsx");
+    const docComponents = readSrc("widgets/preview/previewDocComponents.tsx");
+    // Link matrix + fence highlight live in the component map module.
+    assert.match(docComponents, /openExternalUrl/);
+    assert.match(docComponents, /sanitizeExternalUrl/);
+    assert.match(docComponents, /MarkdownCodeWidget/);
+    // Must not import or call the agent math rewrite (timeline-only).
+    assert.doesNotMatch(docWidget, /normalizeAgentMath/);
+    assert.doesNotMatch(docComponents, /normalizeAgentMath/);
+    assert.doesNotMatch(
+      docWidget + docComponents,
+      /from\s+["']@\/lib\/normalizeAgentMath["']/,
+    );
+    assert.match(docWidget, /mode="static"/);
+    assert.match(docWidget, /parseIncompleteMarkdown=\{false\}/);
+    assert.match(docWidget, /docComponents|previewDocComponents/);
+    // Relative workspace links must not go through default rehype-harden only.
+    assert.match(docWidget, /docRehypePlugins|docRehypeSafety/);
+    assert.match(docWidget, /urlTransform/);
+
+    const docView = readSrc("widgets/preview/PreviewDocView.tsx");
+    assert.doesNotMatch(docView, /useSessionStore|usePreviewStore/);
+    assert.match(docView, /doc-root|doc-scroll/);
+
+    const head = readSrc("widgets/preview/PreviewHeadView.tsx");
+    assert.match(head, /actions\?:/);
+    assert.match(head, /preview-head-actions/);
+
+    const shortcuts = readAllUnoShortcuts();
+    // doc-hr must be a visible rule — never copy md-hr's hidden token.
+    assert.match(shortcuts, /"doc-hr":/);
+    const docHrMatch = shortcuts.match(/"doc-hr":\s*"([^"]*)"/);
+    assert.ok(docHrMatch, "doc-hr shortcut must exist");
+    assert.doesNotMatch(docHrMatch[1]!, /\bhidden\b/);
+    // Absolute body size token + sans root (not mono source chrome).
+    assert.match(shortcuts, /text-doc-body|doc-body/);
+    const docRootMatch = shortcuts.match(/"doc-root":\s*"([^"]*)"/);
+    assert.ok(docRootMatch, "doc-root shortcut must exist");
+    assert.doesNotMatch(docRootMatch[1]!, /font-mono/);
+    // Aggregation must include the new doc slice + the pre-existing code slice.
+    const entry = readDesktopRoot("uno/shortcuts.ts");
+    assert.match(entry, /docShortcuts|shortcuts\.doc/);
+    assert.match(entry, /codeShortcuts|shortcuts\.code/);
   });
 
   it("styles use defineColor tokens + UnoCSS (no layout css modules)", () => {
@@ -965,6 +1130,106 @@ describe("UI surface presence", () => {
       false,
       "base.css must not contain hex colors",
     );
+  });
+
+  it("dark elevate ladder, semantic surfaces, md fills, and syntax chroma (refactor-color-system)", () => {
+    // Drive real shipped tokens in defineColor.css — not a reimplemented ladder.
+    const css = readSrc("styles/defineColor.css");
+    // Isolate the dark :root block (ends at light theme override).
+    const rootStart = css.indexOf(":root {");
+    const lightStart = css.indexOf('html[data-theme="light"]');
+    assert.ok(rootStart >= 0, "dark :root block present");
+    assert.ok(lightStart > rootStart, "light theme block follows :root");
+    const darkRoot = css.slice(rootStart, lightStart);
+    const lightBlock = css.slice(lightStart);
+
+    // Phase 1 — elevate knobs (dark only).
+    assert.match(darkRoot, /--scheme-elevate:\s*4%;/);
+    assert.match(darkRoot, /--scheme-elevate-2:\s*11%;/);
+    assert.match(darkRoot, /--scheme-elevate-3:\s*16%;/);
+    assert.match(darkRoot, /--scheme-elevate-4:\s*22%;/);
+    assert.match(darkRoot, /--scheme-elevate-5:\s*28%;/);
+    // Phase 3 — text scheme alphas.
+    assert.match(darkRoot, /--scheme-secondary:\s*76%;/);
+    assert.match(darkRoot, /--scheme-muted:\s*62%;/);
+    assert.match(darkRoot, /--scheme-faint:\s*50%;/);
+    // Phase 2 — object roles vs flat sidebar.
+    assert.match(darkRoot, /--color-bg-elevated:\s*var\(--color-surface-high\);/);
+    assert.match(darkRoot, /--color-bg-user:\s*var\(--color-surface-high\);/);
+    assert.match(
+      darkRoot,
+      /--color-bg-composer:\s*var\(--color-surface-container\);/,
+    );
+    assert.match(
+      darkRoot,
+      /--color-bg-sidebar:\s*var\(--color-surface-lowest\);/,
+    );
+    // Soft fills for md scale.
+    assert.match(
+      darkRoot,
+      /--color-bg-white-code:\s*color-mix\(in oklch,\s*var\(--seed-ink\)\s*5%/,
+    );
+    assert.match(
+      darkRoot,
+      /--color-bg-white-chip:\s*color-mix\(in oklch,\s*var\(--seed-ink\)\s*9%/,
+    );
+    // Phase 5 — desaturated syntax + mention (hue kept, C ~×0.60).
+    assert.match(darkRoot, /--color-code-keyword:\s*#7ca4c6;/i);
+    assert.match(darkRoot, /--color-code-control:\s*#c09abd;/i);
+    assert.match(darkRoot, /--color-code-type:\s*#8acaba;/i);
+    assert.match(darkRoot, /--color-code-tag:\s*#7ca4c6;/i);
+    assert.match(darkRoot, /--color-code-string:\s*#c7a192;/i);
+    assert.match(darkRoot, /--color-code-string-expression:\s*#c7a192;/i);
+    assert.match(darkRoot, /--color-code-comment:\s*#89a67e;/i);
+    assert.match(darkRoot, /--color-code-constant:\s*#8bc7ec;/i);
+    assert.match(darkRoot, /--color-code-number:\s*#c5d4bd;/i);
+    assert.match(darkRoot, /--color-code-function:\s*#e4e4c7;/i);
+    assert.match(darkRoot, /--color-code-variable:\s*#bde2f7;/i);
+    assert.match(darkRoot, /--color-code-parameter:\s*#bde2f7;/i);
+    assert.match(darkRoot, /--color-code-link:\s*#84a1d1;/i);
+    assert.match(darkRoot, /--color-composer-mention:\s*#84b1df;/i);
+    // Pre-desaturate VS Code literals must not remain on the dark ladder.
+    assert.doesNotMatch(darkRoot, /--color-code-keyword:\s*#569cd6;/i);
+    assert.doesNotMatch(darkRoot, /--color-composer-mention:\s*#1479c9;/i);
+    // Diff wash alphas untouched (hard cap for AA on dark surfaces).
+    assert.match(
+      darkRoot,
+      /--color-diff-add-bg[\s\S]{0,160}?--seed-diff-add-wash\)\s+10%/,
+    );
+    assert.match(
+      darkRoot,
+      /--color-diff-del-bg[\s\S]{0,160}?--seed-diff-del-wash\)\s+9%/,
+    );
+
+    // Light theme still zeros elevate and overrides surfaces.
+    assert.match(lightBlock, /--scheme-elevate:\s*0%;/);
+    assert.match(lightBlock, /--scheme-elevate-2:\s*0%;/);
+    assert.match(lightBlock, /--scheme-elevate-3:\s*0%;/);
+    assert.match(lightBlock, /--scheme-elevate-4:\s*0%;/);
+    assert.match(lightBlock, /--scheme-elevate-5:\s*0%;/);
+    assert.match(lightBlock, /--color-bg-elevated:\s*#ffffff;/i);
+    assert.match(lightBlock, /--color-bg-composer:\s*#ffffff;/i);
+    assert.match(lightBlock, /--color-bg-user:\s*#ffffff;/i);
+
+    // Uno bg aliases for the new soft fills.
+    const uno = readDesktopRoot("uno.config.ts");
+    assert.match(uno, /"white-code":\s*"var\(--color-bg-white-code\)"/);
+    assert.match(uno, /"white-chip":\s*"var\(--color-bg-white-chip\)"/);
+
+    // Timeline md fills + table chrome (one signal: fill/line, no outer box).
+    const shortcuts = readAllUnoShortcuts();
+    const mdPre = shortcuts.match(/"md-pre":\s*"([^"]+)"/)?.[1] ?? "";
+    const mdInline = shortcuts.match(/"md-inline-code":\s*"([^"]+)"/)?.[1] ?? "";
+    const mdThead = shortcuts.match(/"md-thead":\s*"([^"]+)"/)?.[1] ?? "";
+    const mdTableWrap =
+      shortcuts.match(/"md-table-wrap":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(mdPre, /\bbg-white-code\b/);
+    assert.match(mdInline, /\bbg-white-chip\b/);
+    assert.match(mdThead, /\bbg-white-soft\b/);
+    assert.match(mdThead, /border-b\b/);
+    assert.match(mdThead, /border-line-subtle/);
+    assert.doesNotMatch(mdTableWrap, /\bborder\b/);
+    assert.doesNotMatch(mdTableWrap, /border-line-muted/);
   });
 
   it("mention chips are one shared model across composer, history, and menu", () => {
@@ -1164,5 +1429,98 @@ describe("UI surface presence", () => {
       [],
       `unexpected D5/extensions remnants: ${srcHits.join(", ")}`,
     );
+  });
+
+  it("U-09..11: Rules & prompts page is real three-scope editor (not stub)", () => {
+    const page = readSrc("widgets/prompts/PromptsPageWidget.tsx");
+    const body = readSrc("widgets/prompts/PromptsPageBodyView.tsx");
+    const section = readSrc("widgets/prompts/PromptScopeSectionView.tsx");
+    const row = readSrc("widgets/prompts/PromptEntryRowView.tsx");
+    const evidence = readSrc("widgets/prompts/PromptEvidenceBarView.tsx");
+    const hook = readSrc("widgets/prompts/usePromptsWidget.ts");
+    const sheet = readSrc("widgets/environment/EnvironmentSheetWidget.tsx");
+    const envHook = readSrc("widgets/environment/useEnvironmentWidget.ts");
+
+    // U-09: page uses hook; views do not own store hooks.
+    assert.match(page, /usePromptsWidget/);
+    assert.doesNotMatch(section, /useSessionStore|useUserPromptsStore/);
+    assert.doesNotMatch(row, /useSessionStore|useUserPromptsStore/);
+    assert.doesNotMatch(evidence, /useSessionStore|useUserPromptsStore/);
+    assert.doesNotMatch(body, /useSessionStore|useUserPromptsStore/);
+    assert.match(hook, /useUserPromptsStore/);
+
+    // U-10: real paths + token label; rules case is not stub.
+    assert.match(section, /pathLabel|prompt-scope-path/);
+    assert.match(section, /tokenLabel|prompt-scope-tok/);
+    assert.match(sheet, /PromptsPageWidget/);
+    assert.doesNotMatch(
+      sheet,
+      /case "rules":\s*return\s*\(\s*<EnvironmentStubPageView/,
+    );
+    assert.match(envHook, /Rules & prompts/);
+    // rules nav item must not set soon:true (compat after it still may).
+    assert.match(
+      envHook,
+      /id:\s*"rules",\s*\n\s*label:\s*"Rules & prompts",\s*\n\s*count:[^\n]+,\s*\n\s*\},/,
+    );
+    assert.doesNotMatch(
+      envHook,
+      /id:\s*"rules",\s*\n\s*label:\s*"Rules & prompts",\s*\n\s*count:[^\n]+,\s*\n\s*soon:\s*true/,
+    );
+
+    // U-11: no tablist for scopes — stacked sections only.
+    assert.doesNotMatch(body, /role=["']tablist["']/);
+    assert.doesNotMatch(section, /role=["']tablist["']/);
+    assert.doesNotMatch(page, /role=["']tablist["']/);
+    assert.match(body, /prompt-overlay-hint|下面的覆盖上面的/);
+  });
+});
+
+/*
+ * Generated-CSS guard for the whole transform family, not one call site.
+ *
+ * presetUno's translate/scale/rotate/skew utilities set a --un-* custom
+ * property and then emit one composed
+ * `transform: translateX(var(--un-translate-x)) … scaleZ(var(--un-scale-z))`.
+ * Those vars exist only in the preflight this app disables (uno.config:
+ * `presetUno({ preflight: false })`), so the declaration is invalid at
+ * computed-value time and the browser resolves `transform: none` — the class
+ * looks applied in devtools and moves nothing. `-`-prefixed spellings are
+ * worse: presetMini's negative variant strips the dash, matches the plain
+ * rule, finds nothing numeric to negate and drops the body, emitting no CSS
+ * at all. Anything that must actually move needs a plain rule in uno.config.
+ */
+describe("UnoCSS transform utilities emit literal values", () => {
+  it("no shortcut emits a --un-* transform chain or an empty body", async () => {
+    const uno = await createGenerator(unoConfigModule);
+    const varChains: string[] = [];
+    const empty: string[] = [];
+    for (const [name, body] of Object.entries(appShortcuts)) {
+      const { css } = await uno.generate(name, { preflights: false });
+      for (const [, value] of css.matchAll(/transform:\s*([^;}]+)/g)) {
+        if (value.includes("var(--un-")) {
+          varChains.push(`${name}: ${value}`);
+        }
+      }
+      // A transform-only shortcut that generates nothing is the dashed-key trap.
+      const transformOnly = /^-?(translate|scale|rotate|skew)-\S+$/.test(
+        body.trim(),
+      );
+      if (transformOnly && !css.includes("transform:")) {
+        empty.push(`${name}: "${body}" generated no transform`);
+      }
+    }
+    assert.deepEqual(varChains, []);
+    assert.deepEqual(empty, []);
+  });
+
+  it("side-nav drawer is off-canvas at <=900px and slides in on data-open", async () => {
+    const uno = await createGenerator(unoConfigModule);
+    const { css } = await uno.generate("side-nav", { preflights: false });
+    const media = css.match(/@media \(max-width: 900px\)\{([\s\S]+?)\n\}/)?.[1] ?? "";
+    // Closed: pushed a full own-width left. Open: back to 0, via the
+    // higher-specificity attribute selector (wins on specificity, not order).
+    assert.match(media, /\.side-nav\{[^}]*transform:translateX\(-100%\)/);
+    assert.match(media, /\.side-nav\[data-open=true\]\{transform:translateX\(0\)/);
   });
 });

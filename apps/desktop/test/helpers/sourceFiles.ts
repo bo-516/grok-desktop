@@ -60,6 +60,8 @@ export function readAllUnoShortcuts(): string {
     "uno/shortcuts.composer.ts",
     "uno/shortcuts.chrome.ts",
     "uno/shortcuts.preview.ts",
+    "uno/shortcuts.code.ts",
+    "uno/shortcuts.doc.ts",
   ];
   return files.map((f) => readDesktopRoot(f)).join("\n");
 }
