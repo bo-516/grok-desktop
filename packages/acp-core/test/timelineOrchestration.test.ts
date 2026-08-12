@@ -250,6 +250,83 @@ describe("timeline orchestration", () => {
     assert.equal(state.subagents, undefined);
     assert.equal(state.timeline, frozenTimeline);
   });
+
+  it("links spawn card completion then subagent_spawned (card-first order)", () => {
+    let state = createSessionState({ id: "parent" });
+    const toolCallId = "call-spawn-1";
+    const spawnBody = `Subagent started in background.
+subagent_id: ${SPAWNED.subagent_id}
+type: general-purpose
+description: goal plan writer`;
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title: "spawn_subagent",
+      kind: "other",
+      status: "pending",
+      _meta: {
+        "x.ai/tool": { name: "spawn_subagent", kind: "task" },
+      },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      status: "completed",
+      content: [{ type: "content", content: { type: "text", text: spawnBody } }],
+    });
+    assert.equal(state.subagentLinks?.[SPAWNED.subagent_id], toolCallId);
+    const lenAfterLink = state.timeline.length;
+    state = applySessionUpdate(state, { ...SPAWNED });
+    assert.equal(state.timeline.length, lenAfterLink);
+    assert.equal(state.subagents?.[SPAWNED.subagent_id]?.toolCallId, toolCallId);
+  });
+
+  it("links subagent_spawned then spawn card completion (event-first order)", () => {
+    let state = createSessionState({ id: "parent" });
+    const toolCallId = "call-spawn-2";
+    const spawnBody = `Subagent started in background.
+subagent_id: ${SPAWNED.subagent_id}
+type: general-purpose
+description: goal plan writer`;
+    state = applySessionUpdate(state, { ...SPAWNED });
+    assert.equal(state.subagents?.[SPAWNED.subagent_id]?.toolCallId, undefined);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title: "Create Vue+Vite project",
+      kind: "other",
+      status: "completed",
+      content: spawnBody,
+      _meta: {
+        "x.ai/tool": { name: "spawn_subagent", kind: "task" },
+      },
+    });
+    assert.equal(state.subagentLinks?.[SPAWNED.subagent_id], toolCallId);
+    assert.equal(state.subagents?.[SPAWNED.subagent_id]?.toolCallId, toolCallId);
+  });
+
+  it("subagentLinks first write wins (no overwrite)", () => {
+    let state = createSessionState({ id: "parent" });
+    const first = "call-first";
+    const second = "call-second";
+    const body = `subagent_id: ${SPAWNED.subagent_id}`;
+    const meta = { "x.ai/tool": { name: "spawn_subagent" } };
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call",
+      toolCallId: first,
+      status: "completed",
+      content: body,
+      _meta: meta,
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call",
+      toolCallId: second,
+      status: "completed",
+      content: body,
+      _meta: meta,
+    });
+    assert.equal(state.subagentLinks?.[SPAWNED.subagent_id], first);
+  });
 });
 
 describe("knownSilent + unknown kinds via applySessionUpdate", () => {

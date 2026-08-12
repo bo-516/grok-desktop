@@ -12,9 +12,13 @@ import {
   applySessionUpdate,
   createSessionState,
   extractSessionUpdate,
+  extractGoalIntentLine,
+  looksLikeHarnessRolePrompt,
   normalizeEchoBody,
   resetTimelineIdCounter,
+  sanitizeUserEchoText,
   stripSystemReminders,
+  summarizeHarnessRolePrompt,
   userTextFromBlocks,
 } from "../src/timeline.js";
 import {
@@ -30,6 +34,52 @@ const REMINDER = [
   "Command: ls -la /Users/me/idea/grok-desktop/ 2>/dev/null | head -5",
   'Use get_command_or_subagent_output("call-8dd0cb34") to see the full output.',
   "</system-reminder>",
+].join("\n");
+
+/**
+ * Goal-mode injection shape from session 019ff165 (parent plan execution).
+ * Entire body is a system-reminder — old strip left the canvas empty.
+ */
+const GOAL_REMINDER = [
+  "<system-reminder>",
+  "A goal has been set: @docs/refactor-extensions-environment-2026-08-11.md",
+  "",
+  "You are working directly on this goal across multiple turns. Deliver",
+  "EVERYTHING the user asked for yourself — no follow-up questions.",
+  "Plan: /Users/me/.grok/sessions/…/goal/plan.md",
+  "</system-reminder>",
+].join("\n");
+
+/**
+ * Subagent adversarial-verifier pack shape (session 019ff178).
+ * Padded past the length gate so the role-card heuristic fires.
+ */
+const VERIFIER_ROLE_PROMPT = [
+  "You are an **adversarial verifier** for the xAI Grok Build harness. You are",
+  "NOT the agent that produced the work below. Your job is to **refute** that the",
+  "objective has been met. **Default to `refuted: true` if uncertain**.",
+  "",
+  "## Inputs",
+  "",
+  "- OBJECTIVE: the user's goal, verbatim.",
+  "- PLAN_FILE: path to the Markdown plan, or `(unavailable)`.",
+  "- PLAN_CHANGES: a diff of how the agent edited PLAN_FILE, or `(none)`.",
+  "- CHANGES_FILE: a unified-diff changelog; may be truncated or `(unavailable)`.",
+  "- CHANGED_FILES: the COMPLETE list of files this goal created/modified.",
+  "- FINAL_RESPONSE: the agent's own summary.",
+  "",
+  "## Output contract — STRICT",
+  "",
+  "Write the JSON verdict then the terminal token.",
+  "",
+  // Pad so length exceeds the harness role min (ordinary chat stays short).
+  "x".repeat(1600),
+  "",
+  "OBJECTIVE:",
+  "@docs/refactor-extensions-environment-2026-08-11.md",
+  "",
+  "CHANGED_FILES:",
+  "- apps/desktop/src/lib/inspectModel.ts",
 ].join("\n");
 
 /** User rows of a session, narrowed for assertions. */
@@ -247,5 +297,260 @@ describe("agent user-echo sanitizing", () => {
       normalizeEchoBody("look [Image #2]  at   this"),
       "look at this",
     );
+  });
+
+  it("goal injection becomes a short Goal intent line (not empty, not full reminder)", () => {
+    assert.equal(
+      extractGoalIntentLine(GOAL_REMINDER),
+      "Goal: @docs/refactor-extensions-environment-2026-08-11.md",
+    );
+    assert.equal(
+      sanitizeUserEchoText(GOAL_REMINDER),
+      "Goal: @docs/refactor-extensions-environment-2026-08-11.md",
+    );
+
+    let state = createSessionState({ id: "s-goal" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: GOAL_REMINDER },
+      _meta: { modelId: "grok-4.5", promptIndex: 0 },
+    });
+    const users = userRows(state);
+    assert.equal(users.length, 1);
+    assert.ok(users[0] && users[0].kind === "user");
+    if (users[0]?.kind === "user") {
+      assert.equal(
+        userTextFromBlocks(users[0].blocks),
+        "Goal: @docs/refactor-extensions-environment-2026-08-11.md",
+      );
+    }
+  });
+
+  it("adversarial verifier role pack collapses to role · objective", () => {
+    assert.equal(looksLikeHarnessRolePrompt(VERIFIER_ROLE_PROMPT), true);
+    assert.equal(
+      summarizeHarnessRolePrompt(VERIFIER_ROLE_PROMPT),
+      "adversarial verifier · @docs/refactor-extensions-environment-2026-08-11.md",
+    );
+    assert.equal(
+      sanitizeUserEchoText(VERIFIER_ROLE_PROMPT),
+      "adversarial verifier · @docs/refactor-extensions-environment-2026-08-11.md",
+    );
+
+    let state = createSessionState({ id: "s-verifier" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: VERIFIER_ROLE_PROMPT },
+      _meta: { modelId: "grok-4.5", promptIndex: 0 },
+    });
+    const users = userRows(state);
+    assert.equal(users.length, 1);
+    assert.ok(users[0] && users[0].kind === "user");
+    if (users[0]?.kind === "user") {
+      const body = userTextFromBlocks(users[0].blocks);
+      assert.equal(
+        body,
+        "adversarial verifier · @docs/refactor-extensions-environment-2026-08-11.md",
+      );
+      assert.equal(body.includes("You are an"), false);
+      assert.equal(body.includes("Output contract"), false);
+    }
+  });
+
+  it("ordinary short chat is never collapsed as a harness role pack", () => {
+    const chat = "You are right, fix the button padding please";
+    assert.equal(looksLikeHarnessRolePrompt(chat), false);
+    assert.equal(sanitizeUserEchoText(chat), chat);
+  });
+
+  it("seed heal rewrites cached goal dumps and verifier packs", () => {
+    const tagged = tagSeedUserMessages([
+      {
+        kind: "user",
+        id: "u-goal",
+        blocks: [{ type: "text", text: GOAL_REMINDER }],
+      },
+      {
+        kind: "user",
+        id: "u-verifier",
+        blocks: [{ type: "text", text: VERIFIER_ROLE_PROMPT }],
+      },
+      {
+        kind: "user",
+        id: "u-human",
+        blocks: [{ type: "text", text: "real human follow-up" }],
+      },
+    ]);
+    assert.equal(tagged.length, 3);
+    assert.deepEqual(
+      tagged.map((item) =>
+        item.kind === "user" ? userTextFromBlocks(item.blocks) : "",
+      ),
+      [
+        "Goal: @docs/refactor-extensions-environment-2026-08-11.md",
+        "adversarial verifier · @docs/refactor-extensions-environment-2026-08-11.md",
+        "real human follow-up",
+      ],
+    );
+  });
+
+  it("session/load image chunks attach binary so thumbs survive without optimistic local", () => {
+    // Wire order from real grok-build updates.jsonl: text with [Image #N], then
+    // a separate content.type === "image" chunk with base64. Old reducer dropped
+    // the image chunk (empty text) → only placeholder chips after reload.
+    const sent = "你改完为什么图片预览不了 [Image #1] ";
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    let state = createSessionState({ id: "s-img-wire" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: sent },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "image", mimeType: "image/png", data: png },
+    });
+
+    const users = userRows(state);
+    assert.equal(users.length, 1);
+    assert.ok(users[0] && users[0].kind === "user");
+    if (users[0]?.kind === "user") {
+      // Placeholder stripped once binary is present.
+      assert.equal(
+        userTextFromBlocks(users[0].blocks),
+        "你改完为什么图片预览不了",
+      );
+      const images = users[0].blocks.filter((b) => b.type === "image");
+      assert.equal(images.length, 1);
+      if (images[0]?.type === "image") {
+        assert.equal(images[0].data, png);
+        assert.equal(images[0].mimeType, "image/png");
+      }
+    }
+
+    // Replay of the same image chunk must not stack a second thumb.
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "image", mimeType: "image/png", data: png },
+    });
+    const users2 = userRows(state);
+    assert.ok(users2[0] && users2[0].kind === "user");
+    if (users2[0]?.kind === "user") {
+      assert.equal(
+        users2[0].blocks.filter((b) => b.type === "image").length,
+        1,
+      );
+    }
+  });
+
+  it("multi-turn session/load replay attaches each image to its own turn", () => {
+    // Real reload shape: agent-origin rows never reach agentConfirmed, so a
+    // "first unconfirmed row" target stacked every image of the transcript on
+    // turn 1 and left later turns with bare `[Image #N]` chips.
+    const png1 = "PNG_TURN_ONE";
+    const png2 = "PNG_TURN_TWO";
+    let state = createSessionState({ id: "s-img-multi" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "看下这个会话 [Image #1]" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "image", mimeType: "image/png", data: png1 },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "answer one" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "你改完为什么图片预览不了 [Image #1]" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "image", mimeType: "image/png", data: png2 },
+    });
+
+    const users = userRows(state);
+    assert.equal(users.length, 2);
+    const payloads = users.map((row) =>
+      row.kind === "user"
+        ? row.blocks
+            .filter((b) => b.type === "image")
+            .map((b) => (b.type === "image" ? b.data : ""))
+        : [],
+    );
+    assert.deepEqual(payloads, [[png1], [png2]]);
+    // Both bodies keep their own text with placeholders cleaned.
+    assert.deepEqual(
+      users.map((row) =>
+        row.kind === "user" ? userTextFromBlocks(row.blocks) : "",
+      ),
+      ["看下这个会话", "你改完为什么图片预览不了"],
+    );
+  });
+
+  it("a prompt sent after session/load replay absorbs its echo instead of doubling", () => {
+    // Replayed rows are agent-origin and never confirm, so a "first unconfirmed
+    // row" search stopped at turn 1: the local row kept the typed body while the
+    // echo opened a second bubble carrying the raw `[Image #N]` stand-in.
+    const png = "LOCAL_PNG_PAYLOAD";
+    let state = createSessionState({ id: "s-after-replay" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "replayed turn one" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "replayed answer one" },
+    });
+
+    state = appendUserPrompt(state, [
+      { type: "text", text: "新的一条带图消息" },
+      { type: "image", mimeType: "image/png", data: png },
+    ]);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "新的一条带图消息 [Image #1]" },
+    });
+
+    const users = userRows(state);
+    assert.equal(users.length, 2);
+    const live = users[1];
+    assert.ok(live && live.kind === "user");
+    if (live?.kind === "user") {
+      assert.equal(live.origin, "local");
+      assert.equal(live.agentConfirmed, true);
+      assert.equal(userTextFromBlocks(live.blocks), "新的一条带图消息");
+      assert.equal(live.blocks.filter((b) => b.type === "image").length, 1);
+    }
+  });
+
+  it("image chunk keeps local optimistic binary instead of stacking agent copy", () => {
+    const localPng = "LOCAL_BASE64_PAYLOAD";
+    const agentPng = "AGENT_COMPRESSED_PAYLOAD";
+    let state = createSessionState({ id: "s-img-local" });
+    state = appendUserPrompt(state, [
+      { type: "text", text: "see this" },
+      { type: "image", mimeType: "image/png", data: localPng },
+    ]);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "see this [Image #1]" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "image", mimeType: "image/png", data: agentPng },
+    });
+
+    const users = userRows(state);
+    assert.equal(users.length, 1);
+    assert.ok(users[0] && users[0].kind === "user");
+    if (users[0]?.kind === "user") {
+      const images = users[0].blocks.filter((b) => b.type === "image");
+      assert.equal(images.length, 1);
+      if (images[0]?.type === "image") {
+        assert.equal(images[0].data, localPng);
+      }
+    }
   });
 });

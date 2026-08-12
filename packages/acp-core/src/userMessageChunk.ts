@@ -1,6 +1,9 @@
 /**
- * Identity-based idempotent application of agent `user_message_chunk` events.
+ * Identity-based idempotent application of agent `user_message_chunk` text events.
  * Keeps local/seed user bodies authoritative so session/load resume never doubles text.
+ *
+ * Binary image chunks are handled by {@link applyUserImageChunk} in
+ * `userMessageImage.ts` — both land on the same user row.
  */
 
 import type { ContentBlock, TimelineItem } from "./types.js";
@@ -35,6 +38,51 @@ export function collapseRepeatedText(text: string): string {
 }
 
 /**
+ * Whether a user row owns its body and is still waiting for the agent echo
+ * that claims it: client-created rows (local / seed / older untagged cache
+ * rows), never agent-origin rows minted by replay.
+ * @param item User timeline row.
+ * @returns true when an echo should absorb into this row instead of opening one.
+ */
+export function isClaimableUserRow(
+  item: Extract<TimelineItem, { kind: "user" }>,
+): boolean {
+  return (
+    item.origin === "local" ||
+    item.origin === "seed" ||
+    // Untagged rows from older caches still act as seed during resume.
+    item.origin === undefined ||
+    Boolean(item.clientPromptId)
+  );
+}
+
+/**
+ * Row an incoming echo belongs to.
+ *
+ * A claimable row wins over timeline order: agent-origin rows minted by
+ * session/load replay never reach `agentConfirmed`, so a plain "first
+ * unconfirmed" search stops at turn 1 forever. After a reload that made every
+ * new prompt open a duplicate bubble — the local row kept the typed body while
+ * the echo (with its `[Image #N]` stand-ins) landed in a second row.
+ * @param timeline Ordered timeline.
+ * @returns Index of the row to absorb into, or -1 when there is none.
+ */
+function findEchoTargetIndex(timeline: TimelineItem[]): number {
+  const claimableIdx = timeline.findIndex(
+    (item) =>
+      item.kind === "user" && !item.agentConfirmed && isClaimableUserRow(item),
+  );
+  if (claimableIdx >= 0) {
+    return claimableIdx;
+  }
+  // Pure agent-origin stream: first unconfirmed row keeps chunked replay
+  // concatenating into the row it opened (tail guards below split turns).
+  return timeline.findIndex(
+    (item) => item.kind === "user" && !item.agentConfirmed,
+  );
+}
+
+/**
  * Apply one agent `user_message_chunk` with identity-based idempotency.
  * Unconfirmed local/seed user rows (in timeline order) absorb replay; blocks stay
  * authoritative for those rows so seed + session/load never doubles text.
@@ -47,9 +95,7 @@ export function applyUserMessageChunk(
   timeline: TimelineItem[],
   text: string,
 ): TimelineItem[] {
-  const pendingIdx = timeline.findIndex(
-    (item) => item.kind === "user" && !item.agentConfirmed,
-  );
+  const pendingIdx = findEchoTargetIndex(timeline);
 
   if (pendingIdx < 0) {
     // All user rows confirmed — discard late re-echo of the latest user body
@@ -82,12 +128,7 @@ export function applyUserMessageChunk(
   }
   const item: Extract<TimelineItem, { kind: "user" }> = pending;
 
-  const authoritative =
-    item.origin === "local" ||
-    item.origin === "seed" ||
-    Boolean(item.clientPromptId) ||
-    // Untagged rows from older caches still act as seed during resume.
-    item.origin === undefined;
+  const authoritative = isClaimableUserRow(item);
 
   // Heal repeated bodies still present on older catalog rows before absorb.
   const cleanedBlocks = normalizeUserBlocks(item.blocks);

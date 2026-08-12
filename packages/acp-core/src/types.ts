@@ -95,8 +95,18 @@ export type ToolCallCard = {
   status?: ToolCallStatus;
   content?: unknown;
   rawLocations?: unknown;
-  /** Arbitrary extra fields from the agent (preserved on patch). */
+  /**
+   * Vendor `_meta` from the raw update (e.g. `x.ai/tool`), merged on patch.
+   * Identifies tools the UI must render specially (subagent spawn / wait /
+   * kill) without matching on human-facing titles.
+   */
   meta?: Record<string, unknown>;
+  /**
+   * Agent-supplied tool input (`rawInput`). Only UI-needed keys are retained
+   * by the reducer (`description` / `task_ids`); never render wholesale.
+   * Missing or omitted when the update carries no usable input fields.
+   */
+  rawInput?: Record<string, unknown>;
 };
 
 export type PlanEntry = {
@@ -217,7 +227,19 @@ export type TimelineItem =
 export type SessionUpdate =
   | {
       sessionUpdate: "user_message_chunk";
-      content?: { type?: string; text?: string };
+      /**
+       * Text echo (`type: "text"`) or binary image (`type: "image"` + mimeType/data).
+       * grok-build sends images as separate chunks after the text echo that carries
+       * `[Image #N]` placeholders — both must land on the same user row.
+       */
+      content?: {
+        type?: string;
+        text?: string;
+        mimeType?: string;
+        data?: string;
+        uri?: string;
+        _meta?: Record<string, unknown>;
+      };
     }
   | {
       sessionUpdate: "agent_message_chunk";
@@ -331,6 +353,12 @@ export type SubagentCard = {
   durationMs?: number;
   tokensUsed?: number;
   output?: string;
+  /**
+   * Spawn tool card that created this subagent; resolved from `subagentLinks`.
+   * Order-independent: may arrive via spawn-card completion first or via
+   * `subagent_spawned` reading an earlier link write.
+   */
+  toolCallId?: string;
 };
 
 /**
@@ -399,8 +427,14 @@ export type SessionState = {
   goal?: GoalSnapshot;
   /** subagentId → card; sidebar data, never timeline rows. */
   subagents?: Record<string, SubagentCard>;
-  /** taskId → card; replaces hand-pasted JSON in the Tasks panel. */
+  /** taskId → card; session-scoped background shell tasks. */
   backgroundTasks?: Record<string, BackgroundTaskCard>;
+  /**
+   * subagentId → toolCallId of the `spawn_subagent` card that created it.
+   * Protocol-derived join key so timeline groups and orchestration cards
+   * link without title matching. Written from either arrival order.
+   */
+  subagentLinks?: Record<string, string>;
 };
 
 /** One model the agent advertises for session/set_model and the model picker. */

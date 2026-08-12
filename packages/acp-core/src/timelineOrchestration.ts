@@ -219,6 +219,10 @@ export function applyOrchestrationUpdate(
     if (spawned && existingTerminal) {
       return state;
     }
+    // Order-independent join: link may already exist from a completed spawn card.
+    // Elapsed clocks stay client-local (desktop); never write startedAtMs here
+    // so session/load replay does not invent a "just started" clock.
+    const linkedToolCallId = state.subagentLinks?.[subagentId];
     const card = patchSubagentCard(existing, {
       subagentId,
       childSessionId: readString(update, "child_session_id"),
@@ -233,6 +237,8 @@ export function applyOrchestrationUpdate(
       durationMs: readNumber(update, "duration_ms"),
       tokensUsed: readNumber(update, "tokens_used"),
       output: readString(update, "output"),
+      // Prefer existing card link if already set; else take map entry.
+      toolCallId: existing?.toolCallId ?? linkedToolCallId,
     });
     return {
       ...state,

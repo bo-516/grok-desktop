@@ -9,7 +9,7 @@ import type { ToolCallCard } from "./types.js";
  * Deep-ish merge for tool card patches.
  * - Undefined fields on the patch are ignored (do not wipe).
  * - `content` is only replaced when the patch explicitly provides content.
- * - Nested plain objects are merged one level; arrays replace when provided.
+ * - Nested plain objects (`meta` / `rawInput`) are merged one level; arrays replace when provided.
  * @param existing Prior card for this toolCallId, if any.
  * @param patch Partial fields; `toolCallId` is required and always wins.
  * @returns New card object (never mutates `existing`).
@@ -19,7 +19,11 @@ export function patchToolCard(
   patch: Partial<ToolCallCard> & { toolCallId: string },
 ): ToolCallCard {
   const base: ToolCallCard = existing
-    ? { ...existing, meta: existing.meta ? { ...existing.meta } : undefined }
+    ? {
+        ...existing,
+        meta: existing.meta ? { ...existing.meta } : undefined,
+        rawInput: existing.rawInput ? { ...existing.rawInput } : undefined,
+      }
     : { toolCallId: patch.toolCallId };
 
   const next: ToolCallCard = { ...base, toolCallId: patch.toolCallId };
@@ -42,7 +46,9 @@ export function patchToolCard(
   if (patch.meta !== undefined) {
     next.meta = { ...(base.meta ?? {}), ...patch.meta };
   }
+  if (patch.rawInput !== undefined) {
+    next.rawInput = { ...(base.rawInput ?? {}), ...patch.rawInput };
+  }
 
-  // Preserve any extra agent fields stored under meta from raw updates
   return next;
 }

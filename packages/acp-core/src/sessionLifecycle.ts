@@ -11,7 +11,7 @@ import { nextTimelineId } from "./timelineId.js";
 import {
   collapseRepeatedText,
 } from "./userMessageChunk.js";
-import { stripSystemReminders } from "./userEchoText.js";
+import { sanitizeUserEchoText } from "./userEchoText.js";
 import type {
   ContentBlock,
   PermissionRequest,
@@ -75,8 +75,10 @@ export function appendUserPrompt(
  * Tag cached transcript rows as seed so session/load replay can confirm them
  * without concatenating or double-appending.
  * - User rows: also heals bodies written by earlier builds — a prompt repeated
- *   once per replay, and swallowed `<system-reminder>` log dumps — then drops rows left with no
- *   content at all, so an old cache full of harness noise does not repaint it.
+ *   once per replay, swallowed `<system-reminder>` log dumps, pure goal
+ *   injections (collapsed to `Goal: …`), and multi-KB harness role packs
+ *   (collapsed to role · objective) — then drops rows left with no content at
+ *   all, so an old cache full of harness noise does not repaint it.
  * - Agent / thought rows: origin seed + agentConfirmed false so
  *   appendOrMergeText / appendOrMergeThought claim them in order.
  * Confirmed or already agent-origin rows are left alone (users still text-healed).
@@ -94,7 +96,7 @@ export function tagSeedUserMessages(
         if (block.type !== "text") {
           return block;
         }
-        const cleaned = stripSystemReminders(
+        const cleaned = sanitizeUserEchoText(
           collapseRepeatedText(block.text),
         );
         if (cleaned === block.text) {

@@ -11,7 +11,9 @@ export function isWeakSessionTitle(title: string | undefined | null): boolean {
   if (t === "New session" || t === "Current chat") {return true;}
   // Agent / disk summary placeholders that look like real titles but are not.
   if (/^\(?no summary\)?$/i.test(t)) {return true;}
-  if (/^untitled( session)?$/i.test(t)) {return true;}
+  // "Untitled" / "Untitled chat" / "Untitled session" — fallbackSessionLabel
+  // and row display both use "Untitled chat"; treat as empty-draft placeholders.
+  if (/^untitled(\s+(session|chat))?$/i.test(t)) {return true;}
   // "Session 019fd6…" / "session 019…" / "Chat 019…"
   if (/^(session|chat)\s+[0-9a-f-]{6,}$/i.test(t)) {return true;}
   // bare uuid-ish / short id

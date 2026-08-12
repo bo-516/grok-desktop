@@ -11,11 +11,7 @@ import type {
 } from "./types.js";
 import { normalizeAvailableCommands } from "./sessionMetadata.js";
 import { nextTimelineId } from "./timelineId.js";
-import { applyUserMessageChunk } from "./userMessageChunk.js";
-import {
-  isHiddenFromScrollback,
-  stripSystemReminders,
-} from "./userEchoText.js";
+import { applyUserMessageUpdate } from "./userMessageApply.js";
 import { patchToolCard } from "./timelineToolCard.js";
 import {
   appendOrMergeAgentText,
@@ -26,6 +22,60 @@ import {
   applyOrchestrationUpdate,
   isOrchestrationUpdate,
 } from "./timelineOrchestration.js";
+import {
+  isSpawnSubagentCard,
+  parseSpawnedSubagentId,
+  readToolMeta,
+  readToolRawInput,
+} from "./subagentLink.js";
+
+/**
+ * When a spawn card body carries `subagent_id:`, record the join key and
+ * back-fill any orchestration card that arrived earlier without a toolCallId.
+ * Idempotent: an existing link for the same subagentId is never overwritten.
+ * @param state Session snapshot after the tool card was patched.
+ * @param toolCallId Timeline tool card id.
+ * @param card Patched card (may or may not be a spawn).
+ * @returns State with `subagentLinks` / matching `subagents` updated, or
+ *   the input state when no spawn id is present.
+ */
+function linkSpawnCardIfReady(
+  state: SessionState,
+  toolCallId: string,
+  card: ToolCallCard,
+): SessionState {
+  if (!isSpawnSubagentCard(card)) {
+    return state;
+  }
+  const spawnedId = parseSpawnedSubagentId(card.content);
+  if (!spawnedId) {
+    return state;
+  }
+  // Do not overwrite an earlier link for the same subagent (first write wins).
+  if (state.subagentLinks?.[spawnedId]) {
+    return state;
+  }
+  const subagentLinks = {
+    ...(state.subagentLinks ?? {}),
+    [spawnedId]: toolCallId,
+  };
+  const existing = state.subagents?.[spawnedId];
+  if (!existing) {
+    return { ...state, subagentLinks };
+  }
+  // Back-fill toolCallId on the orchestration card if it landed first.
+  if (existing.toolCallId) {
+    return { ...state, subagentLinks };
+  }
+  return {
+    ...state,
+    subagentLinks,
+    subagents: {
+      ...(state.subagents ?? {}),
+      [spawnedId]: { ...existing, toolCallId },
+    },
+  };
+}
 
 /**
  * Session-update kinds that insert a visible timeline row (or update one).
@@ -71,24 +121,6 @@ function chunkText(update: SessionUpdate): string {
     return "";
   }
   return typeof content.text === "string" ? content.text : "";
-}
-
-/**
- * Text of a user echo chunk that is allowed onto the canvas.
- *
- * grok-build reuses `user_message_chunk` for harness injections (background
- * task completions, hook notices): the agent flags them `hideFromScrollback`
- * and wraps them in `<system-reminder>`. They are not something the person
- * said, so they must not open a bubble, extend one, or finalize a thought —
- * returning empty makes the caller drop the update whole.
- * @param update Raw user_message_chunk update.
- * @returns Displayable user text, or empty when the chunk is harness-only.
- */
-function visibleUserChunkText(update: SessionUpdate): string {
-  if (isHiddenFromScrollback(update)) {
-    return "";
-  }
-  return stripSystemReminders(chunkText(update));
 }
 
 /**
@@ -139,13 +171,7 @@ export function applySessionUpdate(
 
   switch (kind) {
     case "user_message_chunk": {
-      const text = visibleUserChunkText(update);
-      if (!text) {
-        return state;
-      }
-      const base = withFinalizedThoughtIfVisible(state, kind);
-      const timeline = applyUserMessageChunk(base.timeline, text);
-      return { ...base, timeline };
+      return applyUserMessageUpdate(state, update);
     }
     case "agent_message_chunk": {
       const text = chunkText(update);
@@ -181,6 +207,8 @@ export function applySessionUpdate(
       if (!toolCallId) {
         return state;
       }
+      const meta = readToolMeta(update as { _meta?: unknown });
+      const rawInput = readToolRawInput(update as { rawInput?: unknown });
       const card = patchToolCard(base.toolCalls[toolCallId], {
         toolCallId,
         title: update.title as string | undefined,
@@ -188,6 +216,8 @@ export function applySessionUpdate(
         status: (update.status as string | undefined) ?? "pending",
         content: update.content,
         rawLocations: (update as { locations?: unknown }).locations,
+        meta,
+        rawInput,
       });
       const toolCalls = {
         ...base.toolCalls,
@@ -206,7 +236,11 @@ export function applySessionUpdate(
               toolCallId,
             },
           ];
-      return { ...base, toolCalls, timeline };
+      return linkSpawnCardIfReady(
+        { ...base, toolCalls, timeline },
+        toolCallId,
+        card,
+      );
     }
     case "tool_call_update": {
       const base = withFinalizedThoughtIfVisible(state, kind);
@@ -236,6 +270,12 @@ export function applySessionUpdate(
       if (Object.prototype.hasOwnProperty.call(update, "locations")) {
         patch.rawLocations = (update as { locations?: unknown }).locations;
       }
+      if (Object.prototype.hasOwnProperty.call(update, "_meta")) {
+        patch.meta = readToolMeta(update as { _meta?: unknown });
+      }
+      if (Object.prototype.hasOwnProperty.call(update, "rawInput")) {
+        patch.rawInput = readToolRawInput(update as { rawInput?: unknown });
+      }
       const card = patchToolCard(existing, patch);
       const toolCalls = {
         ...base.toolCalls,
@@ -255,7 +295,11 @@ export function applySessionUpdate(
               toolCallId,
             },
           ];
-      return { ...base, toolCalls, timeline };
+      return linkSpawnCardIfReady(
+        { ...base, toolCalls, timeline },
+        toolCallId,
+        card,
+      );
     }
     case "plan": {
       // Silent metadata — do not finalize thought.

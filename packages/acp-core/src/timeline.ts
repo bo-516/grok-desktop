@@ -16,12 +16,20 @@ export {
   type UserImageBlock,
 } from "./userMessageChunk.js";
 export {
+  applyUserImageChunk,
+  type UserChunkImage,
+} from "./userMessageImage.js";
+export {
   countImagePlaceholders,
   echoRepeatsBody,
+  extractGoalIntentLine,
   isHiddenFromScrollback,
+  looksLikeHarnessRolePrompt,
   normalizeEchoBody,
+  sanitizeUserEchoText,
   stripImagePlaceholders,
   stripSystemReminders,
+  summarizeHarnessRolePrompt,
 } from "./userEchoText.js";
 export { patchToolCard } from "./timelineToolCard.js";
 export {
@@ -39,6 +47,21 @@ export {
   applyOrchestrationUpdate,
   isOrchestrationUpdate,
 } from "./timelineOrchestration.js";
+export {
+  SPAWN_SUBAGENT_TOOL,
+  WAIT_SUBAGENT_TOOL,
+  KILL_SUBAGENT_TOOL,
+  flattenToolText,
+  vendorToolName,
+  isSpawnSubagentCard,
+  isWaitSubagentCard,
+  isKillSubagentCard,
+  parseSpawnedSubagentId,
+  waitBarrierTaskIds,
+  sanitizeToolRawInput,
+  readToolMeta,
+  readToolRawInput,
+} from "./subagentLink.js";
 
 /**
  * Extract a SessionUpdate from a session/update notification params object.

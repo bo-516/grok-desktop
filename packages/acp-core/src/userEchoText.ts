@@ -2,12 +2,19 @@
  * Sanitizers for agent-echoed user text (`user_message_chunk`).
  *
  * grok-build replays a prompt as the *agent* received it, not as the person
- * typed it, and two rewrites leak into the canvas if left alone:
+ * typed it, and several rewrites leak into the canvas if left alone:
  *
  * 1. Harness `<system-reminder>` notices (background-task completions, hook
  *    output) arrive as their own user chunks flagged `_meta.hideFromScrollback`.
  *    Rendering them turns the user bubble into a log dump.
- * 2. Attached images come back as `[Image #N]` placeholders. Comparing the raw
+ * 2. Goal mode injects a long system-reminder that only contains
+ *    `A goal has been set: <objective>` — stripping it leaves an empty canvas
+ *    with no user intent. We keep a short `Goal: …` line instead.
+ * 3. Subagent / harness role cards (`You are an **adversarial verifier**…`
+ *    plus multi-page Inputs / Output contract) arrive as a single user chunk
+ *    with no hide flag. Dumping 30KB of system prompt as the "user" bubble is
+ *    wrong; we collapse them to a short intent line (role · objective).
+ * 4. Attached images come back as `[Image #N]` placeholders. Comparing the raw
  *    echo against the local body then fails, so the optimistic row never
  *    confirms and the next replay appends a duplicate bubble.
  *
@@ -27,8 +34,29 @@ const REMINDER_CLOSE_HEAD = /^[\s\S]*?<\/system-reminder>/;
 /** Unterminated open tag: reminder ran past the end of this chunk. */
 const REMINDER_OPEN_TAIL = /<system-reminder>[\s\S]*$/;
 
+/** Goal harness injection line inside a system-reminder (or plain text). */
+const GOAL_SET_LINE = /A goal has been set:\s*(.+)/i;
+
+/** Role-card openers used by harness subagent / skeptic / planner prompts. */
+const ROLE_OPENER = /^You are (?:an?|the)\s+/i;
+
+/**
+ * Filled `OBJECTIVE:` value lines. Template copy ("the user's goal, verbatim.")
+ * is filtered out later; real goals are paths / short imperatives.
+ */
+const OBJECTIVE_LINE = /^OBJECTIVE:\s*(.+?)\s*$/gim;
+
+/** `OBJECTIVE:\n@docs/...` block form used by goal skeptic task packs. */
+const OBJECTIVE_BLOCK = /^OBJECTIVE:\s*\n([^\n]+)/gim;
+
 /** Agent stand-in for an image ContentBlock in the echoed prompt. */
 export const IMAGE_PLACEHOLDER = /\[Image\s*#\d+\]/gi;
+
+/**
+ * Minimum length before a role-card heuristic may fire.
+ * Ordinary chat prompts stay well under this; harness packs are multi-KB.
+ */
+const HARNESS_ROLE_MIN_LEN = 1500;
 
 /**
  * Count `[Image #N]` placeholders in agent-echoed user text.
@@ -119,6 +147,202 @@ export function stripSystemReminders(text: string): string {
 }
 
 /**
+ * First line of a multi-line capture, trimmed.
+ * @param raw Match group that may include trailing prose.
+ * @returns First non-empty line, or empty string.
+ */
+function firstLine(raw: string): string {
+  const line = raw.split(/\r?\n/, 1)[0] ?? "";
+  return line.trim();
+}
+
+/**
+ * Whether an OBJECTIVE value is harness template copy rather than a real goal.
+ * @param value Candidate objective string.
+ * @returns true when the value must be ignored.
+ */
+function isObjectivePlaceholder(value: string): boolean {
+  const v = value.trim();
+  if (!v) {
+    return true;
+  }
+  if (/^the user's goal/i.test(v)) {
+    return true;
+  }
+  if (/verbatim/i.test(v) && v.length < 48) {
+    return true;
+  }
+  if (/^\((unavailable|none)\)/i.test(v)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Short intent line from a goal-mode harness injection.
+ * Matches `A goal has been set: <objective>` even when wrapped in a
+ * system-reminder so the canvas can show intent after reminders are stripped.
+ * @param text Raw user_message_chunk body.
+ * @returns `Goal: <objective>` or null when the phrase is absent.
+ */
+export function extractGoalIntentLine(text: string): string | null {
+  if (!text.includes("goal has been set")) {
+    return null;
+  }
+  const match = text.match(GOAL_SET_LINE);
+  const objective = match?.[1] ? firstLine(match[1]) : "";
+  if (!objective) {
+    return null;
+  }
+  return `Goal: ${objective}`;
+}
+
+/**
+ * Last non-placeholder OBJECTIVE value in a harness task pack.
+ * Goal skeptic prompts list the field in the template first, then fill the
+ * real objective later; taking the last real value avoids the template line.
+ * @param text Full harness role / task prompt.
+ * @returns Objective string, or null when none look real.
+ */
+function extractFilledObjective(text: string): string | null {
+  let last: string | null = null;
+  for (const match of text.matchAll(OBJECTIVE_LINE)) {
+    const value = (match[1] ?? "").trim();
+    if (!isObjectivePlaceholder(value)) {
+      last = value;
+    }
+  }
+  for (const match of text.matchAll(OBJECTIVE_BLOCK)) {
+    const value = (match[1] ?? "").trim();
+    if (!isObjectivePlaceholder(value)) {
+      last = value;
+    }
+  }
+  return last;
+}
+
+/**
+ * Role title from a `You are an **…**` / `You are a …` opener.
+ * @param text Full harness role prompt.
+ * @returns Short role label, or null when the opener is missing.
+ */
+function roleTitleFromOpener(text: string): string | null {
+  const head = text.trimStart();
+  const bold = head.match(/^You are (?:an?|the)\s+\*\*([^*]+)\*\*/i);
+  if (bold?.[1]) {
+    return bold[1].trim();
+  }
+  const plain = head.match(/^You are (?:an?|the)\s+([^.!\n*]{3,80})/i);
+  if (plain?.[1]) {
+    return plain[1]
+      .trim()
+      .replace(/\s+for\s+the\s*$/i, "")
+      .trim();
+  }
+  return null;
+}
+
+/**
+ * High-precision detector for multi-page harness role / task cards.
+ * Ordinary user chat never starts with a long "You are …" pack that also
+ * carries Inputs + PLAN_FILE / CHANGED_FILES / FINAL_RESPONSE sections.
+ * @param text Candidate user_message_chunk body.
+ * @returns true when the text should be collapsed, not shown in full.
+ */
+export function looksLikeHarnessRolePrompt(text: string): boolean {
+  if (text.length < HARNESS_ROLE_MIN_LEN) {
+    return false;
+  }
+  if (!ROLE_OPENER.test(text.trimStart())) {
+    return false;
+  }
+  const hasInputsSection =
+    text.includes("## Inputs") ||
+    text.includes("OBJECTIVE:") ||
+    text.includes("OBJECTIVES");
+  const hasContractSection =
+    text.includes("PLAN_FILE") ||
+    text.includes("CHANGED_FILES") ||
+    text.includes("FINAL_RESPONSE") ||
+    text.includes("Output contract");
+  return hasInputsSection && hasContractSection;
+}
+
+/**
+ * Collapse a harness role / skeptic / planner task pack to a short intent line.
+ * Prefer `role · objective` when both are recoverable; fall back to either alone.
+ * @param text Full harness prompt body.
+ * @returns Short display string, or null when the text is not a role pack
+ *   (caller must leave ordinary chat unchanged).
+ */
+export function summarizeHarnessRolePrompt(text: string): string | null {
+  if (!looksLikeHarnessRolePrompt(text)) {
+    return null;
+  }
+  const objective = extractFilledObjective(text);
+  const role = roleTitleFromOpener(text);
+  if (objective && role) {
+    return `${role} · ${objective}`;
+  }
+  if (objective) {
+    return `Goal: ${objective}`;
+  }
+  if (role) {
+    return role;
+  }
+  const first = firstLine(text.trim());
+  if (!first) {
+    return null;
+  }
+  if (first.length > 120) {
+    return `${first.slice(0, 117)}…`;
+  }
+  return first;
+}
+
+/**
+ * Display form of an agent-echoed user body for the timeline bubble.
+ *
+ * Order:
+ * 1. Goal injection → keep `Goal: <objective>` when the rest is harness noise.
+ * 2. Multi-page harness role pack → short role · objective (or either alone).
+ * 3. Otherwise strip system-reminders and return the remainder.
+ *
+ * Empty result means "drop this chunk" (no bubble). Never returns the full
+ * goal system-reminder or a multi-KB role card.
+ * @param text Raw `user_message_chunk` content text.
+ * @returns Sanitized body to store / render; may be empty.
+ */
+export function sanitizeUserEchoText(text: string): string {
+  if (!text) {
+    return "";
+  }
+  const goalLine = extractGoalIntentLine(text);
+  if (goalLine) {
+    // Pure goal injection (reminder-only) → short intent. If human text is
+    // also present outside the reminder, prefer that and drop the harness wrap.
+    const withoutReminders = stripSystemReminders(text);
+    if (!withoutReminders) {
+      return goalLine;
+    }
+    // Goal phrase sometimes sits outside a reminder; if stripping left the
+    // long harness prose, still prefer the short intent line.
+    if (withoutReminders.includes("A goal has been set")) {
+      return goalLine;
+    }
+    if (looksLikeHarnessRolePrompt(withoutReminders)) {
+      return goalLine;
+    }
+    return withoutReminders;
+  }
+  const harnessSummary = summarizeHarnessRolePrompt(text);
+  if (harnessSummary !== null) {
+    return harnessSummary;
+  }
+  return stripSystemReminders(text);
+}
+
+/**
  * Comparison form of a user body: agent rewrites removed, whitespace flattened.
  *
  * Only ever used to decide whether an echo *is* the local text — never stored
@@ -129,7 +353,9 @@ export function stripSystemReminders(text: string): string {
  * @returns Normalized body for prefix / equality checks.
  */
 export function normalizeEchoBody(text: string): string {
-  return stripImagePlaceholders(stripSystemReminders(text))
+  // Sanitize first so a full harness pack and its short intent line compare
+  // equal after seed heal + replay.
+  return stripImagePlaceholders(sanitizeUserEchoText(text))
     .replace(/\s+/g, " ")
     .trim();
 }
