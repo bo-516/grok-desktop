@@ -83,7 +83,6 @@ export type SessionSpawnConfig = {
   rules?: string;
   disableWebSearch?: boolean;
   webFetch?: boolean;
-  trust?: boolean;
   effort?: string;
   allowRules?: string[];
   denyRules?: string[];

@@ -41,9 +41,14 @@ export async function dispatchCliCommand(
         args: Array.isArray(args.cmdArgs)
           ? args.cmdArgs.map(String)
           : undefined,
+        env: Array.isArray(args.env) ? args.env.map(String) : undefined,
         scope: args.scope === "project" ? "project" : "user",
         cwd,
       });
+    case "mcp_enable":
+      return cli.mcpEnable(String(args.name ?? ""), cwd);
+    case "mcp_disable":
+      return cli.mcpDisable(String(args.name ?? ""), cwd);
     case "mcp_remove":
       return cli.mcpRemove(
         String(args.name ?? ""),
@@ -73,12 +78,14 @@ export async function dispatchCliCommand(
       return cli.authLogout();
     case "update_check":
       return cli.updateCheck();
-    case "hooks_trust":
-      return cli.hooksTrust(String(args.folder ?? cwd ?? ""));
     case "mcp_add_http":
       return cli.mcpAddHttp({
         name: String(args.name ?? ""),
         url: String(args.url ?? ""),
+        headers: Array.isArray(args.headers)
+          ? args.headers.map(String)
+          : undefined,
+        transport: args.transport === "sse" ? "sse" : "http",
         scope: args.scope === "project" ? "project" : "user",
         cwd,
       });

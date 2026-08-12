@@ -171,28 +171,95 @@ export async function mcpDoctor(name: string, cwd?: string): Promise<unknown> {
 }
 
 /**
- * Add stdio MCP server.
- * @param name Server id.
- * @param command Executable.
- * @param args Optional args.
- * @param scope user | project.
- * @param cwd Project cwd when scope=project.
+ * Build argv for `grok mcp add` (stdio). Pure so unit tests can assert flags
+ * without spawning. Repeatable `-e KEY=value` comes from `env`.
+ * @param opts name, command, optional cmd args / env / scope.
+ * @returns Full argv after the binary name (starts with `mcp`).
  */
-export async function mcpAddStdio(opts: {
+export function buildMcpAddStdioArgs(opts: {
   name: string;
   command: string;
   args?: string[];
+  env?: string[];
   scope?: "user" | "project";
-  cwd?: string;
-}): Promise<CliRunResult> {
-  const args = ["mcp", "add", opts.name, opts.command];
+}): string[] {
+  const args = ["mcp", "add", opts.name];
+  for (const entry of opts.env ?? []) {
+    if (entry.trim()) {
+      args.push("-e", entry.trim());
+    }
+  }
+  args.push(opts.command);
   if (opts.args?.length) {
     args.push("--", ...opts.args);
   }
   if (opts.scope === "project") {
     args.push("--scope", "project");
   }
-  return runGrokCli(args, { cwd: opts.cwd, timeoutMs: 30_000 });
+  return args;
+}
+
+/**
+ * Add stdio MCP server.
+ * @param opts name, command, optional cmd args / env KEY=value / scope / cwd.
+ *   Missing name/command yields a CLI error (caller should validate).
+ */
+export async function mcpAddStdio(opts: {
+  name: string;
+  command: string;
+  args?: string[];
+  /** Repeatable KEY=value pairs for `-e` (process env for the server). */
+  env?: string[];
+  scope?: "user" | "project";
+  cwd?: string;
+}): Promise<CliRunResult> {
+  return runGrokCli(buildMcpAddStdioArgs(opts), {
+    cwd: opts.cwd,
+    timeoutMs: 30_000,
+  });
+}
+
+/**
+ * Build argv for `grok mcp enable|disable <name>`. No `--scope` (CLI has none).
+ * @param action enable or disable.
+ * @param name Server id.
+ * @returns Full argv after the binary name.
+ */
+export function buildMcpToggleArgs(
+  action: "enable" | "disable",
+  name: string,
+): string[] {
+  return ["mcp", action, name];
+}
+
+/**
+ * Enable a config-defined MCP server (`grok mcp enable <name>`).
+ * @param name Server id.
+ * @param cwd Optional project cwd (affects project config discovery).
+ */
+export async function mcpEnable(
+  name: string,
+  cwd?: string,
+): Promise<CliRunResult> {
+  return runGrokCli(buildMcpToggleArgs("enable", name), {
+    cwd,
+    timeoutMs: 30_000,
+  });
+}
+
+/**
+ * Disable a config-defined MCP server (`grok mcp disable <name>`).
+ * @param name Server id.
+ * @param cwd Optional project cwd.
+ */
+export async function mcpDisable(
+  name: string,
+  cwd?: string,
+): Promise<CliRunResult> {
+  return runGrokCli(buildMcpToggleArgs("disable", name), {
+    cwd,
+    timeoutMs: 30_000,
+  });
 }
 
 /**
@@ -324,35 +391,49 @@ export async function updateCheck(): Promise<unknown> {
 }
 
 /**
- * Trust project hooks folder (writes trusted_folders.toml via CLI when available).
- * @param folder Absolute project path.
+ * Build argv for `grok mcp add` (http or sse). Pure for unit tests.
+ * Repeatable `-H 'Name: Value'` comes from `headers`; transport defaults to http.
+ * @param opts name, url, optional headers / transport / scope.
+ * @returns Full argv after the binary name.
  */
-export async function hooksTrust(folder: string): Promise<CliRunResult> {
-  // Prefer explicit trust command; fallback to spawn flag is SPAWN-side.
-  const tryCmd = await runGrokCli(["hooks", "trust", folder], {
-    timeoutMs: 15_000,
-  });
-  if (tryCmd.code === 0) {
-    return tryCmd;
+export function buildMcpAddHttpArgs(opts: {
+  name: string;
+  url: string;
+  headers?: string[];
+  transport?: "http" | "sse";
+  scope?: "user" | "project";
+}): string[] {
+  const transport = opts.transport === "sse" ? "sse" : "http";
+  const args = ["mcp", "add", opts.name, "--transport", transport, opts.url];
+  for (const header of opts.headers ?? []) {
+    if (header.trim()) {
+      args.push("-H", header.trim());
+    }
   }
-  return runGrokCli(["agent", "--trust", "--help"], { timeoutMs: 5_000 });
+  if (opts.scope === "project") {
+    args.push("--scope", "project");
+  }
+  return args;
 }
 
 /**
- * Add HTTP MCP server (F-EXT-03).
- * @param opts name + url + optional headers env.
+ * Add HTTP/SSE MCP server (F-EXT-03).
+ * @param opts name + url + optional headers (`Name: Value`), transport, scope, cwd.
  */
 export async function mcpAddHttp(opts: {
   name: string;
   url: string;
+  /** Repeatable `Name: Value` header strings for `-H`. */
+  headers?: string[];
+  /** Remote transport; defaults to http. */
+  transport?: "http" | "sse";
   scope?: "user" | "project";
   cwd?: string;
 }): Promise<CliRunResult> {
-  const args = ["mcp", "add", opts.name, "--transport", "http", opts.url];
-  if (opts.scope === "project") {
-    args.push("--scope", "project");
-  }
-  return runGrokCli(args, { cwd: opts.cwd, timeoutMs: 30_000 });
+  return runGrokCli(buildMcpAddHttpArgs(opts), {
+    cwd: opts.cwd,
+    timeoutMs: 30_000,
+  });
 }
 
 /**

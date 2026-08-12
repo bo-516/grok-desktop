@@ -32,7 +32,6 @@ export type SessionSpawnConfig = {
   rules?: string;
   disableWebSearch?: boolean;
   webFetch?: boolean;
-  trust?: boolean;
   /** Reasoning effort (SPAWN --reasoning-effort). */
   effort?: string;
   /** Permission mode SPAWN --permission-mode. */
@@ -120,9 +119,6 @@ export function buildSpawnExtraArgs(
   }
   if (cfg?.disableWebSearch) {
     args.push("--disable-web-search");
-  }
-  if (cfg?.trust) {
-    args.push("--trust");
   }
   if (cfg?.effort) {
     args.push("--reasoning-effort", cfg.effort);
