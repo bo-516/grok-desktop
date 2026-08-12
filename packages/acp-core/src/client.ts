@@ -19,6 +19,10 @@ import {
   markPromptSettled,
   markPromptStarted,
 } from "./sessionLifecycle.js";
+import {
+  parsePromptResultUsage,
+  turnCompletedUpdateFromUsage,
+} from "./sessionTokenUsage.js";
 import type { AcpTransport } from "./transport.js";
 import type {
   ContentBlock,
@@ -237,6 +241,10 @@ export class AcpClient {
         prompt: blocks,
       })) as PromptResult;
       this.promptInFlight = false;
+      // F-CTX-01: grok-build always returns counters on prompt result _meta.
+      // Vendor turn_completed may be disk-only; relay result usage so the UI
+      // ring fills after the first reply without waiting for a stream event.
+      this.applyPromptResultUsage(sessionId, result);
       this.scheduleSettle();
       return result;
     } catch (e) {
@@ -244,6 +252,27 @@ export class AcpClient {
       this.setState(markPromptSettled(this.state));
       throw e;
     }
+  }
+
+  /**
+   * Apply session/prompt result usage into tokenUsage and fan out a synthetic
+   * turn_completed so thin bridges relay the same shape as the vendor stream.
+   * No-op when counters are missing or unparseable.
+   * @param sessionId Active ACP session id for the onSessionUpdate relay.
+   * @param result Raw session/prompt result (expects `_meta` usage bag).
+   */
+  private applyPromptResultUsage(sessionId: string, result: unknown): void {
+    const usage = parsePromptResultUsage(result);
+    if (!usage) {
+      return;
+    }
+    this.setState({ ...this.state, tokenUsage: usage });
+    // Relay as turn_completed so desktop reduce (session_update path) stores it.
+    // Idempotent with a real stream turn_completed for the same turn.
+    const update = turnCompletedUpdateFromUsage(
+      usage,
+    ) as unknown as SessionUpdate;
+    this.onSessionUpdate?.(update, sessionId, null);
   }
 
   /** Cancel the current turn (notification; late updates may still arrive). */
@@ -413,5 +442,24 @@ export class AcpClient {
    */
   async tokenUsage(sessionId: string): Promise<unknown> {
     return this.request("session/token_usage", { sessionId });
+  }
+
+  /**
+   * Branch the source session into a peer via `_x.ai/session/fork`.
+   * Copies history on disk and returns the child id; the client must then
+   * `session/load` (or select) that id — this process stays on the parent.
+   * @param params sourceSessionId + sourceCwd + newCwd (same cwd for non-worktree).
+   * @returns Raw agent result (use parseSessionForkResult for the child id).
+   */
+  async forkSession(params: {
+    sourceSessionId: string;
+    sourceCwd: string;
+    newCwd: string;
+  }): Promise<unknown> {
+    return this.request("_x.ai/session/fork", {
+      sourceSessionId: params.sourceSessionId,
+      sourceCwd: params.sourceCwd,
+      newCwd: params.newCwd,
+    });
   }
 }
