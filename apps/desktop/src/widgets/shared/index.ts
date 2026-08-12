@@ -20,5 +20,7 @@ export type { PathLabelViewProps } from "./stateless/PathLabelView";
 export { useCodeHighlight } from "./useCodeHighlight";
 export { CodeLineView } from "./stateless/CodeLineView";
 export type { CodeLineViewProps } from "./stateless/CodeLineView";
+export { MarkdownCodeWidget } from "./MarkdownCodeWidget";
+export type { MarkdownCodeWidgetProps } from "./MarkdownCodeWidget";
 export { useCopyFeedback } from "./useCopyFeedback";
 export type { CopyFeedback } from "./useCopyFeedback";

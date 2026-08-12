@@ -1,10 +1,11 @@
 /**
- * Stateless preview drawer chrome: path, +N/−M summary, close control.
+ * Stateless preview drawer chrome: path, +N/−M summary, optional actions slot, close.
  * A path title renders as dir + file name (workspace-shortened by the caller);
  * the absolute path stays in the tooltip and on the copy gesture.
  */
 
 import { X } from "lucide-react";
+import type { ReactNode } from "react";
 import type { PathDisplay } from "@/lib/pathDisplay";
 import { PathLabelView } from "@/widgets/shared";
 
@@ -23,13 +24,18 @@ export type PreviewHeadViewProps = {
   added?: number;
   /** Aggregate −M when showing a diff. */
   removed?: number;
+  /**
+   * Extra head controls left of close (e.g. doc mode toggle + copy full text).
+   * Absent for non-file targets so chrome stays compact.
+   */
+  actions?: ReactNode;
   /** Close the preview rail. */
   onClose: () => void;
 };
 
 /**
  * Preview drawer head bar.
- * @param props Title (plain or split path), optional counts, close handler.
+ * @param props Title (plain or split path), optional counts/actions, close handler.
  */
 export function PreviewHeadView(props: PreviewHeadViewProps) {
   const hasCounts =
@@ -53,15 +59,18 @@ export function PreviewHeadView(props: PreviewHeadViewProps) {
           </p>
         ) : null}
       </div>
-      <button
-        type="button"
-        className="context-drawer-close"
-        onClick={props.onClose}
-        aria-label="Close preview"
-        title="Close"
-      >
-        <X size={16} strokeWidth={1.75} aria-hidden="true" />
-      </button>
+      <div className="preview-head-actions">
+        {props.actions ?? null}
+        <button
+          type="button"
+          className="context-drawer-close"
+          onClick={props.onClose}
+          aria-label="Close preview"
+          title="Close"
+        >
+          <X size={16} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }

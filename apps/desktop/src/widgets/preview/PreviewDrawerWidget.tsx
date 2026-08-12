@@ -11,6 +11,7 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import type { DrawerLayout } from "@/lib/contextDrawerPrefs";
 import { toPathDisplay } from "@/lib/pathDisplay";
@@ -22,10 +23,9 @@ import {
 } from "@/store/previewStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { useCopyFeedback } from "@/widgets/shared";
-import { DiffReviewView } from "./DiffReviewView";
+import { DiffReviewWidget } from "./DiffReviewWidget";
 import { PreviewChangeListView } from "./PreviewChangeListView";
-import { PreviewCodeWidget } from "./PreviewCodeWidget";
-import { PreviewDiffWidget } from "./PreviewDiffWidget";
+import { PreviewFileWidget } from "./PreviewFileWidget";
 import { PreviewHeadView } from "./PreviewHeadView";
 import { usePreviewSource } from "./usePreviewSource";
 
@@ -58,6 +58,11 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const dragStartX = useRef(0);
   const dragStartW = useRef(storedWidth);
+  /**
+   * File-body toolbar (mode toggle + copy) published by PreviewFileWidget.
+   * Cleared when the body unmounts or leaves the file status.
+   */
+  const [fileToolbar, setFileToolbar] = useState<ReactNode | null>(null);
 
   const width = dragWidth ?? storedWidth;
   const isOverlay = props.effectiveLayout === "overlay";
@@ -155,12 +160,14 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
         subtitle={head.subtitle}
         added={head.added}
         removed={head.removed}
+        actions={source.status === "file" ? fileToolbar : null}
         onClose={handleClose}
       />
       <div className="context-drawer-body preview-body">
         <PreviewBody
           source={source}
           onOpenFile={(path) => openPreview({ kind: "file", path })}
+          onFileToolbarChange={setFileToolbar}
         />
       </div>
     </aside>
@@ -169,13 +176,15 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
 
 /**
  * Dispatch body content by load status.
- * @param props Source load state + file open fallback.
+ * @param props Source load state + file open fallback + toolbar publisher.
  */
 function PreviewBody(props: {
   source: ReturnType<typeof usePreviewSource>;
   onOpenFile: (path: string) => void;
+  /** Publish file head toolbar from PreviewFileWidget; null when not a file. */
+  onFileToolbarChange: (node: ReactNode | null) => void;
 }) {
-  const { source, onOpenFile } = props;
+  const { source, onOpenFile, onFileToolbarChange } = props;
   if (source.status === "idle") {
     return (
       <div className="preview-empty">
@@ -190,31 +199,27 @@ function PreviewBody(props: {
     return <div className="preview-error">{source.message}</div>;
   }
   if (source.status === "file") {
+    // Doc vs code + mode/degrade live in the file orchestrator — not here.
     return (
-      <PreviewCodeWidget
+      <PreviewFileWidget
         path={source.path}
         content={source.content}
         truncated={source.truncated}
         focusLine={source.focusLine}
+        onOpenFile={onOpenFile}
+        onToolbarChange={onFileToolbarChange}
       />
     );
   }
   if (source.status === "diff") {
+    // Single paint: review shell owns decisions + Apply and the structured body.
     return (
-      <div className="preview-diff-stack">
-        <PreviewDiffWidget
-          fileDiff={source.fileDiff}
-          path={source.path}
-          oldText={source.oldText}
-          newText={source.newText}
-        />
-        <DiffReviewView
-          key={`${source.toolCallId}:${source.path}`}
-          path={source.path}
-          oldText={source.oldText}
-          newText={source.newText}
-        />
-      </div>
+      <DiffReviewWidget
+        key={`${source.toolCallId}:${source.path}`}
+        path={source.path}
+        oldText={source.oldText}
+        newText={source.newText}
+      />
     );
   }
   if (source.status === "changeset") {

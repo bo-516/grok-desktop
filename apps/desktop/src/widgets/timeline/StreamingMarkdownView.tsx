@@ -24,7 +24,7 @@ import { createMathPlugin } from "@streamdown/math";
 import cs from "classnames";
 import { openExternalUrl } from "@/lib/openExternalUrl";
 import { normalizeAgentMath } from "@/lib/normalizeAgentMath";
-import { MarkdownCodeWidget } from "./MarkdownCodeWidget";
+import { MarkdownCodeWidget } from "@/widgets/shared";
 // KaTeX layout metrics (fonts, spacing). Text color inherits `currentColor` from
 // `.md-root`; errorColor below maps parse failures to the app danger token.
 import "katex/dist/katex.min.css";

@@ -12,6 +12,7 @@ import { composerShortcuts } from "./shortcuts.composer";
 import { chromeShortcuts } from "./shortcuts.chrome";
 import { previewShortcuts } from "./shortcuts.preview";
 import { codeShortcuts } from "./shortcuts.code";
+import { docShortcuts } from "./shortcuts.doc";
 
 export const appShortcuts: Record<string, string> = {
   ...sideNavShortcuts,
@@ -21,4 +22,5 @@ export const appShortcuts: Record<string, string> = {
   ...chromeShortcuts,
   ...previewShortcuts,
   ...codeShortcuts,
+  ...docShortcuts,
 };

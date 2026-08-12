@@ -1,11 +1,10 @@
 /**
  * Fenced Markdown code block with syntax highlighting.
  *
- * Split out of StreamingMarkdownView because highlighting is async: the element
- * map there stays a stable module constant (remounting it would restart every
- * block mid-stream), while this widget owns the tokenize lifecycle per fence.
- * Chrome still comes from `md-pre` on the surrounding <pre>; this only replaces
- * the text nodes inside <code> with colored runs.
+ * Shared by timeline (`md-pre`) and document preview (`doc-pre`): highlighting
+ * is async, so the Streamdown element map stays a stable constant while this
+ * widget owns the tokenize lifecycle per fence. Chrome lives on the surrounding
+ * <pre>; this only replaces text nodes inside <code> with colored runs.
  */
 
 import { useMemo, type HTMLAttributes, type ReactNode } from "react";
