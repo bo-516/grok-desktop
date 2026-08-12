@@ -78,11 +78,13 @@ export const timelineShortcuts: Record<string, string> = {
       "flex flex-col gap-1 pl-3 pb-2 border-l border-l-rail-line w-full max-w-full min-h-0 max-h-[max(280px,min(50vh,560px))] overflow-y-auto overscroll-contain",
     "turn-step-row": "flex flex-col w-full max-w-full min-w-0",
     /* Shared step geometry for narration / thought / tool rows inside the rail.
-     * items-center vertically aligns the 12px Lucide chevron with text-11px /
+     * items-center vertically aligns the 12px Lucide chevron with text-12px /
      * leading-snug (items-start left the icon riding above the first line).
-     * Chevron stays before the label (nested rows); shell-toggle is the reverse. */
+     * Chevron stays before the label (nested rows); shell-toggle is the reverse.
+     * One step above meta chrome (11px) so thought process stays readable without
+     * matching the 15px answer body. */
     "turn-step":
-      "inline-flex items-center gap-1.5 w-full max-w-full border-none bg-transparent px-0 py-1 text-left text-11px leading-snug text-fg-faint transition-colors duration-fast ease-soft hover:text-fg-muted",
+      "inline-flex items-center gap-1.5 w-full max-w-full border-none bg-transparent px-0 py-1 text-left text-12px leading-snug text-fg-faint transition-colors duration-fast ease-soft hover:text-fg-muted",
     /* Current step while streaming — the only place that carries a fill cue. */
     "turn-step-active": "text-fg-muted",
     /* Label next to the step chevron (thought / tool summary / single-line). */
@@ -92,12 +94,14 @@ export const timelineShortcuts: Record<string, string> = {
     "turn-step-note": "min-w-0 flex-1 line-clamp-4 whitespace-pre-wrap break-words",
     /* No fill: rail body sits on the canvas; a rounded chip fought the quiet
      * Codex-style Worked rail (only the final answer / user bubble should read
-     * as a surface). Padding keeps the text from hugging the left guide. */
+     * as a surface). Padding keeps the text from hugging the left guide.
+     * 13px: slight step up from the 12px label so expanded thought body is easy
+     * to scan without competing with the 15px final answer. */
     "turn-step-body":
-      "mt-1 px-0 py-1 text-12px leading-snug text-fg-secondary whitespace-pre-wrap break-words",
+      "mt-1 px-0 py-1 text-13px leading-snug text-fg-secondary whitespace-pre-wrap break-words",
 
     "item-thought":
-      "max-w-full min-w-200px bg-transparent border-none text-fg-muted text-11px",
+      "max-w-full min-w-200px bg-transparent border-none text-fg-muted text-12px",
     /* Live thought row: one shimmering word (ShinyText owns the color sweep). */
     "thought-live-label": "font-medium tracking-tight",
 
@@ -232,6 +236,10 @@ export const timelineShortcuts: Record<string, string> = {
      *   2. Streamdown puts its own Tailwind classes (`space-y-4`, …) on the
      *      wrapper, and nothing compiles them here — block rhythm has to come
      *      from `md-streamdown` itself, not from the library.
+     *
+     * Document preview uses a separate `doc-*` namespace (uno/shortcuts.doc.ts):
+     * agent chat needs em sizes, soft-break preserve, hidden hr; disk docs need
+     * absolute sizes, CommonMark soft-break fold, visible hr. Do not merge them.
      */
     "md-root": "min-w-0",
     /* Sole owner of block rhythm: flex gap, so children can stay margin-free. */
@@ -250,11 +258,13 @@ export const timelineShortcuts: Record<string, string> = {
       "m-0 pl-[1.45em] [&>li]:my-[0.28em] [&>li]:marker:text-fg-muted [&_ul]:mt-[0.28em] [&_ol]:mt-[0.28em]",
     "md-list-ordered": "list-decimal",
     /* Slightly under body size so mono stays readable without dominating the line;
-     * padding is in em of the chip font so the pill tracks the size bump. */
+     * padding is in em of the chip font so the pill tracks the size bump.
+     * Chip fill (white-chip 9%) is stronger than pre (white-code 5%) so small
+     * inline chrome matches the panel's visual weight. */
     "md-inline-code":
-      "font-mono text-[0.93em] px-[0.42em] py-[0.14em] rounded-1.5 bg-white-faint text-fg",
+      "font-mono text-[0.93em] px-[0.42em] py-[0.14em] rounded-1.5 bg-white-chip text-fg",
     "md-pre":
-      "m-0 px-3.5 py-3 overflow-x-auto rounded-shell bg-white-faint font-mono text-12px leading-relaxed text-fg [&>code]:(font-inherit whitespace-pre)",
+      "m-0 px-3.5 py-3 overflow-x-auto rounded-shell bg-white-code font-mono text-12px leading-relaxed text-fg [&>code]:(font-inherit whitespace-pre)",
     "md-link":
       "text-fg underline underline-offset-2 decoration-line-strong transition-colors duration-fast ease-soft hover:decoration-fg",
     /* mx-0 kills the UA `margin-inline: 40px` that pushed quotes off the text column. */
@@ -266,12 +276,11 @@ export const timelineShortcuts: Record<string, string> = {
     "md-hr": "hidden mx-0 my-[0.55em] h-0 border-none",
     "md-del": "text-fg-muted line-through",
     "md-img": "m-0 max-w-full h-auto rounded-soft",
-    /* GFM tables — frame lives on the wrapper so the radius clips the corners
-     * (a border-collapse table paints its own border over any rounding). */
-    "md-table-wrap":
-      "w-full max-w-full overflow-x-auto rounded-soft border border-line-muted",
+    /* GFM tables — one signal only: thead soft fill + row hairlines (no outer
+     * border). Radius still clips overflow on the wrap. */
+    "md-table-wrap": "w-full max-w-full overflow-x-auto rounded-soft",
     "md-table": "w-full border-collapse text-[0.95em] leading-snug",
-    "md-thead": "bg-white-faint",
+    "md-thead": "bg-white-soft border-b border-line-subtle",
     "md-tr": "border-b border-line-subtle last:border-b-0",
     "md-th": "px-3 py-2 text-left font-semibold text-fg align-top",
     "md-td": "px-3 py-2 text-fg align-top",

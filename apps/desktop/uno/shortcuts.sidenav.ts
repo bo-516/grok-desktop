@@ -8,9 +8,15 @@ export const sideNavShortcuts: Record<string, string> = {
    * Desktop: fixed 272px column.
    * ≤900px: off-canvas overlay so main keeps width (tablet + narrow laptop);
    * top-nav hamburger toggles data-open.
+   * Both slide states are plain rules from uno.config (translate-x-full-left /
+   * translate-x-none). presetUno's own `translate-x-[-100%]` / `translate-x-0`
+   * compose through --un-translate-* vars that only its preflight defines, and
+   * preflight is off here — the drawer computed `transform:none` and sat fully
+   * on screen at every width, with the hamburger moving nothing.
+   * data-[open=true] beats the base state on specificity, not source order.
    */
   "side-nav":
-    "fixed left-0 top-0 z-50 flex flex-col w-sidebar h-full py-2 border-r border-line-subtle bg-sidebar transition-transform duration-normal ease-soft max-[900px]:translate-x-[-100%] max-[900px]:z-100 max-[900px]:shadow-modal max-[900px]:data-[open=true]:translate-x-0",
+    "fixed left-0 top-0 z-50 flex flex-col w-sidebar h-full py-2 border-r border-line-subtle bg-sidebar transition-transform duration-normal ease-soft max-[900px]:translate-x-full-left max-[900px]:z-100 max-[900px]:shadow-modal max-[900px]:data-[open=true]:translate-x-none",
   "side-nav-backdrop":
     "fixed inset-0 z-90 bg-overlay border-none p-0 m-0 cursor-default max-[900px]:block",
   "side-nav-header":
@@ -78,16 +84,15 @@ export const sideNavShortcuts: Record<string, string> = {
   /* pb owns inter-group spacing (replaces former scroll gap-0.5). */
   "project-group": "flex flex-col gap-px pb-1.5",
   /*
-   * Folder holding the selected chat. Idle folders sit at secondary ink, so
-   * lifting name → full contrast plus an accent glyph and a stronger tree
-   * guide is enough to place the current project at a glance — no fill or
-   * accent bar on the header (it must stay quieter than the selected row,
-   * and sticky paint has to remain opaque).
+   * Folder holding the selected chat. All folder names sit at full primary
+   * ink; active lifts weight to medium plus an accent glyph and a stronger
+   * tree guide — no fill or accent bar on the header (it must stay quieter
+   * than the selected row, and sticky paint has to remain opaque).
    * Parent selectors (2 classes) outrank the single-class base shortcuts, so
    * this wins regardless of the order Uno emits them in.
    */
   "project-group-active":
-    "[&_.project-group-name]:text-fg [&_.project-group-folder]:text-primary [&_.project-group-sessions]:before:bg-line-muted",
+    "[&_.project-group-name]:font-medium [&_.project-group-folder]:text-primary [&_.project-group-sessions]:before:bg-line-muted",
   "project-group-collapsed": "pb-0.5",
   /*
    * Workspace folder name sticks at the top of side-nav-scroll while that
@@ -107,7 +112,7 @@ export const sideNavShortcuts: Record<string, string> = {
   /* Rotate −90° when collapsed so the same ChevronDown points right. */
   "project-group-chevron":
     "w-3 h-3 shrink-0 block text-fg-faint transition-[color,transform] duration-fast ease-soft group-hover:text-fg-muted",
-  "project-group-chevron-collapsed": "-rotate-90",
+  "project-group-chevron-collapsed": "rotate-90-ccw",
   /* Flat folder stack — both glyphs absolute; active/idle crossfade + scale. */
   "project-group-folder":
     "relative shrink-0 inline-block w-3.5 h-3.5 text-fg-secondary",
@@ -117,16 +122,38 @@ export const sideNavShortcuts: Record<string, string> = {
   "project-group-icon-idle": "opacity-0 scale-90 pointer-events-none",
   /* leading-snug (not leading-none): overflow-hidden + line-height:1 clips
    * glyph tops/bottoms; match sess-title so folder labels stay fully readable.
-   * Rest sits at secondary ink so the active folder (project-group-active →
-   * text-fg) is the only one at full contrast; hover restores it too. */
+   * Full primary ink for every folder name; active (project-group-active →
+   * font-medium) is the weight lift that marks the current project. */
   "project-group-name":
-    "min-w-0 flex-1 pr-0.5 text-nav font-medium text-fg-secondary whitespace-nowrap overflow-hidden text-ellipsis leading-snug transition-colors duration-fast ease-soft group-hover:text-fg",
+    "min-w-0 flex-1 pr-0.5 text-nav font-normal text-fg whitespace-nowrap overflow-hidden text-ellipsis leading-snug transition-colors duration-fast ease-soft",
   /* Count badge only — pin belongs on session rows, not the folder. */
   "project-group-count":
     "shrink-0 inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-pill bg-white-soft text-fg-muted text-10px font-medium tabular-nums leading-none",
   /* Nested list: left guide line under the folder glyph. */
   "project-group-sessions":
     "relative flex flex-col gap-px ml-[18px] pl-2 before:(content-[''] absolute left-0 top-1 bottom-1 w-px bg-line-subtle)",
+  /*
+   * "No project" section: sibling of the project tree, not a folder in it.
+   * Head reuses project-group-main / -chevron / -count for identical hit
+   * targets, but the label is section-cased (uppercase, muted) so it reads as
+   * a category next to PROJECTS instead of a workspace name. Sticky + opaque
+   * bg-sidebar for the same reason folder headers are: rows scroll under it.
+   * mt-1 with a hairline rule separates it from the last project group.
+   */
+  "loose-group": "flex flex-col gap-px pt-1.5 pb-1.5 border-t border-line-subtle",
+  "loose-group-active":
+    "[&_.loose-group-name]:text-fg [&_.loose-group-icon]:text-primary",
+  "loose-group-collapsed": "pb-0.5",
+  "loose-group-header":
+    "sticky top-0 z-10 flex items-center gap-1.5 min-h-8 pr-1.5 bg-sidebar shadow-[0_-8px_0_0_var(--color-bg-sidebar)] transition-colors duration-fast ease-soft hover:bg-sidebar-hover",
+  "loose-group-icon": "w-3.5 h-3.5 shrink-0 block text-fg-secondary",
+  /* Section-cased label: matches project-section-label ink/size, no px-2.5
+   * (project-group-main already owns the row inset). */
+  "loose-group-name":
+    "min-w-0 flex-1 pr-0.5 text-10px font-medium tracking-[0.08em] uppercase text-fg-muted whitespace-nowrap overflow-hidden text-ellipsis leading-none transition-colors duration-fast ease-soft",
+  /* Flat list — no tree guide (there is no folder to nest under), but the same
+   * left inset as project rows so titles line up across both sections. */
+  "loose-group-sessions": "flex flex-col gap-px ml-[18px] pl-2",
   "project-group-more":
     "w-full pl-2 pr-2 py-1 border-none rounded-7px bg-transparent text-left text-11px text-fg-muted cursor-pointer transition-colors duration-fast ease-soft hover:(text-fg-secondary bg-white-faint) focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)])",
   /* Legacy aliases. */
@@ -140,8 +167,13 @@ export const sideNavShortcuts: Record<string, string> = {
    * font-size is 13px; rem h-* collapses). No leading status dot; live /
    * waiting only lift title color; selection is elevated pill + medium title.
    */
+  /*
+   * pr-2.5 (not pr-1.5): keeps trailing meta (relative time / streaming "…" /
+   * remove) a touch clear of the pill's right edge. Scoped to the row only so
+   * folder headers, scroll inset, and count badges stay put.
+   */
   "sess-row":
-    "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 w-full h-[32px] pl-2 pr-1.5 rounded-7px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) data-[dragging=true]:(opacity-45) data-[drag-over=true]:(bg-white-soft shadow-[inset_0_2px_0_0_var(--color-text-primary)])",
+    "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 w-full h-[32px] pl-2 pr-2.5 rounded-7px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) data-[dragging=true]:(opacity-45) data-[drag-over=true]:(bg-white-soft shadow-[inset_0_2px_0_0_var(--color-text-primary)])",
   /*
    * Selected chat: elevated fill one step above the rest (surface-highest)
    * + medium title. No border / inset ring — fill + weight alone mark
@@ -174,7 +206,7 @@ export const sideNavShortcuts: Record<string, string> = {
    * stays 28px for hit target. No hover fill / no outer padding.
    */
   "sess-pin":
-    "shrink-0 flex items-center justify-center w-5.5 h-7 p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none transition-opacity duration-fast ease-soft group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+    "shrink-0 flex items-center justify-center w-4 h-7 p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none transition-opacity duration-fast ease-soft group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
   "sess-pin-active": "text-fg",
   "sess-pin-icon": "w-3.5 h-3.5 block shrink-0",
   /*

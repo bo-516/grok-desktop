@@ -32,6 +32,15 @@
   --seed-on-brand: #0c0d0f;
   --seed-danger: #ff6b63;
   --seed-success: #3dd68c;
+  /*
+   * Diff-only seeds: keep success/danger free for toast / error chrome.
+   * -wash anchors row/emph backgrounds; bare seed anchors marker/foreground.
+   * Dark uses the same hue for both; light must split (brighter wash, deeper text).
+   */
+  --seed-diff-add: #3dd68c;
+  --seed-diff-add-wash: #3dd68c;
+  --seed-diff-del: #ff6b63;
+  --seed-diff-del-wash: #ff6b63;
 
   /*
    * SCHEME knobs — polarity & tint strength (not hex).
@@ -40,16 +49,17 @@
    * --scheme-fg-strength: text opacity ladder vs ink.
    */
   --scheme-brand-in-surface: 0%;
-  --scheme-elevate: 6%;
-  --scheme-elevate-2: 10%;
-  --scheme-elevate-3: 14%;
-  --scheme-elevate-4: 18%;
-  --scheme-elevate-5: 22%;
+  /* Elevate ladder: flat large chrome (4%), object lifts stepped higher (11→28%). */
+  --scheme-elevate: 4%;
+  --scheme-elevate-2: 11%;
+  --scheme-elevate-3: 16%;
+  --scheme-elevate-4: 22%;
+  --scheme-elevate-5: 28%;
   --scheme-fg-strength: 100%;
-  /* Muted/faint raised for helper chrome contrast on dark canvas (UI audit). */
-  --scheme-muted: 52%;
-  --scheme-faint: 40%;
-  --scheme-secondary: 68%;
+  /* Text alphas raised so secondary/muted/faint clear AA on the dark ladder. */
+  --scheme-muted: 62%;
+  --scheme-faint: 50%;
+  --scheme-secondary: 76%;
   --scheme-border: 8%;
   --scheme-border-strong: 14%;
   --scheme-overlay: 55%;
@@ -97,10 +107,13 @@
   );
   --color-surface-variant: var(--color-surface-high);
 
-  /* ── App semantic aliases (layout chrome) ── */
+  /* ── App semantic aliases (layout chrome) ──
+   * Object roles sit above container; large chrome (sidebar) stays on lowest so
+   * the canvas reads continuous. Sidebar remains an opaque solid for sticky headers.
+   */
   --color-bg-app: var(--color-surface-lowest);
   --color-bg-surface: var(--color-surface-low);
-  --color-bg-elevated: var(--color-surface-container);
+  --color-bg-elevated: var(--color-surface-high);
   --color-bg-timeline: var(--color-surface-lowest);
   --color-bg-composer: var(--color-surface-container);
   --color-bg-composer-suggestion: var(--color-surface-high);
@@ -110,13 +123,13 @@
   --color-text-composer-suggestion-kind: var(--color-text-muted);
   --color-bg-thought: var(--brand-ghost);
   --color-bg-tool: var(--brand-ghost);
-  --color-bg-user: var(--color-surface-container);
+  --color-bg-user: var(--color-surface-high);
   --color-bg-overlay: color-mix(
     in oklch,
     black var(--scheme-overlay),
     transparent
   );
-  --color-bg-sidebar: var(--color-surface-low);
+  --color-bg-sidebar: var(--color-surface-lowest);
   /*
    * Opaque sidebar hover: same ink strength as white-faint, but mixed into the
    * solid sidebar surface (not transparent). Sticky folder headers must stay
@@ -134,10 +147,14 @@
   );
   --color-bg-secondary-container: var(--color-surface-high);
 
-  /* Soft fills = ink at low alpha (tracks scheme automatically) */
+  /* Soft fills = ink at low alpha (tracks scheme automatically).
+   * white-code (5%) = large md code panels; white-chip (9%) = small inline chips
+   * (smaller chrome needs stronger fill to read the same visual weight). */
   --color-bg-white-soft: color-mix(in oklch, var(--seed-ink) 6%, transparent);
   --color-bg-white-faint: color-mix(in oklch, var(--seed-ink) 3%, transparent);
   --color-bg-white-hover: color-mix(in oklch, var(--seed-ink) 8%, transparent);
+  --color-bg-white-code: color-mix(in oklch, var(--seed-ink) 5%, transparent);
+  --color-bg-white-chip: color-mix(in oklch, var(--seed-ink) 9%, transparent);
   --color-bg-kbd: color-mix(in oklch, var(--seed-ink) 7%, transparent);
   --color-bg-skeleton: color-mix(in oklch, var(--seed-ink) 7%, transparent);
   --color-bg-skeleton-mid: color-mix(in oklch, var(--seed-ink) 5%, transparent);
@@ -247,60 +264,83 @@
     var(--seed-ink)
   );
 
-  /* Diff: success/danger mixes on surface */
-  --color-diff-add: color-mix(in oklch, var(--seed-success) 72%, var(--seed-ink));
+  /*
+   * Diff tokens (independent of success/danger).
+   * Row bg wash hard-capped at 10%/9%: at higher alpha, comment green on a
+   * changed line drops below WCAG AA 4.5:1 over the dark surface (see
+   * docs/refactor-diff-reading-ux-2026-08-12.md §4.4). Prefer marker + num-bg
+   * weight if row emphasis feels weak — do not raise these alphas.
+   */
+  --color-diff-add: color-mix(in oklch, var(--seed-diff-add) 78%, var(--seed-ink));
   --color-diff-add-bg: color-mix(
     in oklch,
-    var(--seed-success) 14%,
+    var(--seed-diff-add-wash) 10%,
     transparent
   );
-  --color-diff-del: color-mix(in oklch, var(--seed-danger) 70%, var(--seed-ink));
-  --color-diff-del-bg: color-mix(in oklch, var(--seed-danger) 12%, transparent);
-  /* Dual-gutter / collapsed-gap chrome for preview drawer */
-  --color-diff-gutter: color-mix(in oklch, var(--seed-ink) 42%, transparent);
-  --color-diff-collapsed-bg: color-mix(
+  --color-diff-del: color-mix(in oklch, var(--seed-diff-del) 76%, var(--seed-ink));
+  --color-diff-del-bg: color-mix(
     in oklch,
-    var(--seed-ink) 6%,
+    var(--seed-diff-del-wash) 9%,
     transparent
   );
-  /* Word-level emph reserved for S2 */
+  --color-diff-gutter: color-mix(in oklch, var(--seed-ink) 42%, transparent);
+  /* gap-bg: was --color-diff-collapsed-bg (single consumer: fold band) */
+  --color-diff-gap-bg: color-mix(in oklch, var(--seed-ink) 4%, transparent);
+  --color-diff-collapsed-bg: var(--color-diff-gap-bg);
+  --color-diff-gap-bg-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 7%,
+    transparent
+  );
+  --color-diff-gap-fg: color-mix(in oklch, var(--seed-ink) 52%, transparent);
   --color-diff-add-emph: color-mix(
     in oklch,
-    var(--seed-success) 28%,
+    var(--seed-diff-add-wash) 14%,
     transparent
   );
   --color-diff-del-emph: color-mix(
     in oklch,
-    var(--seed-danger) 26%,
+    var(--seed-diff-del-wash) 13%,
     transparent
   );
+  --color-diff-add-num-bg: color-mix(
+    in oklch,
+    var(--seed-diff-add-wash) 16%,
+    transparent
+  );
+  --color-diff-del-num-bg: color-mix(
+    in oklch,
+    var(--seed-diff-del-wash) 15%,
+    transparent
+  );
+  --color-diff-row-focus: color-mix(in oklch, var(--seed-ink) 6%, transparent);
+  --color-diff-file-head-bg: var(--color-bg-titlebar);
 
   /*
-   * Syntax highlighting (dark) — literals transplanted from VS Code's default
-   * dark theme (Dark+ / Dark Modern), mapped onto the semantic kinds the
-   * highlighter emits (see src/lib/codeHighlight.ts).
-   *
-   * Literals, not formulas, on purpose: these are a borrowed theme's palette,
-   * so they must NOT retint with --seed-brand — a per-palette hue shift would
-   * desaturate keyword/string apart from each other and break code legibility.
+   * Syntax highlighting (dark) — base hues from VS Code Dark+ / Dark Modern,
+   * mapped onto the semantic kinds the highlighter emits (see
+   * src/lib/codeHighlight.ts), then one-shot desaturated (~C×0.60, slight L
+   * lift) so chroma sits nearer neutral chrome. Still fixed literals: they
+   * must NOT retint with --seed-brand (a per-palette hue shift would pull
+   * keyword/string apart and break legibility).
    * Consumers use the `code-tok-*` shortcuts only; never these vars directly.
    *
    * Swapping themes = replace these values here (and the light block below)
    * with another VS Code theme's; no TS/TSX change is needed.
    */
-  --color-code-keyword: #569cd6;
-  --color-code-control: #c586c0;
-  --color-code-type: #4ec9b0;
-  --color-code-tag: #569cd6;
-  --color-code-string: #ce9178;
-  --color-code-string-expression: #ce9178;
-  --color-code-comment: #6a9955;
-  --color-code-constant: #4fc1ff;
-  --color-code-number: #b5cea8;
-  --color-code-function: #dcdcaa;
-  --color-code-variable: #9cdcfe;
-  --color-code-parameter: #9cdcfe;
-  --color-code-link: #6796e6;
+  --color-code-keyword: #7ca4c6;
+  --color-code-control: #c09abd;
+  --color-code-type: #8acaba;
+  --color-code-tag: #7ca4c6;
+  --color-code-string: #c7a192;
+  --color-code-string-expression: #c7a192;
+  --color-code-comment: #89a67e;
+  --color-code-constant: #8bc7ec;
+  --color-code-number: #c5d4bd;
+  --color-code-function: #e4e4c7;
+  --color-code-variable: #bde2f7;
+  --color-code-parameter: #bde2f7;
+  --color-code-link: #84a1d1;
   /* VS Code leaves separators at editor foreground; body text is our stand-in. */
   --color-code-punctuation: var(--color-text-primary);
 
@@ -319,7 +359,8 @@
    * Optional pill chip tokens (file/command -bg/-border/-icon) remain for
    * non-caret surfaces that want heavier chrome; not used for draft/history.
    */
-  --color-composer-mention: #1479c9;
+  /* Desaturated accent (was #1479c9); keeps hue identity without IDE-blue pop. */
+  --color-composer-mention: #84b1df;
   --color-mention-file: color-mix(
     in oklch,
     var(--seed-ink) 88%,
@@ -456,6 +497,19 @@
   --letter-spacing-body: -0.01em;
 
   /*
+   * Document preview: absolute size steps (do not follow container em).
+   * Body line-height 1.75 suits CJK; reading width ~46rem ≈ 48 CJK chars/line.
+   */
+  --doc-max-width: 46rem;
+  --font-size-doc-body: 15px;
+  --line-height-doc-body: 1.75;
+  --font-size-doc-h1: 24px;
+  --font-size-doc-h2: 19px;
+  --font-size-doc-h3: 16px;
+  --font-size-doc-code: 12.5px;
+  --line-height-doc-code: 1.6;
+
+  /*
    * Palette swatch faces (Settings picker only).
    * These are the authored brand seeds mirrored as display chips.
    */
@@ -493,6 +547,11 @@ html[data-theme="light"] {
   --seed-ink: #12141a;
   --seed-brand: #12141a;
   --seed-on-brand: #ffffff;
+  /* Diff seeds: deeper text for AA on white; brighter wash for row/emph bg */
+  --seed-diff-add: #1a7f37;
+  --seed-diff-add-wash: #2fbf63;
+  --seed-diff-del: #cf222e;
+  --seed-diff-del-wash: #f2555f;
   --scheme-brand-in-surface: 0%;
   /*
    * Elevate knobs kept for any residual formula consumers; the surface ladder
@@ -589,6 +648,20 @@ html[data-theme="light"] {
   );
   --color-outline: color-mix(in oklch, var(--seed-ink) 16%, transparent);
   --color-outline-variant: color-mix(in oklch, var(--seed-ink) 9%, transparent);
+
+  /* Diff foreground / gap chrome tuned for white canvas (wash alphas stay). */
+  --color-diff-add: var(--seed-diff-add);
+  --color-diff-del: var(--seed-diff-del);
+  --color-diff-gutter: color-mix(in oklch, var(--seed-ink) 46%, transparent);
+  --color-diff-gap-bg: color-mix(in oklch, var(--seed-ink) 3%, transparent);
+  --color-diff-collapsed-bg: var(--color-diff-gap-bg);
+  --color-diff-gap-bg-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 5.5%,
+    transparent
+  );
+  --color-diff-gap-fg: color-mix(in oklch, var(--seed-ink) 55%, transparent);
+  --color-diff-row-focus: color-mix(in oklch, var(--seed-ink) 5%, transparent);
 
   /*
    * Syntax highlighting (light) — VS Code's default light theme (Light+ /

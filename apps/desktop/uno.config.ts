@@ -31,6 +31,8 @@ const colors = {
   "white-soft": "var(--color-bg-white-soft)",
   "white-faint": "var(--color-bg-white-faint)",
   "white-hover": "var(--color-bg-white-hover)",
+  "white-code": "var(--color-bg-white-code)",
+  "white-chip": "var(--color-bg-white-chip)",
   kbd: "var(--color-bg-kbd)",
   skeleton: "var(--color-bg-skeleton)",
   "skeleton-mid": "var(--color-bg-skeleton-mid)",
@@ -70,6 +72,12 @@ const colors = {
   "diff-add-bg": "var(--color-diff-add-bg)",
   "diff-del": "var(--color-diff-del)",
   "diff-del-bg": "var(--color-diff-del-bg)",
+  "diff-add-emph": "var(--color-diff-add-emph)",
+  "diff-del-emph": "var(--color-diff-del-emph)",
+  "diff-add-num": "var(--color-diff-add-num-bg)",
+  "diff-del-num": "var(--color-diff-del-num-bg)",
+  "diff-gap": "var(--color-diff-gap-bg)",
+  "diff-gap-hover": "var(--color-diff-gap-bg-hover)",
   "mention-file": "var(--color-mention-file)",
   "mention-file-bg": "var(--color-mention-file-bg)",
   "mention-dir": "var(--color-mention-dir)",
@@ -110,6 +118,7 @@ export default defineConfig({
     "uno/shortcuts.chrome.ts",
     "uno/shortcuts.preview.ts",
     "uno/shortcuts.code.ts",
+    "uno/shortcuts.doc.ts",
   ],
   /**
    * Colon only. UnoCSS also accepts `-` as a variant separator by default, so
@@ -196,6 +205,12 @@ export default defineConfig({
         "var(--font-size-headline-sm)",
         "var(--line-height-headline-sm)",
       ],
+      /* Document preview absolute sizes (see defineColor --font-size-doc-*). */
+      "doc-body": ["var(--font-size-doc-body)", "var(--line-height-doc-body)"],
+      "doc-h1": ["var(--font-size-doc-h1)", "1.3"],
+      "doc-h2": ["var(--font-size-doc-h2)", "1.4"],
+      "doc-h3": ["var(--font-size-doc-h3)", "1.5"],
+      "doc-code": ["var(--font-size-doc-code)", "var(--line-height-doc-code)"],
     },
     animation: {
       keyframes: {
@@ -267,8 +282,15 @@ export default defineConfig({
     ["right-rail", { right: "var(--rail-right-width)" }],
     ["pr-rail", { "padding-right": "var(--rail-right-width)" }],
     ["translate-x-rail", { transform: "translateX(var(--rail-right-width))" }],
-    /* Own-width off-screen slide (preview/plan closed state; not rail token). */
+    /*
+     * Own-width off-screen slide (not a rail token): `-full` docks a
+     * right-edge drawer (preview/plan closed), `-full-left` docks the
+     * left-edge side-nav off-canvas at ≤900px.
+     * `translate-x-full-left`, not `-translate-x-full` — see the leading-dash
+     * note on `translate-x-center` below.
+     */
     ["translate-x-full", { transform: "translateX(100%)" }],
+    ["translate-x-full-left", { transform: "translateX(-100%)" }],
     ["translate-x-none", { transform: "translateX(0)" }],
     [
       "px-container",
@@ -291,8 +313,30 @@ export default defineConfig({
      * `transform: translate(var(--un-translate-x)) …` is invalid and drops the
      * whole declaration. Anything that must actually move gets a plain rule.
      */
+    ["scale-75", { transform: "scale(0.75)" }],
+    ["scale-90", { transform: "scale(0.9)" }],
     ["scale-96", { transform: "scale(0.96)" }],
+    ["scale-100", { transform: "scale(1)" }],
     ["rotate-90", { transform: "rotate(90deg)" }],
+    /*
+     * Counter-clockwise quarter turn (collapsed chevron). Named, not
+     * `-rotate-90`: presetMini's negative variant strips the dash, matches this
+     * `rotate-90` rule, finds nothing numeric to negate inside `rotate(90deg)`
+     * and returns an empty body — so `-rotate-90` emitted no CSS whatsoever,
+     * not even a broken declaration.
+     */
+    ["rotate-90-ccw", { transform: "rotate(-90deg)" }],
+    /*
+     * Horizontal centering for `left-1/2` popovers (composer context tip).
+     * presetUno's `-translate-x-1/2` sets only --un-translate-x and then emits
+     * translateX(var(--un-translate-x)) translateY(var(--un-translate-y)) … —
+     * with preflight off the sibling vars are undefined, the declaration is
+     * invalid at computed-value time, and the browser resolves `transform:none`,
+     * so the bubble hung off the anchor's right instead of centering on it.
+     * Named, not `-translate-x-1/2`: presetMini's negative variant strips the
+     * leading `-` before the static-rule lookup, so a dashed key never matches.
+     */
+    ["translate-x-center", { transform: "translateX(-50%)" }],
     ["rounded-inherit", { "border-radius": "inherit" }],
     ["tabular-nums", { "font-variant-numeric": "tabular-nums" }],
     ["tracking-tight", { "letter-spacing": "var(--letter-spacing-tight)" }],

@@ -3,9 +3,15 @@
  * Keeps native input for keyboard + ARIA; visual box uses --color-* only.
  *
  * Purpose: Settings and forms that must match OKLCH brand chrome —
- * empty = faint surface + strong border; checked = primary fill + on-primary mark.
- * The box is deliberately square-ish (4px radius): at the panel's 16px size a
- * larger radius reads as a radio, i.e. as a mutually exclusive choice.
+ * empty = high surface + muted border; checked = primary fill + on-primary mark.
+ * The box stays square-ish (3.5px radius): at ~15px a larger radius reads as a
+ * radio, i.e. as a mutually exclusive choice.
+ *
+ * Checked chrome is class-driven (`ui-check-box-on` / `ui-check-mark-on`) from
+ * the controlled `checked` prop — not `peer-checked`. Uno shortcuts inline
+ * utilities into one rule, so a `peer` token inside a shortcut never becomes a
+ * real `.peer` class on the DOM and peer variants never match.
+ *
  * Boundary: controlled presentational; parent owns checked state.
  */
 
@@ -31,7 +37,7 @@ export type CheckboxProps = Omit<
 };
 
 /**
- * Accessible checkbox with tokenized chrome (peer-driven checked/hover states).
+ * Accessible checkbox with tokenized chrome (class-driven checked + focus-within ring).
  * @param props Standard input props + optional label/description; onChange required for controlled use
  * @returns Label wrapping visually hidden native input + custom box
  */
@@ -39,12 +45,19 @@ export function Checkbox(props: CheckboxProps) {
   const { label, description, className, disabled, checked, id, ...rest } =
     props;
   const inputId = id;
+  /** Controlled on/off — drives box fill and mark visibility (not CSS :checked). */
+  const isOn = Boolean(checked);
 
   return (
     <label
-      className={cs("ui-check relative", className, {
-        "ui-check-disabled": Boolean(disabled),
-      })}
+      className={cs(
+        /* Literal `group`: Uno shortcuts do not emit a real .group class. */
+        "group ui-check",
+        className,
+        {
+          "ui-check-disabled": Boolean(disabled),
+        },
+      )}
       htmlFor={inputId}
     >
       <input
@@ -55,10 +68,20 @@ export function Checkbox(props: CheckboxProps) {
         checked={checked}
         disabled={disabled}
       />
-      <span className="ui-check-box" aria-hidden="true">
-        {checked ? (
-          <Check className="ui-check-mark" strokeWidth={3} aria-hidden />
-        ) : null}
+      <span
+        className={cs("ui-check-box", { "ui-check-box-on": isOn })}
+        aria-hidden="true"
+      >
+        {/*
+         * Always mounted so scale/opacity can animate; hidden when off.
+         * size 11 + stroke 2.5 keeps the glyph crisp inside a 15px face.
+         */}
+        <Check
+          className={cs("ui-check-mark", { "ui-check-mark-on": isOn })}
+          size={11}
+          strokeWidth={2.5}
+          aria-hidden
+        />
       </span>
       {label ? (
         <span className="ui-check-text">

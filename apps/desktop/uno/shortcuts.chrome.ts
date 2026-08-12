@@ -211,24 +211,44 @@ export const chromeShortcuts: Record<string, string> = {
     "check-row":
       "flex items-start gap-2 text-12px leading-snug text-fg cursor-pointer",
     /*
-     * Tokenized checkbox — empty = faint fill + strong border (readable on
-     * elevated panels); checked = primary fill + on-primary mark; hover border
-     * uses focus token, checked-hover uses accent-hover.
+     * Tokenized checkbox (shadcn/Radix-style face, no new deps).
      *
-     * Radius stays at 4px: --radius-sm (6px) on a 16px box is all but a circle,
-     * which read as a radio group and made multi-select toggles look exclusive.
+     * Empty: high surface + muted border so the face reads on elevated panels
+     * without a harsh outline. Checked: solid primary + on-primary mark via
+     * `ui-check-box-on` / `ui-check-mark-on` (class-driven from React — do not
+     * use peer-checked; shortcuts never emit a real .peer class).
+     *
+     * Radius stays ~3.5px: --radius-sm (6px) on a 15px box is nearly circular
+     * and reads as radio / exclusive choice.
+     *
+     * Pair the label with a literal `group` class (see Checkbox.tsx) so
+     * group-hover / group-focus-within variants resolve.
      */
     "ui-check":
-      "group flex w-full items-start gap-2.5 text-12px leading-snug text-fg cursor-pointer select-none",
+      "relative flex w-full items-start gap-2.5 text-12px leading-snug text-fg cursor-pointer select-none",
     "ui-check-disabled": "opacity-50 cursor-not-allowed pointer-events-none",
+    /*
+     * Visually hidden but still focusable for keyboard. Not classic 1px
+     * sr-only: keep a real 15px hit box under the custom face so label clicks
+     * and space/enter land on the input without layout shift.
+     */
     "ui-check-input":
-      "absolute opacity-0 w-4 h-4 m-0 peer",
+      "absolute left-0 top-0.5 m-0 h-[15px] w-[15px] opacity-0 cursor-pointer appearance-none",
     "ui-check-box":
-      "mt-px shrink-0 w-4 h-4 rounded-4px border border-line-strong bg-white-faint flex items-center justify-center transition-colors duration-fast ease-soft group-hover:border-line-focus peer-focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-2 ring-offset-[var(--color-bg-elevated)]) peer-checked:(bg-primary border-primary) peer-checked:group-hover:(bg-accent-hover border-accent-hover)",
-    "ui-check-mark": "block w-3 h-3 text-on-primary",
-    "ui-check-text": "min-w-0 flex-1 flex flex-col",
-    "ui-check-label": "min-w-0",
-    "ui-check-desc": "m-0 mt-0.5 text-10px leading-snug text-fg-muted",
+      "mt-0.5 shrink-0 w-[15px] h-[15px] rounded-[3.5px] border border-line-muted bg-high flex items-center justify-center transition-colors duration-fast ease-soft group-hover:border-line-focus group-focus-within:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-surface)])",
+    /* Checked face — toggled from Checkbox via className, not :checked. */
+    "ui-check-box-on":
+      "bg-primary border-primary group-hover:(bg-accent-hover border-accent-hover)",
+    /*
+     * Check glyph: hidden/scaled when off so mount is stable for a short
+     * scale-in; color is always on-primary (only visible over primary fill).
+     */
+    "ui-check-mark":
+      "block shrink-0 text-on-primary opacity-0 scale-75 transition-all duration-fast ease-soft",
+    "ui-check-mark-on": "opacity-100 scale-100",
+    "ui-check-text": "min-w-0 flex-1 flex flex-col gap-0.5 pt-px",
+    "ui-check-label": "min-w-0 font-medium text-fg",
+    "ui-check-desc": "m-0 text-11px leading-snug text-fg-muted",
     /* Native arrow is suppressed by appearance-none; ui-select-chevron redraws it. */
     "ui-select-wrap": "relative flex w-full items-center",
     "ui-select":
@@ -335,6 +355,79 @@ export const chromeShortcuts: Record<string, string> = {
       "m-0 text-18px font-medium tabular-nums text-fg",
     "env-overview-meta":
       "flex flex-col gap-1.5 px-3 pb-3 text-12px text-fg-secondary",
+
+    /* Rules & prompts page (three stacked scopes + evidence bar) */
+    "prompt-page":
+      "flex flex-1 min-h-0 min-w-0 flex-col",
+    "prompt-page-intro":
+      "shrink-0 px-3 pt-2.5 pb-1 border-b border-line-subtle",
+    "prompt-page-intro-title":
+      "m-0 text-12px font-medium text-fg",
+    "prompt-page-intro-body":
+      "m-0 mt-0.5 text-11px leading-snug text-fg-muted",
+    "prompt-scopes":
+      "flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-3",
+    "prompt-scope":
+      "flex flex-col gap-1.5 rounded-card border border-line-subtle bg-white-faint px-3 py-2.5",
+    "prompt-scope-foreign": "opacity-90",
+    "prompt-scope-unavailable": "opacity-70",
+    "prompt-scope-pending": "ring-1 ring-line-strong",
+    "prompt-scope-head":
+      "flex flex-wrap items-center justify-between gap-2 min-w-0",
+    "prompt-scope-head-left":
+      "flex items-center gap-1.5 min-w-0 text-fg",
+    "prompt-scope-head-right":
+      "flex items-center gap-2 min-w-0 text-11px text-fg-muted",
+    "prompt-scope-title":
+      "m-0 text-12px font-medium text-fg",
+    "prompt-scope-project": "font-normal text-fg-secondary",
+    "prompt-scope-path":
+      "max-w-xs overflow-hidden text-ellipsis whitespace-nowrap text-10px text-fg-muted",
+    "prompt-scope-tok": "shrink-0 tabular-nums",
+    "prompt-scope-subhint":
+      "m-0 text-10px leading-snug text-fg-muted",
+    "prompt-scope-empty": "py-1.5 flex flex-col gap-0.5",
+    "prompt-scope-empty-title":
+      "text-12px text-fg-secondary",
+    "prompt-scope-foot":
+      "flex flex-wrap items-center gap-1.5 pt-1",
+    "prompt-add-input": "min-w-0 flex-1",
+    "prompt-add-cat":
+      "shrink-0 max-w-28 text-11px rounded-control border border-line-subtle bg-elevated text-fg px-1.5 py-1",
+    "prompt-entry-list":
+      "m-0 p-0 list-none flex flex-col gap-1",
+    "prompt-entry-row":
+      "flex items-center gap-1.5 min-w-0 rounded-8px px-1 py-0.5 hover:bg-white-soft",
+    "prompt-entry-row-disabled": "opacity-70",
+    "prompt-entry-grip":
+      "shrink-0 text-fg-muted cursor-grab active:cursor-grabbing",
+    "prompt-entry-input": "min-w-0 flex-1 text-12px",
+    "prompt-entry-cat":
+      "shrink-0 max-w-22 text-10px rounded-control border border-line-subtle bg-elevated text-fg-secondary px-1 py-0.5",
+    "prompt-entry-enable": "shrink-0 flex items-center",
+    "prompt-entry-menu": "relative shrink-0",
+    "prompt-entry-menu-btn": "p-1 list-none [&::-webkit-details-marker]:hidden",
+    "prompt-entry-menu-panel":
+      "absolute right-0 z-10 mt-1 min-w-40 flex flex-col gap-0.5 rounded-8px border border-line-subtle bg-elevated p-1 shadow-modal",
+    "prompt-entry-menu-item":
+      "w-full justify-start text-left text-12px",
+    "prompt-badge":
+      "shrink-0 text-10px px-1.5 py-0.5 rounded-pill border border-line-subtle bg-white-soft text-fg-muted",
+    "prompt-badge-git": "text-fg-secondary",
+    "prompt-badge-overridden": "text-fg-muted line-through-none",
+    "prompt-badge-overrides": "text-fg-secondary",
+    "prompt-overlay-hint":
+      "m-0 py-0.5 text-center text-10px text-fg-muted",
+    "prompt-foreign-banner":
+      "flex flex-col gap-1.5 rounded-8px border border-line-subtle bg-white-soft px-2 py-1.5",
+    "prompt-foreign-actions":
+      "flex flex-wrap items-center gap-1",
+    "prompt-evidence":
+      "flex flex-wrap items-center gap-2 shrink-0 px-3 py-2 border-t border-line-subtle text-12px text-fg-secondary",
+    "prompt-evidence-warn": "text-warning",
+    "prompt-evidence-text": "min-w-0 flex-1",
+    "settings-prompts-link":
+      "mt-3 flex flex-col gap-1.5 rounded-8px border border-line-subtle bg-white-faint px-2.5 py-2",
 
     /* Multi-session overview rows */
     "overview-bucket":
