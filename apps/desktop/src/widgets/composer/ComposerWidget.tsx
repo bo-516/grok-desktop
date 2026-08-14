@@ -1,7 +1,11 @@
 /**
  * Composer state container.
- * State is computed in useComposerWidget; this component only assembles the result into UI.
+ * Most state is computed in useComposerWidget; weekly remaining and the
+ * mid-turn follow-up queue are sibling hooks so that file stays under the
+ * line cap. This component assembles the UI.
  * Status footer is always mounted (one row) and driven by resolveComposerStatus.
+ * The live-turn strip sits above the card (outside the transcript scroller)
+ * so Thinking / Responding cannot paint through the streaming answer.
  * Left bar includes a Codex-style + attach control that opens the image file picker.
  * The hidden file input lives outside the card flex so open/focus never jitters height.
  */
@@ -10,12 +14,17 @@ import cs from "classnames";
 import { Plus } from "lucide-react";
 import { ClickSpark, StarBorder } from "@/components/react-bits";
 import { ProjectSwitcherWidget } from "@/widgets/project";
+import { TurnStatusWidget } from "@/widgets/turnStatus";
 import { ComposerContextUsageView } from "./ComposerContextUsageView";
+import { ComposerWeeklyUsageView } from "./ComposerWeeklyUsageView";
+import { useWeeklyUsageDisplay } from "./useWeeklyUsageDisplay";
 import { ComposerInputView } from "./ComposerInputView";
 import { ComposerModelMenuView } from "./ComposerModelMenuView";
 import { ComposerModeControlView } from "./ComposerModeControlView";
+import { ComposerQueueView } from "./ComposerQueueView";
 import { ComposerSuggestionListView } from "./ComposerSuggestionListView";
 import { resolveComposerStatus } from "./composerStatus";
+import { useComposerQueue } from "./useComposerQueue";
 import { useComposerWidget } from "./useComposerWidget";
 
 /**
@@ -26,6 +35,18 @@ import { useComposerWidget } from "./useComposerWidget";
  */
 export function ComposerWidget() {
   const widget = useComposerWidget();
+  /** Weekly remaining lives here so useComposerWidget stays under the line cap. */
+  const weeklyUsageDisplay = useWeeklyUsageDisplay();
+  /**
+   * Mid-turn follow-ups sit above the composer card (Codex / Claude queue
+   * panel) with Send now / Edit / Cancel. Draft writes stay on the completion
+   * hook via this adapter.
+   */
+  const queue = useComposerQueue({
+    draft: widget.draft,
+    setDraftWithCaret: widget.setDraftWithCaret,
+    textareaRef: widget.textareaRef,
+  });
   let idlePlaceholder = "Ask Grok anything";
   if (widget.viewingSubagent) {
     idlePlaceholder =
@@ -59,6 +80,21 @@ export function ComposerWidget() {
           aria-hidden="true"
           onChange={widget.handleFileInputChange}
         />
+        {/*
+          Live-turn strip: outside the timeline scroller so a sticky pill
+          cannot overlay / punch through the answer. Renders null when idle.
+        */}
+        <TurnStatusWidget />
+        {/*
+          Codex / Claude: follow-ups sit above the composer as their own
+          surface — never inside the input card (that reads as one field).
+        */}
+        <ComposerQueueView
+          items={queue.items}
+          onSendNow={queue.sendNow}
+          onEdit={queue.edit}
+          onCancel={queue.cancel}
+        />
         <div className="composer">
           {widget.isMenuOpen ? (
             <ComposerSuggestionListView
@@ -66,6 +102,7 @@ export function ComposerWidget() {
               activeIndex={widget.activeIndex}
               emptyLabel={widget.emptyLabel}
               onPick={widget.pickSuggestion}
+              onHighlight={widget.highlightSuggestion}
             />
           ) : null}
           <ComposerInputView
@@ -152,8 +189,16 @@ export function ComposerWidget() {
             </div>
             <div className="composer-bar-right">
               {/*
-                Context meter left of the model chip (Settings → Appearance).
-                Gated by contextUsageDisplay so the toggle does not leave an empty slot.
+                Weekly remaining immediately left of the context pie
+                (Settings → Appearance). Gated so a missing snapshot leaves no slot.
+              */}
+              {weeklyUsageDisplay ? (
+                <ComposerWeeklyUsageView display={weeklyUsageDisplay} />
+              ) : null}
+              {/*
+                Context pie left of the model chip (Settings → Appearance).
+                Null until occupancy is known — do not reserve a 0% disk.
+                Mount plays composer-usage-reveal (Weekly slides, then fade).
               */}
               {widget.contextUsageDisplay ? (
                 <ComposerContextUsageView display={widget.contextUsageDisplay} />

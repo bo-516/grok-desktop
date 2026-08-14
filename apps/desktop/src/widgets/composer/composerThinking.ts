@@ -1,32 +1,47 @@
 /**
  * Thinking / reasoning-effort options for the composer control menu.
- * Prefer grok-build `config_option_update` when present; product fallback is
- * the official Grok 4.5 ladder only (`low` / `medium` / `high`) — never invent Max.
+ * Same contract as grok-build: a model only accepts levels its menu
+ * advertises (`config_option_update`, then that model's `reasoningEfforts`).
+ * No family regex fallback and no Extra High injection.
  */
+
+import type { AvailableModel } from "@grok-desktop/acp-core";
 
 /**
  * Reasoning effort id (wire value for `--reasoning-effort` / agent config).
- * Prefer values from grok-build `config_option_update`; product fallback is
- * the official Grok 4.5 set only (`low` / `medium` / `high`).
+ * Prefer values from grok-build `config_option_update` or the model catalog.
  */
 export type ThinkingEffort = string;
 
 /** One row in the thinking intensity submenu. */
 export type ThinkingOption = {
-  /** Wire id (e.g. `low`, `medium`, `high`). */
+  /** Wire id (e.g. `low`, `medium`, `high`, `xhigh`). */
   id: ThinkingEffort;
   /** Human label for the menu and chrome pill. */
   label: string;
+  /** True when this row is the model/agent default. */
+  default?: boolean;
 };
 
 /**
- * Official Grok 4.5 effort ladder used when the agent has not advertised options.
- * Do not add `xhigh` / `max` here — those only appear if grok-build lists them.
+ * grok-build models_cache snapshot for grok-4.5 (`low/medium/high`).
+ * Label / test fixture only — not a client fallback when the agent is silent.
  */
 export const DEFAULT_THINKING_OPTIONS: ThinkingOption[] = [
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
+];
+
+/**
+ * grok-build models_cache snapshot for grok-4.6 (`xhigh` default).
+ * Label / test fixture only — do not inject these rows onto another model.
+ */
+export const GROK_46_THINKING_OPTIONS: ThinkingOption[] = [
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Extra High", default: true },
 ];
 
 /**
@@ -51,7 +66,8 @@ function isEffortConfigId(id: string): boolean {
 
 /**
  * Friendly label for a raw effort wire id when the agent omitted a display name.
- * Maps known aliases (`xhigh`/`max` → Max) but does not invent menu rows.
+ * `xhigh` is Extra High (Grok 4.6 catalog); `max` stays Max and is not invented
+ * as a menu row. Empty falls back to High.
  * @param effortId Wire id; empty falls back to High.
  */
 export function formatEffortIdLabel(effortId: string): string {
@@ -59,7 +75,10 @@ export function formatEffortIdLabel(effortId: string): string {
   if (!id) {
     return "High";
   }
-  if (id === "xhigh" || id === "max") {
+  if (id === "xhigh") {
+    return "Extra High";
+  }
+  if (id === "max") {
     return "Max";
   }
   if (id === "minimal") {
@@ -69,6 +88,22 @@ export function formatEffortIdLabel(effortId: string): string {
     return "None";
   }
   return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/**
+ * Compact a catalog label for the composer chip (drop a trailing "Effort").
+ * @param id Wire id used when the raw label is empty.
+ * @param raw Optional agent/catalog label.
+ */
+function compactEffortLabel(id: string, raw?: string): string {
+  if (id === "xhigh") {
+    return "Extra High";
+  }
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) {
+    return formatEffortIdLabel(id);
+  }
+  return trimmed.replace(/\s+effort\s*$/i, "").trim() || formatEffortIdLabel(id);
 }
 
 /**
@@ -173,43 +208,120 @@ export function currentEffortFromConfig(
 }
 
 /**
- * Resolve the thinking submenu from agent data when available.
- * Prefer live `config_option_update` effort options; else the official Grok 4.5 ladder.
+ * Map a catalog model's reasoningEfforts into menu rows.
+ * Empty or unmatched `modelId` is [] — never inherit `availableModels[0]`.
+ * @param modelId Live session model to match by id or name; empty yields [].
+ * @param availableModels Handshake / session catalog (may carry reasoningEfforts).
+ * @returns Menu rows in catalog order, or [] when no matching model advertised them.
+ */
+export function thinkingFromAvailableModels(
+  modelId: string | undefined,
+  availableModels: AvailableModel[] | undefined,
+): ThinkingOption[] {
+  const id = (modelId ?? "").trim();
+  if (!id || !Array.isArray(availableModels) || availableModels.length === 0) {
+    return [];
+  }
+  const match = availableModels.find((m) => m.id === id || m.name === id);
+  const rows = match?.reasoningEfforts;
+  if (!rows?.length) {
+    return [];
+  }
+  const mapped: ThinkingOption[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const wire = row.id.trim();
+    if (!wire || seen.has(wire)) {
+      continue;
+    }
+    seen.add(wire);
+    const option: ThinkingOption = {
+      id: wire,
+      label: compactEffortLabel(wire, row.label),
+    };
+    if (row.default) {
+      option.default = true;
+    }
+    mapped.push(option);
+  }
+  return mapped;
+}
+
+/**
+ * Resolve the thinking submenu from grok-build advertisements only.
+ * Order: live `config_option_update` → matching model `reasoningEfforts` →
+ * [] (agent has not advertised a menu for this model).
  * @param configOptions Agent config_option_update snapshot.
+ * @param modelId Live session model id or name; empty / unmatched yields [].
+ * @param availableModels Session catalog; used when it carries reasoningEfforts.
+ * @returns Advertised rows in agent/catalog order, or [].
  */
 export function resolveThinkingOptions(
   configOptions: unknown[] | undefined,
+  modelId?: string,
+  availableModels?: AvailableModel[],
 ): ThinkingOption[] {
   const fromAgent = thinkingFromConfigOptions(configOptions);
-  return fromAgent.length > 0 ? fromAgent : DEFAULT_THINKING_OPTIONS;
+  if (fromAgent.length > 0) {
+    return fromAgent;
+  }
+  return thinkingFromAvailableModels(modelId, availableModels);
+}
+
+/**
+ * Default wire id for a resolved option list.
+ * Prefers a row marked `default`, then Extra High when listed, then High.
+ * Empty list yields "" — do not invent a family default.
+ * @param options Active thinking menu rows from grok-build.
+ */
+export function defaultEffortFromOptions(
+  options: ThinkingOption[],
+): ThinkingEffort {
+  if (options.length === 0) {
+    return "";
+  }
+  const marked = options.find((o) => o.default);
+  if (marked) {
+    return marked.id;
+  }
+  if (options.some((o) => o.id === "xhigh")) {
+    return "xhigh";
+  }
+  if (options.some((o) => o.id === DEFAULT_THINKING_EFFORT)) {
+    return DEFAULT_THINKING_EFFORT;
+  }
+  return options[options.length - 1]?.id ?? "";
 }
 
 /**
  * Pick the effective effort for first paint / after agent options change.
- * Order: valid local preference → agent currentValue → default `high` if listed → last option.
- * Legacy prefs such as `xhigh` that the current model does not advertise are discarded.
+ * Advertised menu: valid local pref → agent currentValue → list default.
+ * Empty menu (handshake not in yet): keep pref or agent current, do not invent.
+ * Prefs the current advertised list does not include (e.g. `xhigh` on 4.5) drop.
  * @param configOptions Agent config snapshot (for currentValue).
- * @param options Active thinking menu rows.
+ * @param options Active thinking menu rows (empty = not advertised yet).
  * @param preferred Optional localStorage (or prior UI) preference.
+ * @param _modelId Unused; kept so existing call sites type-check.
  */
 export function resolveThinkingEffort(
   configOptions: unknown[] | undefined,
   options: ThinkingOption[],
   preferred?: string | null,
+  _modelId?: string,
 ): ThinkingEffort {
   const valid = new Set(options.map((o) => o.id));
   const pref = typeof preferred === "string" ? preferred.trim() : "";
+  const agentCurrent = currentEffortFromConfig(configOptions);
+  if (options.length === 0) {
+    return pref || agentCurrent || "";
+  }
   if (pref && valid.has(pref)) {
     return pref;
   }
-  const agentCurrent = currentEffortFromConfig(configOptions);
   if (agentCurrent && valid.has(agentCurrent)) {
     return agentCurrent;
   }
-  if (valid.has(DEFAULT_THINKING_EFFORT)) {
-    return DEFAULT_THINKING_EFFORT;
-  }
-  return options[options.length - 1]?.id ?? DEFAULT_THINKING_EFFORT;
+  return defaultEffortFromOptions(options);
 }
 
 /**
@@ -229,15 +341,22 @@ export function loadThinkingEffortRaw(): string | null {
 }
 
 /**
- * Load persisted thinking effort, clamped to the active option list.
- * Use when agent options are not yet known — falls back to official defaults only.
- * @param options Allowed rows; defaults to the official Grok 4.5 ladder (no Max).
- * @returns Valid effort or `high` / last option.
+ * Load persisted thinking effort, clamped to the advertised option list.
+ * Empty `options` keeps the raw stored id (handshake not in yet).
+ * @param options Advertised rows; default [] does not invent a family ladder.
+ * @param modelId Unused; kept so existing call sites type-check.
+ * @returns Stored id when valid or menu unknown; else the advertised default.
  */
 export function loadThinkingEffort(
-  options: ThinkingOption[] = DEFAULT_THINKING_OPTIONS,
+  options: ThinkingOption[] = [],
+  modelId?: string,
 ): ThinkingEffort {
-  return resolveThinkingEffort(undefined, options, loadThinkingEffortRaw());
+  return resolveThinkingEffort(
+    undefined,
+    options,
+    loadThinkingEffortRaw(),
+    modelId,
+  );
 }
 
 /**

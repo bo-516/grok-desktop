@@ -1,6 +1,8 @@
 /**
  * Composer completion interaction state.
  * Owns local draft, caret, and real bridge file queries only; does not connect Zustand or send prompts.
+ * `/model` / `/effort` argument picks call `applyArgDraft` so chrome updates
+ * immediately and the option never stays in the composer as a draft.
  */
 
 import {
@@ -13,18 +15,32 @@ import {
 } from "react";
 import type { AvailableCommand } from "@grok-desktop/acp-core";
 import { snapCaretToMentionEdge } from "@/lib/mentionTokens";
+import type { SlashChoice, SlashModelEffortRow } from "@/lib/slashBuiltins";
+import type { LocalSlashApplyResult } from "@/lib/slashBuiltinsApply";
 import {
   createCommandSuggestions,
   getComposerEmptyLabel,
   createMentionSuggestions,
   findComposerTrigger,
-  replaceComposerTrigger,
   type ComposerSuggestion,
   type ComposerWorkspaceEntry,
 } from "./composerCompletion";
+import { planSuggestionPick } from "./composerPick";
 
 type ComposerCompletionConfig = {
   commands: AvailableCommand[];
+  /**
+   * Live model picker rows for `/model` argument completion.
+   * Empty / omitted leaves `/model ` with an empty argument list.
+   */
+  models?: SlashChoice[];
+  /**
+   * Agent availableModels. `/model <id>` effort args read that row's
+   * reasoningEfforts only — never the session thinking menu or a family fallback.
+   */
+  availableModels?: SlashModelEffortRow[];
+  /** Live session model id for bare `/effort` argument completion. */
+  currentModel?: string;
   listWorkspaceEntries?: (query: string) => Promise<ComposerWorkspaceEntry[]>;
   /**
    * Absolute session workspace root. Used to remap absolute `@` queries
@@ -32,6 +48,22 @@ type ComposerCompletionConfig = {
    * Empty / omitted leaves absolute remapping disabled.
    */
   workspace?: string;
+  /**
+   * Session connection mode for `/` empty copy (disconnected / connecting / live).
+   * Omitted treats an empty catalog as "no matching commands".
+   */
+  connectionMode?: string;
+  /**
+   * True while inspect / connect is still filling an empty `/` catalog.
+   * Does not cover `@` file listing (that uses isLoadingEntries).
+   */
+  isLoadingCommands?: boolean;
+  /**
+   * Apply a `/model` / `/effort` argument pick as chrome (not a draft insert).
+   * Return `applied` to clear the field, `error` to keep the typed text,
+   * `none` / omit to fall through to insert. Unwired leaves the insert path.
+   */
+  applyArgDraft?: (draftAfterPick: string) => LocalSlashApplyResult;
 };
 
 /**
@@ -65,10 +97,26 @@ function workspaceEntriesEqual(
 /**
  * Local state and behavior for the `@` file and `/skill` menus.
  * @param config Current agent command snapshot and real bridge file reader; when the reader is missing only connection hints are shown.
- * @returns Draft, menu state, and event handlers for the textarea.
+ * @returns Draft, menu state, keyboard/pointer highlight, and event handlers for the textarea.
  */
 export function useComposerCompletion(config: ComposerCompletionConfig) {
-  const { commands, listWorkspaceEntries, workspace = "" } = config;
+  const {
+    commands,
+    models = [],
+    availableModels = [],
+    currentModel = "",
+    listWorkspaceEntries,
+    workspace = "",
+    connectionMode = "",
+    isLoadingCommands = false,
+    applyArgDraft,
+  } = config;
+  /**
+   * Latest apply callback. Stored on a ref so pickSuggestion does not close
+   * over a stale bar/notice writer from the render that created the handler.
+   */
+  const applyArgDraftRef = useRef(applyArgDraft);
+  applyArgDraftRef.current = applyArgDraft;
   /** High-frequency draft belongs only to Composer, not global session state. */
   const [draft, setDraft] = useState("");
   /** Caret position decides plain typing vs `@` file completion vs `/` command completion. */
@@ -85,7 +133,7 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   /** Keeps a failure state when the bridge does not answer file indexing, so protocol/connection issues are not disguised as an empty directory. */
   const [hasWorkspaceLoadError, setHasWorkspaceLoadError] = useState(false);
-  /** Keyboard-controlled highlight index inside the menu. */
+  /** Keyboard / pointer highlight index inside the menu. */
   const [activeIndex, setActiveIndex] = useState(0);
   /** Escape dismisses the menu for the current token; further edits reopen it. */
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(
@@ -105,8 +153,13 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
    */
   const hasLoadedEntriesRef = useRef(false);
   const trigger = useMemo(
-    () => findComposerTrigger(draft, caret),
-    [draft, caret],
+    () =>
+      findComposerTrigger(draft, caret, {
+        models,
+        availableModels,
+        currentModel,
+      }),
+    [availableModels, caret, currentModel, draft, models],
   );
   const triggerKey = trigger
     ? `${trigger.kind}:${trigger.start}:${trigger.end}:${trigger.query}`
@@ -114,7 +167,13 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
   const suggestions = useMemo(() => {
     if (!trigger) {return [];}
     if (trigger.kind === "command") {
-      return createCommandSuggestions(commands, trigger.query);
+      return createCommandSuggestions(commands, trigger.query, {
+        argCommand: trigger.argCommand,
+        argModelId: trigger.argModelId,
+        models,
+        availableModels,
+        currentModel,
+      });
     }
     // Pass workspace so absolute pasted paths match relative bridge entries.
     return createMentionSuggestions(
@@ -122,13 +181,26 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
       trigger.query,
       workspace,
     );
-  }, [commands, trigger, workspace, workspaceEntries]);
+  }, [
+    availableModels,
+    commands,
+    currentModel,
+    models,
+    trigger,
+    workspace,
+    workspaceEntries,
+  ]);
   const isMenuOpen = Boolean(trigger && dismissedTriggerKey !== triggerKey);
   const emptyLabel = getComposerEmptyLabel(
     trigger?.kind,
     isLoadingEntries,
     Boolean(listWorkspaceEntries),
     hasWorkspaceLoadError,
+    {
+      catalogSize: commands.length,
+      connectionMode,
+      isLoadingCatalog: isLoadingCommands,
+    },
   );
   const activeSuggestion = suggestions[activeIndex];
 
@@ -208,19 +280,37 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
     textarea.setSelectionRange(pendingCaret, pendingCaret);
   }, [draft]);
 
-  /** Pick a candidate with mouse or keyboard and restore the logical caret after replacement. */
+  /**
+   * Accept the highlighted / clicked candidate.
+   * Desktop `/model` / `/effort` argument rows apply chrome immediately and
+   * clear the draft. `@` files, skills, and command names still insert.
+   * @param suggestion Row from the open menu; missing trigger is a no-op.
+   */
   const pickSuggestion = (suggestion: ComposerSuggestion) => {
-    const currentTrigger = findComposerTrigger(draft, caret);
-    if (!currentTrigger) {return;}
-
-    const replacement = replaceComposerTrigger(
-      draft,
-      currentTrigger,
-      suggestion.value,
-    );
-    pendingCaretRef.current = replacement.caret;
-    setDraft(replacement.value);
-    setCaret(replacement.caret);
+    const plan = planSuggestionPick(draft, caret, suggestion.value, {
+      models,
+      availableModels,
+      currentModel,
+    });
+    if (plan.kind === "none") {
+      return;
+    }
+    if (plan.kind === "apply") {
+      const outcome = applyArgDraftRef.current?.(plan.draft);
+      if (outcome === "applied") {
+        pendingCaretRef.current = 0;
+        setDraft("");
+        setCaret(0);
+        setDismissedTriggerKey(null);
+        return;
+      }
+      if (outcome === "error") {
+        return;
+      }
+    }
+    pendingCaretRef.current = plan.caret;
+    setDraft(plan.value);
+    setCaret(plan.caret);
     setDismissedTriggerKey(null);
   };
 
@@ -273,6 +363,20 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
     }
   };
 
+  /**
+   * Moves the highlight to a list row (pointer enter / move).
+   * Out-of-range indices are ignored so a stale hover after a filter shrink
+   * cannot select an empty slot; Enter still reads `activeSuggestion`.
+   * Same-index calls return the previous state so hover does not re-render.
+   * @param index Row index in the current suggestions array.
+   */
+  const highlightSuggestion = (index: number) => {
+    if (index < 0 || index >= suggestions.length) {
+      return;
+    }
+    setActiveIndex((current) => (current === index ? current : index));
+  };
+
   /** Close the menu for the current trigger without deleting the typed `@` or `/`. */
   const dismissMenu = () => setDismissedTriggerKey(triggerKey);
 
@@ -297,6 +401,7 @@ export function useComposerCompletion(config: ComposerCompletionConfig) {
     handleSelection,
     isMenuOpen,
     pickSuggestion,
+    highlightSuggestion,
     selectNextSuggestion,
     selectPreviousSuggestion,
     dismissMenu,

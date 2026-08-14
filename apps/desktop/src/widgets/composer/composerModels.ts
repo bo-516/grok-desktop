@@ -20,13 +20,16 @@ export {
   currentEffortFromConfig,
   DEFAULT_THINKING_EFFORT,
   DEFAULT_THINKING_OPTIONS,
+  defaultEffortFromOptions,
   formatEffortIdLabel,
   formatThinkingLabel,
+  GROK_46_THINKING_OPTIONS,
   loadThinkingEffort,
   loadThinkingEffortRaw,
   resolveThinkingEffort,
   resolveThinkingOptions,
   saveThinkingEffort,
+  thinkingFromAvailableModels,
   thinkingFromConfigOptions,
   THINKING_OPTIONS,
 } from "./composerThinking";
@@ -203,21 +206,33 @@ export function resolveModelOptions(
 /**
  * Default model + thinking for "Reset to defaults".
  * Model comes from the agent (config current, else first catalog entry, else session model).
- * Effort prefers agent currentValue when present and valid; else official default `high`.
+ * Effort prefers agent currentValue when present and valid; else the
+ * advertised list default. No catalog / config → effort is "".
  * @param agentDefaultModel Agent-preferred id; empty string leaves model unset for the caller to skip.
  * @param configOptions Optional agent config snapshot for effort currentValue / allowed list.
+ * @param availableModels Optional catalog; effort rows come only from this / config.
  */
 export function defaultComposerControls(
   agentDefaultModel = "",
   configOptions?: unknown[],
+  availableModels?: AvailableModel[],
 ): {
   modelId: string;
   effort: ThinkingEffort;
 } {
-  const options = resolveThinkingOptions(configOptions);
+  const options = resolveThinkingOptions(
+    configOptions,
+    agentDefaultModel,
+    availableModels,
+  );
   return {
     modelId: agentDefaultModel.trim(),
-    effort: resolveThinkingEffort(configOptions, options, null),
+    effort: resolveThinkingEffort(
+      configOptions,
+      options,
+      null,
+      agentDefaultModel,
+    ),
   };
 }
 

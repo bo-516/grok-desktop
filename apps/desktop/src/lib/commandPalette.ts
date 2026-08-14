@@ -1,16 +1,31 @@
 /**
- * Command palette search (F-CMD-06 / F-NATIVE-01) — pure ranking over sessions/commands/settings.
+ * Command palette search (F-CMD-06 / F-NATIVE-01) — ranking over actions,
+ * settings, slash commands, MCP servers, and skills. Sessions stay in the
+ * sidebar search; they are not mounted in ⌘K.
  */
 
-export type PaletteItemKind = "session" | "command" | "setting" | "action";
+import { PREFILL_COMPOSER_EVENT } from "@/lib/composerFocus";
+
+export type PaletteItemKind =
+  | "action"
+  | "setting"
+  | "command"
+  | "mcp"
+  | "skill"
+  | "session";
 
 export type PaletteItem = {
   id: string;
   kind: PaletteItemKind;
   label: string;
   description?: string;
-  /** Slash command name without leading / when kind=command. */
+  /** Slash command / skill name without leading / , or a chrome run id. */
   runValue?: string;
+  /**
+   * When kind=skill, true means prefill `/{runValue}` in the composer.
+   * False / omitted opens the Environment Skills page instead.
+   */
+  invokeAsSlash?: boolean;
 };
 
 /**
@@ -74,14 +89,14 @@ export function defaultPaletteActions(): PaletteItem[] {
     },
     {
       id: "action:env-mcp",
-      kind: "setting",
+      kind: "mcp",
       label: "MCP servers",
       description: "Open Environment on MCP servers",
       runValue: "open_env_mcp",
     },
     {
       id: "action:env-skills",
-      kind: "setting",
+      kind: "skill",
       label: "Skills",
       description: "Open Environment on Skills",
       runValue: "open_env_skills",
@@ -164,6 +179,20 @@ export function defaultPaletteActions(): PaletteItem[] {
       runValue: "release-notes",
     },
     {
+      id: "action:model",
+      kind: "command",
+      label: "/model …",
+      description: "Switch model (optional effort)",
+      runValue: "prefill_model",
+    },
+    {
+      id: "action:effort",
+      kind: "command",
+      label: "/effort …",
+      description: "Set reasoning effort",
+      runValue: "prefill_effort",
+    },
+    {
       id: "action:imagine",
       kind: "action",
       label: "/imagine …",
@@ -193,7 +222,7 @@ export function defaultPaletteActions(): PaletteItem[] {
  */
 export function prefillComposer(text: string): void {
   window.dispatchEvent(
-    new CustomEvent("grok-desktop:prefill-composer", { detail: text }),
+    new CustomEvent(PREFILL_COMPOSER_EVENT, { detail: text }),
   );
 }
 
@@ -261,7 +290,49 @@ export function commandsToPaletteItems(
 }
 
 /**
+ * Map merged MCP rows into palette items (kind=mcp).
+ * @param servers Inspect ⊕ list rows; empty when the environment snapshot is cold.
+ */
+export function mcpToPaletteItems(
+  servers: Array<{ name: string; target?: string; transport?: string }>,
+): PaletteItem[] {
+  return servers
+    .filter((row) => row && typeof row.name === "string" && row.name.trim())
+    .map((row) => ({
+      id: `mcp:${row.name}`,
+      kind: "mcp" as const,
+      label: row.name,
+      description: row.target?.trim() || row.transport || "MCP server",
+      runValue: row.name,
+    }));
+}
+
+/**
+ * Map inspect skills into palette items (kind=skill).
+ * @param skills Snapshot skills; invocable ones prefill `/{name}`.
+ */
+export function skillsToPaletteItems(
+  skills: Array<{
+    name: string;
+    description?: string;
+    userInvocable?: boolean;
+  }>,
+): PaletteItem[] {
+  return skills
+    .filter((row) => row && typeof row.name === "string" && row.name.trim())
+    .map((row) => ({
+      id: `skill:${row.name}`,
+      kind: "skill" as const,
+      label: `/${row.name}`,
+      description: row.description,
+      runValue: row.name,
+      invokeAsSlash: row.userInvocable === true,
+    }));
+}
+
+/**
  * Map session catalog into palette items.
+ * Kept for unit tests and any future jump-to-session entry; ⌘K does not mount these.
  * @param sessions Catalog rows.
  */
 export function sessionsToPaletteItems(
@@ -274,4 +345,63 @@ export function sessionsToPaletteItems(
     description: s.id,
     runValue: s.id,
   }));
+}
+
+/**
+ * Visible name used to collapse "/imagine …" with a skill named imagine.
+ * @param item Palette row.
+ * @returns Lowercase label without a leading slash or trailing ellipsis.
+ */
+export function paletteItemName(item: PaletteItem): string {
+  return item.label
+    .replace(/^\/+/, "")
+    .replace(/[.…]+$/u, "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Deduplicate rows. MCP keeps its own namespace so a server and a skill
+ * that share a name (e.g. browser-use) both stay visible; slash/action/skill
+ * names collapse so `/imagine` is not listed twice.
+ * @param groups Catalog slices in priority order (first group wins).
+ * @returns Flattened unique items.
+ */
+export function mergePaletteItems(groups: PaletteItem[][]): PaletteItem[] {
+  const seen = new Set<string>();
+  const out: PaletteItem[] = [];
+  for (const group of groups) {
+    for (const item of group) {
+      const name = paletteItemName(item);
+      const key = item.kind === "mcp" ? `mcp:${name}` : name;
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/**
+ * Build the live ⌘K catalog: curated actions, MCP servers, skills, then
+ * leftover agent slash commands. Sessions are omitted on purpose.
+ * @param input Agent command list plus environment snapshot slices.
+ */
+export function buildPaletteCatalog(input: {
+  commands: Array<{ name: string; description?: string }>;
+  mcpServers: Array<{ name: string; target?: string; transport?: string }>;
+  skills: Array<{
+    name: string;
+    description?: string;
+    userInvocable?: boolean;
+  }>;
+}): PaletteItem[] {
+  return mergePaletteItems([
+    defaultPaletteActions(),
+    mcpToPaletteItems(input.mcpServers),
+    skillsToPaletteItems(input.skills),
+    commandsToPaletteItems(input.commands),
+  ]);
 }

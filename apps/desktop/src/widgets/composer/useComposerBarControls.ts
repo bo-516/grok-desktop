@@ -1,10 +1,12 @@
 /**
  * Composer bar chrome: agent mode popover + model/thinking menu.
+ * `/model` and `/effort` (no args) open the same submenus as the pills.
  * Extracted from useComposerWidget so the main entry stays under the 440-line limit.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentMode, AvailableModel } from "@grok-desktop/acp-core";
+import { advertisedEffortsForModel } from "@/lib/slashBuiltins";
 import {
   defaultComposerControls,
   formatModelLabel,
@@ -45,7 +47,8 @@ export type UseComposerBarControlsArgs = {
 
 /**
  * Local mode/model/thinking menus and selection handlers for the composer bar.
- * Thinking options prefer grok-build `config_option_update`; otherwise official low/medium/high.
+ * Thinking options prefer grok-build `config_option_update`, then the matching
+ * model's advertised `reasoningEfforts`. No family fallback.
  * @param args Session mode/model + store writers; missing model falls back to preference/catalog.
  * @returns Labels, open state, and handlers for ComposerModeControlView + ComposerModelMenuView.
  */
@@ -61,13 +64,20 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
   } = args;
 
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
-  const [effort, setEffort] = useState<ThinkingEffort>(() =>
-    resolveThinkingEffort(
+  /**
+   * First paint: session.model is often still empty after refresh. Use the
+   * stored preferred model so catalog matching can find advertised efforts.
+   */
+  const [effort, setEffort] = useState<ThinkingEffort>(() => {
+    const initialModel =
+      args.model || loadPreferredModel() || args.availableModels[0]?.id || "";
+    return resolveThinkingEffort(
       undefined,
-      resolveThinkingOptions(undefined),
+      resolveThinkingOptions(undefined, initialModel, args.availableModels),
       loadThinkingEffortRaw(),
-    ),
-  );
+      initialModel,
+    );
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPanel, setMenuPanel] = useState<ComposerMenuPanel>(null);
 
@@ -78,10 +88,10 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     () => resolveModelOptions(configOptions, availableModels, effectiveModel),
     [configOptions, availableModels, effectiveModel],
   );
-  /** Agent-advertised effort ladder, or official Grok 4.5 defaults. */
+  /** grok-build advertised effort ladder (config, then matching catalog row). */
   const thinkingOptions = useMemo(
-    () => resolveThinkingOptions(configOptions),
-    [configOptions],
+    () => resolveThinkingOptions(configOptions, effectiveModel, availableModels),
+    [availableModels, configOptions, effectiveModel],
   );
   const modelLabel =
     models.find((m) => m.id === effectiveModel)?.label ??
@@ -91,22 +101,21 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
 
   /**
    * When grok-build pushes config options (or the model changes the effort menu),
-   * clamp the selected effort to a valid id. Drops stale local prefs such as
-   * `xhigh` when the agent only advertises low/medium/high.
+   * clamp the selected effort to a valid advertised id. Drops stale local prefs
+   * the current model does not advertise (e.g. Extra High on Grok 4.5).
+   * Never write localStorage here — an empty first-paint menu must not persist
+   * a clamp before the catalog arrives.
    */
   useEffect(() => {
-    setEffort((prev) => {
-      const next = resolveThinkingEffort(
+    setEffort((prev) =>
+      resolveThinkingEffort(
         configOptions,
         thinkingOptions,
         loadThinkingEffortRaw() ?? prev,
-      );
-      if (next !== prev) {
-        saveThinkingEffort(next);
-      }
-      return next;
-    });
-  }, [configOptions, thinkingOptions]);
+        effectiveModel,
+      ),
+    );
+  }, [configOptions, effectiveModel, thinkingOptions]);
 
   /**
    * Select a mode explicitly from the popover (or ⇧Tab cycle).
@@ -158,6 +167,36 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
   }, []);
 
   /**
+   * Open the model submenu from `/model` with no argument.
+   * Closes the mode popover so two chrome menus are never up together.
+   */
+  const openModelMenu = useCallback(() => {
+    setModeMenuOpen(false);
+    setMenuOpen(true);
+    setMenuPanel("model");
+  }, []);
+
+  /**
+   * Open the thinking-effort submenu from `/effort` with no argument.
+   * Closes the mode popover so two chrome menus are never up together.
+   */
+  const openThinkingMenu = useCallback(() => {
+    setModeMenuOpen(false);
+    setMenuOpen(true);
+    setMenuPanel("thinking");
+  }, []);
+
+  /**
+   * Advertised reasoning efforts for one catalog model.
+   * Empty when grok-build omitted reasoningEfforts on that row — never a family demo list.
+   * @param modelId Target model id or name from `/model` / `/effort`.
+   */
+  const effortsForModel = useCallback(
+    (modelId: string) => advertisedEffortsForModel(modelId, availableModels),
+    [availableModels],
+  );
+
+  /**
    * Selects a model for the session chrome and persists the preference.
    * @param id Model id from the submenu.
    */
@@ -182,7 +221,7 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
 
   /**
    * Resets model + thinking to agent defaults and closes the menu.
-   * Effort uses agent currentValue when present, else official `high`.
+   * Effort uses agent currentValue when present, else the advertised default.
    */
   const resetControls = useCallback(() => {
     const agentDefault = resolveAgentDefaultModel(
@@ -190,7 +229,11 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
       models,
       model,
     );
-    const defaults = defaultComposerControls(agentDefault, configOptions);
+    const defaults = defaultComposerControls(
+      agentDefault,
+      configOptions,
+      availableModels,
+    );
     if (defaults.modelId) {
       setModel(defaults.modelId);
       savePreferredModel(defaults.modelId);
@@ -198,7 +241,7 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     setEffort(defaults.effort);
     saveThinkingEffort(defaults.effort);
     closeMenu();
-  }, [closeMenu, configOptions, model, models, setModel]);
+  }, [availableModels, closeMenu, configOptions, model, models, setModel]);
 
   return {
     confirmedMode,
@@ -216,6 +259,9 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     modelLabel,
     models,
     openPanel,
+    openModelMenu,
+    openThinkingMenu,
+    effortsForModel,
     resetControls,
     selectEffort,
     selectModel,

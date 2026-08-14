@@ -3,64 +3,43 @@
  * Connects the session store, real prompt send, mode / model / thinking controls;
  * completion by useComposerCompletion; attachments by useComposerAttachments;
  * voice mic by useComposerDictation; notice lifetime by useComposerNotice;
- * bar chrome (mode/model menus) by useComposerBarControls.
+ * bar chrome (mode/model menus) by useComposerBarControls;
+ * New-chat / slash-stub focus by useComposerFocusEvents;
+ * slash catalog by useComposerSlashCatalog (live + persist + inspect + desktop
+ * `/model` / `/effort`); those two pager commands apply on argument-menu pick
+ * (Enter / click) and are intercepted again on send if typed in full.
  */
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   type CompositionEvent,
   type KeyboardEvent,
 } from "react";
-import type { AvailableCommand, AvailableModel } from "@grok-desktop/acp-core";
+import type { AvailableModel } from "@grok-desktop/acp-core";
 import { useSessionStore } from "../../store/sessionStore";
-import {
-  caretJumpOverMention,
-  deleteMentionUnit,
-  mentionUnitForBackspace,
-  mentionUnitForDelete,
-} from "@/lib/mentionTokens";
 import { useComposerCompletion } from "./useComposerCompletion";
+import { tryComposerMentionKey } from "./composerMentionKeys";
 import { useComposerAttachments } from "./useComposerAttachments";
 import { useComposerDictation } from "./useComposerDictation";
 import { useComposerNotice } from "./useComposerNotice";
 import { useComposerBarControls } from "./useComposerBarControls";
 import { useContextUsageDisplay } from "./useContextUsageDisplay";
+import { useComposerFocusEvents } from "./useComposerFocusEvents";
+import { useComposerSlashCatalog } from "./useComposerSlashCatalog";
+import {
+  applyLocalSlashDraftFromBar,
+  bindTryLocalSlashFromBar,
+} from "@/lib/slashBuiltinsApply";
+import { isComposerImeKey } from "./composerIme";
 import { modeLabel } from "./composerModes";
 import { runComposerSubmit } from "./composerSubmit";
 
-/**
- * Reusable empty command snapshot so the Zustand selector does not allocate a new array
- * before any commands arrive. New arrays would make React think the external store snapshot
- * keeps changing and trigger infinite updates.
- */
-const EMPTY_AVAILABLE_COMMANDS: AvailableCommand[] = [];
 const EMPTY_CONFIG_OPTIONS: unknown[] = [];
 const EMPTY_AVAILABLE_MODELS: AvailableModel[] = [];
 
-/**
- * True while an IME is composing or the key event is the platform composition
- * marker (keyCode 229). Used so Enter confirms candidates instead of sending.
- * @param event Keyboard event from the composer textarea.
- * @param composing Session-local flag still true until the frame after compositionend
- *   (some engines fire a non-composing Enter on the same tick as compositionend).
- * @returns Whether the key must be left to the input method.
- */
-export function isComposerImeKey(
-  event: Pick<KeyboardEvent<HTMLTextAreaElement>, "keyCode"> & {
-    nativeEvent: Pick<KeyboardEvent<HTMLTextAreaElement>["nativeEvent"], "isComposing">;
-  },
-  composing: boolean,
-): boolean {
-  return (
-    composing ||
-    event.nativeEvent.isComposing ||
-    // Deprecated but still the reliable IME marker across Chromium / Safari.
-    event.keyCode === 229
-  );
-}
+export { isComposerImeKey } from "./composerIme";
 
 /**
  * Assembles state needed for Composer presentation and behavior.
@@ -68,6 +47,7 @@ export function isComposerImeKey(
  */
 export function useComposerWidget() {
   const sendPrompt = useSessionStore((state) => state.sendPrompt);
+  const forkSession = useSessionStore((state) => state.forkSession);
   const cancelTurn = useSessionStore((state) => state.cancelTurn);
   const status = useSessionStore((state) => state.session.status);
   const connectionMode = useSessionStore((state) => state.connectionMode);
@@ -82,9 +62,9 @@ export function useComposerWidget() {
   const availableModels = useSessionStore(
     (state) => state.session.availableModels ?? EMPTY_AVAILABLE_MODELS,
   );
-  /** Last turn_completed usage for the context ring; undefined before first turn. */
+  /** Live occupancy + last-turn billed usage for the context ring. */
   const tokenUsage = useSessionStore((state) => state.session.tokenUsage);
-  /** Prebuilt ring view-model; null when Settings → Appearance hides the meter. */
+  /** Prebuilt ring view-model; null when the pref is off or occupancy is unknown. */
   const contextUsageDisplay = useContextUsageDisplay(
     model,
     availableModels,
@@ -92,9 +72,8 @@ export function useComposerWidget() {
   );
   const bridgeInfo = useSessionStore((state) => state.bridgeInfo);
   const timelineLength = useSessionStore((state) => state.session.timeline.length);
-  const commands = useSessionStore(
-    (state) => state.session.availableCommands ?? EMPTY_AVAILABLE_COMMANDS,
-  );
+  /** Live handshake + last-known persist + inspect skills (New chat must not wait). */
+  const slash = useComposerSlashCatalog();
   const bridgeListWorkspaceEntries = useSessionStore(
     (state) => state.live?.listWorkspaceEntries,
   );
@@ -117,12 +96,6 @@ export function useComposerWidget() {
     return (query: string) =>
       bridgeListWorkspaceEntries(query, workspace || undefined);
   }, [bridgeListWorkspaceEntries, workspace]);
-  // workspace remaps absolute `@` queries (Finder paste) onto relative paths.
-  const completion = useComposerCompletion({
-    commands,
-    listWorkspaceEntries,
-    workspace,
-  });
   /** Tone-aware notice channel; status text is resolved outside this hook. */
   const { notice, showNotice, clearNotice } = useComposerNotice();
   const bar = useComposerBarControls({
@@ -133,6 +106,32 @@ export function useComposerWidget() {
     availableModels,
     setMode,
     setModel,
+  });
+  /**
+   * Session ops that `/fork` / `/rewind` share with the ⋯ menu and ⌘K.
+   * Spread onto the bar so pick and submit use the same apply path.
+   */
+  const slashBar = {
+    ...bar,
+    forkSession: () => {
+      void forkSession();
+    },
+    openRewind: () => {
+      window.dispatchEvent(new CustomEvent("grok-desktop:open-rewind"));
+    },
+  };
+  // workspace remaps absolute `@` queries (Finder paste) onto relative paths.
+  const completion = useComposerCompletion({
+    commands: slash.commands,
+    models: bar.models,
+    availableModels,
+    currentModel: bar.model,
+    listWorkspaceEntries,
+    workspace,
+    connectionMode,
+    isLoadingCommands: slash.isLoading,
+    applyArgDraft: (text) =>
+      applyLocalSlashDraftFromBar(text, slashBar, showNotice),
   });
 
   const setDraft = completion.setDraft;
@@ -149,31 +148,14 @@ export function useComposerWidget() {
   });
 
   /**
-   * Accept prefill from command palette / session menu (e.g. "/imagine ").
-   * Claude/Codex put media slash stubs in the input, not as auto-sent top-nav clicks.
+   * Prefill (⌘K slash stubs) and New-chat focus (rail / ⌘N / palette / ⋯).
+   * The store only dispatches; this hook owns the textarea.
    */
-  useEffect(() => {
-    const onPrefill = (e: Event) => {
-      const text = String((e as CustomEvent<string>).detail ?? "");
-      if (!text) {
-        return;
-      }
-      setDraft(text);
-      showNotice("Edit the prompt, then Enter to send", "info");
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) {
-          return;
-        }
-        el.focus();
-        const len = el.value.length;
-        el.setSelectionRange(len, len);
-      });
-    };
-    window.addEventListener("grok-desktop:prefill-composer", onPrefill);
-    return () =>
-      window.removeEventListener("grok-desktop:prefill-composer", onPrefill);
-  }, [setDraft, showNotice, textareaRef]);
+  useComposerFocusEvents({
+    setDraftWithCaret: completion.setDraftWithCaret,
+    showNotice,
+    textareaRef,
+  });
 
   const viewingSubagent = useSessionStore((state) => state.viewingSubagent);
   const streaming = status === "streaming";
@@ -214,6 +196,9 @@ export function useComposerWidget() {
    */
   const submitDraft = () => {
     runComposerSubmit({
+      tryLocalSlash: bindTryLocalSlashFromBar(slashBar, showNotice, () =>
+        completion.setDraft(""),
+      ),
       sentDraft: completion.draft,
       attachmentCount: media.attachments.length,
       connectionMode,
@@ -268,6 +253,8 @@ export function useComposerWidget() {
   /**
    * Handles completion-menu keys, ⇧Tab mode cycle, atomic mention arrows /
    * Backspace / Delete, Esc interrupt, and Enter send.
+   * Enter / Tab on a `/model` / `/effort` argument row applies chrome immediately
+   * (via pickSuggestion); `@` / skill / command-name rows still insert.
    * ⇧Tab always cycles Build → Plan → Ask (from pendingMode when in flight) so
    * the three modes can be flipped without waiting for agent confirmation; plain
    * Tab still accepts the active completion row when the menu is open.
@@ -322,64 +309,14 @@ export function useComposerWidget() {
       cancelTurn();
       return;
     }
-
-    const ta = event.currentTarget;
-    const selStart = ta.selectionStart;
-    const selEnd = ta.selectionEnd;
-    const collapsed = selStart === selEnd;
-    /**
-     * Plain Left/Right only (no Alt/Meta/Ctrl word-line jumps). Shift extends
-     * a selection over the whole chip; without Shift the caret hops the unit.
-     */
-    const plainArrow =
-      !event.altKey && !event.metaKey && !event.ctrlKey;
     if (
-      plainArrow &&
-      collapsed &&
-      (event.key === "ArrowLeft" || event.key === "ArrowRight")
+      tryComposerMentionKey(event, {
+        draft: completion.draft,
+        handleSelection: completion.handleSelection,
+        setDraftWithCaret: completion.setDraftWithCaret,
+      })
     ) {
-      const direction = event.key === "ArrowLeft" ? "left" : "right";
-      const jumped = caretJumpOverMention(
-        completion.draft,
-        selStart,
-        direction,
-      );
-      if (jumped !== null) {
-        event.preventDefault();
-        if (event.shiftKey) {
-          const from = Math.min(jumped, selStart);
-          const to = Math.max(jumped, selStart);
-          ta.setSelectionRange(from, to);
-        } else {
-          ta.setSelectionRange(jumped, jumped);
-        }
-        completion.handleSelection({ currentTarget: ta });
-        return;
-      }
-    }
-
-    /**
-     * Atomic delete of a committed chip when the caret is collapsed on its
-     * edge (or inside after a failed snap). Range selections keep browser
-     * default so multi-char cuts still work.
-     */
-    if (
-      collapsed &&
-      !event.altKey &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      (event.key === "Backspace" || event.key === "Delete")
-    ) {
-      const unit =
-        event.key === "Backspace"
-          ? mentionUnitForBackspace(completion.draft, selStart)
-          : mentionUnitForDelete(completion.draft, selStart);
-      if (unit) {
-        event.preventDefault();
-        const next = deleteMentionUnit(completion.draft, unit);
-        completion.setDraftWithCaret(next.value, next.caret);
-        return;
-      }
+      return;
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
@@ -416,7 +353,8 @@ export function useComposerWidget() {
     closeModeMenu: bar.closeModeMenu,
     connectionMode,
     /**
-     * Context-usage ring model when Settings → Appearance is on; null hides it.
+     * Context-usage ring model when Settings → Appearance is on and occupancy
+     * is known; null hides the pie so restore cannot flash "0 of 500k".
      * Built from session.tokenUsage + model totalContextTokens.
      */
     contextUsageDisplay,

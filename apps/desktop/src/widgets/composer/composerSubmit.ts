@@ -28,6 +28,12 @@ export type ComposerSubmitContext = {
     hint: string;
   }>;
   sendPrompt: (text: string, blocks?: ContentBlock[]) => Promise<boolean>;
+  /**
+   * Intercept desktop pager commands (`/model`, `/effort`) before send.
+   * Return true to stop the submit path (applied or shown as an error).
+   * Omitted treats every draft as agent-bound.
+   */
+  tryLocalSlash?: (draft: string) => boolean;
   showNotice: (text: string, tone: ComposerNoticeTone) => void;
   clearNotice: () => void;
   clearDraftIfUnchanged: (sentDraft: string) => void;
@@ -52,6 +58,9 @@ export type ComposerSubmitContext = {
  */
 export function runComposerSubmit(ctx: ComposerSubmitContext): void {
   ctx.stopDictation();
+  if (ctx.tryLocalSlash?.(ctx.sentDraft)) {
+    return;
+  }
   if (!ctx.sentDraft.trim() && ctx.attachmentCount === 0) {
     return;
   }

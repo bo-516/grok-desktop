@@ -8,6 +8,8 @@
  * Attachment strip: browser-decodable images show an inline thumb; click opens
  * an in-app lightbox. HEIC / missing payload / decode failures fall back to
  * the label chip and open via the system default handler (Preview / download).
+ * Thumbs sit out of flow inside a locked 56×56 tile so a large paste cannot
+ * inflate the strip while the browser decodes.
  *
  * Only *committed* tokens paint — the ones picked from the completion menu,
  * which is the only place that knows the path exists. Commit stores a
@@ -49,6 +51,9 @@ import {
   type ImageAttachment,
 } from "../../lib/mediaInput";
 import { ImageLightboxView } from "@/widgets/shared";
+
+/** Pixel box for a composer thumb — must match shortcut `w-14 h-14` (3.5rem @ 16px). */
+const COMPOSER_THUMB_PX = 56;
 
 type ComposerInputViewProps = {
   draft: string;
@@ -260,12 +265,23 @@ export function ComposerInputView(props: ComposerInputViewProps) {
                   onClick={() => handleOpenAttachment(att, attIndex)}
                 >
                   {showThumb && previewSrc ? (
-                    <img
-                      className="composer-attachment-thumb"
-                      src={previewSrc}
-                      alt={label}
-                      onError={() => handleThumbError(attIndex)}
-                    />
+                    <>
+                      <span
+                        className="composer-attachment-fallback"
+                        aria-hidden="true"
+                      >
+                        {label}
+                      </span>
+                      <img
+                        className="composer-attachment-thumb"
+                        src={previewSrc}
+                        alt={label}
+                        width={COMPOSER_THUMB_PX}
+                        height={COMPOSER_THUMB_PX}
+                        draggable={false}
+                        onError={() => handleThumbError(attIndex)}
+                      />
+                    </>
                   ) : (
                     <span className="composer-attachment-fallback">
                       {label}

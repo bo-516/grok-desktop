@@ -1,18 +1,26 @@
 /**
  * Pure presentation layer for the Composer completion menu.
- * Does not read the store or own focus; selection and keyboard state are fully orchestrated by ComposerWidget.
+ * Does not read the store or own focus; selection, keyboard, and pointer
+ * highlight are fully orchestrated by ComposerWidget.
  * Panel height follows the current candidate count (capped by CSS max-h-80); no min-height ratchet.
+ * The active row callback-ref keeps ArrowUp/Down inside that port.
  */
 
 import cs from "classnames";
 import { MentionIconView } from "@/widgets/shared";
 import type { ComposerSuggestion } from "./composerCompletion";
+import { revealActiveSuggestion } from "./composerSuggestionScroll";
 
 type ComposerSuggestionListViewProps = {
   suggestions: ComposerSuggestion[];
   activeIndex: number;
   emptyLabel: string;
   onPick: (suggestion: ComposerSuggestion) => void;
+  /**
+   * Moves the shared highlight to this row so hover and Enter stay in sync.
+   * Required: without it the keyboard index stays put while the pointer moves.
+   */
+  onHighlight: (index: number) => void;
 };
 
 /**
@@ -124,13 +132,14 @@ function suggestionTooltip(suggestion: ComposerSuggestion): string | undefined {
  * Renders the candidate list shared by `@` and `/`.
  * Each row is a non-shrinking block: title, description, and args hint stay on separate lines.
  * Shell height tracks the current suggestion count (content-sized); CSS `max-h-80` caps long lists.
- * @param props Candidates, keyboard highlight, and pick callback.
+ * Active-row ref calls revealActiveSuggestion so a wrapped last/first row still lands on screen.
+ * @param props Candidates, keyboard/pointer highlight, pick, and hover sync.
  * @returns Menu view for the textarea to associate via aria-controls.
  */
 export function ComposerSuggestionListView(
   props: ComposerSuggestionListViewProps,
 ) {
-  const { suggestions, activeIndex, emptyLabel, onPick } = props;
+  const { suggestions, activeIndex, emptyLabel, onPick, onHighlight } = props;
 
   if (suggestions.length === 0) {
     return (
@@ -171,11 +180,14 @@ export function ComposerSuggestionListView(
             <button
               key={suggestion.id}
               id={`composer-suggestion-${index}`}
+              ref={index === activeIndex ? revealActiveSuggestion : undefined}
               type="button"
               className={optionClassName}
               role="option"
               aria-selected={index === activeIndex}
               title={tooltip}
+              onMouseEnter={() => onHighlight(index)}
+              onMouseMove={() => onHighlight(index)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => onPick(suggestion)}
             >

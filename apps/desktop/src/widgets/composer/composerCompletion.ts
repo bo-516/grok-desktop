@@ -6,6 +6,16 @@
 
 import type { AvailableCommand } from "@grok-desktop/acp-core";
 import { mentionMarkForSymbol } from "@/lib/mentionTokens";
+import {
+  advertisedEffortsForModel,
+  isDesktopSlashArgCommand,
+  type SlashChoice,
+  type SlashModelEffortRow,
+} from "@/lib/slashBuiltins";
+import {
+  createArgChoiceSuggestions,
+  findDesktopSlashArgTrigger,
+} from "./composerSlashArgs";
 
 /** Minimal workspace entry shape required by Composer-side bridge file listing. */
 export type ComposerWorkspaceEntry = {
@@ -22,6 +32,36 @@ export type ComposerTrigger = {
   query: string;
   start: number;
   end: number;
+  /**
+   * Desktop command whose arguments are being completed (`model` / `m` / `effort`).
+   * Missing on a still-typed `/name` token (no space yet) so the command list shows.
+   */
+  argCommand?: string;
+  /**
+   * Target model id when completing `/model <id> [effort]`.
+   * Effort suggestions must come from this model's advertised catalog.
+   */
+  argModelId?: string;
+};
+
+/**
+ * Optional catalogs so `/model` / `/effort` can complete their arguments.
+ * Omitted fields leave argument completion empty (command list still works).
+ */
+export type CommandSuggestionContext = {
+  /** Command name when the caret is in that command's argument slot. */
+  argCommand?: string;
+  /** Live model picker rows. */
+  models?: SlashChoice[];
+  /**
+   * Handshake / session availableModels. Effort args read each row's
+   * `reasoningEfforts` only — never a session-wide or family fallback list.
+   */
+  availableModels?: SlashModelEffortRow[];
+  /** Live session model id for bare `/effort`. */
+  currentModel?: string;
+  /** Target model id when already in a `/model <id>` effort slot. */
+  argModelId?: string;
 };
 
 /** Unified completion candidate for the view; `value` omits the trigger symbol. */
@@ -41,15 +81,23 @@ export type ComposerSuggestion = {
 
 /**
  * Finds a completion trigger in the token before the caret.
+ * Desktop `/model` / `/effort` lines keep the menu open after the command name
+ * so arguments (model id, effort level) can be picked the same way.
  * @param value Full textarea contents.
  * @param caret Caret position; out-of-range values are clamped so selection glitches cannot crash.
+ * @param catalogs Live model / effort rows; needed to detect the `/model` effort slot.
  * @returns A valid `@`/`/` token, or null when the user is typing ordinary text.
  */
 export function findComposerTrigger(
   value: string,
   caret: number,
+  catalogs?: CommandSuggestionContext,
 ): ComposerTrigger | null {
   const safeCaret = Math.max(0, Math.min(caret, value.length));
+  const argTrigger = findDesktopSlashArgTrigger(value, safeCaret, catalogs);
+  if (argTrigger) {
+    return argTrigger;
+  }
   const prefix = value.slice(0, safeCaret);
   const lastWhitespace = Math.max(
     prefix.lastIndexOf(" "),
@@ -113,7 +161,11 @@ export function replaceComposerTrigger(
 
   if (!replacement) {return { value, caret: end };}
 
-  const mark = mentionMarkForSymbol(trigger.symbol);
+  /**
+   * Argument picks (`/model grok-4.6`) must not insert another slash mark —
+   * the command token already carries the trigger.
+   */
+  const mark = trigger.argCommand ? "" : mentionMarkForSymbol(trigger.symbol);
   const inserted = `${mark}${escapedReplacement}${
     needsTrailingSpace ? " " : ""
   }`;
@@ -212,19 +264,40 @@ export function createMentionSuggestions(
 
 /**
  * Converts agent-advertised commands into `/` menu items and marks skill metadata.
+ * When `context.argCommand` is set, the menu lists model or effort arguments
+ * instead of command names so `/model` / `/effort` can be completed in place.
  * @param commands Command snapshot from the current SessionState; pass [] when there is no session.
- * @param query Name fragment after `/`; matching is case-insensitive.
- * @returns Up to 10 command/skill suggestions, keeping agent description and input hints.
+ * @param query Name fragment after `/`, or the active argument token.
+ * @param context Optional desktop argument catalogs; omitted keeps command-only matching.
+ * @returns Matching command/skill suggestions in agent order, keeping description and input hints.
+ *   File `@` mentions stay capped; slash catalogs are longer (skills + builtins) and the
+ *   menu already scrolls (`max-h-80`), so a 10-row cut would hide most of the live list.
  */
 export function createCommandSuggestions(
   commands: AvailableCommand[],
   query: string,
+  context?: CommandSuggestionContext,
 ): ComposerSuggestion[] {
+  const argCommand = context?.argCommand;
+  if (argCommand && isDesktopSlashArgCommand(argCommand)) {
+    if (argCommand === "effort") {
+      const targetId = context?.argModelId || context?.currentModel || "";
+      const advertised = advertisedEffortsForModel(
+        targetId,
+        context?.availableModels,
+      );
+      return createArgChoiceSuggestions("effort", query, advertised);
+    }
+    return createArgChoiceSuggestions(
+      argCommand,
+      query,
+      context?.models ?? [],
+    );
+  }
   const normalizedQuery = query.toLocaleLowerCase();
 
   return commands
     .filter((command) => command.name.toLocaleLowerCase().includes(normalizedQuery))
-    .slice(0, 10)
     .map((command) => ({
       id: `command:${command.name}`,
       kind: isSkillCommand(command) ? "skill" : "command",
@@ -236,11 +309,25 @@ export function createCommandSuggestions(
 }
 
 /**
+ * Extra `/` empty-state context so New chat does not claim we are waiting
+ * on grok-build when the catalog is already resolved (or simply unmatched).
+ */
+export type ComposerCommandEmptyState = {
+  /** Resolved catalog size (live + cache + inspect), not the filtered menu. */
+  catalogSize: number;
+  /** Session store connection mode; disconnected / connecting change the copy. */
+  connectionMode: string;
+  /** True while inspect / connect is still the only way to fill an empty catalog. */
+  isLoadingCatalog: boolean;
+};
+
+/**
  * Empty-list copy for the current completion state without inventing data sources.
  * @param kind Current trigger kind; returns "" when there is no trigger.
  * @param isLoadingEntries Whether a real bridge file listing is in flight.
  * @param canListEntries Whether the bridge is connectable and supports workspace reads.
  * @param hasWorkspaceLoadError Bridge request failed; when true the user must be told to recover the real bridge.
+ * @param commandState Optional `/` catalog connection state; omitted treats the list as unmatched.
  * @returns Status copy suitable for the menu.
  */
 export function getComposerEmptyLabel(
@@ -248,14 +335,29 @@ export function getComposerEmptyLabel(
   isLoadingEntries: boolean,
   canListEntries: boolean,
   hasWorkspaceLoadError: boolean,
+  commandState?: ComposerCommandEmptyState,
 ): string {
   if (kind === "mention") {
     if (isLoadingEntries) {return "Reading the current workspace…";}
     if (hasWorkspaceLoadError) {return "Could not read the workspace. Restart the bridge and try again.";}
     return canListEntries ? "No matching files" : "Connect the bridge to mention workspace files";
   }
-  if (kind === "command") {return "Waiting for live grok-build to provide commands…";}
-  return "";
+  if (kind !== "command") {
+    return "";
+  }
+  if ((commandState?.catalogSize ?? 0) > 0) {
+    return "No matching commands";
+  }
+  if (
+    commandState?.isLoadingCatalog ||
+    commandState?.connectionMode === "connecting"
+  ) {
+    return "Loading commands…";
+  }
+  if (commandState?.connectionMode === "disconnected") {
+    return "Connect the bridge to load commands";
+  }
+  return "No matching commands";
 }
 
 /**

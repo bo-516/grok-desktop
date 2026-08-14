@@ -136,4 +136,48 @@ describe("runComposerSubmit", () => {
     assert.ok(order.indexOf("paint") < order.indexOf("clear-draft"));
     assert.ok(order.includes("restore-draft"));
   });
+
+  it("does not send when tryLocalSlash handles /model or /effort", () => {
+    const order: string[] = [];
+    runComposerSubmit({
+      sentDraft: "/model grok-4.6",
+      attachmentCount: 0,
+      connectionMode: "live-bridge",
+      streaming: false,
+      waitingPermission: false,
+      canSend: true,
+      bridgeInfo: "",
+      tryLocalSlash: (draft) => {
+        order.push(`local:${draft}`);
+        return true;
+      },
+      buildOutgoingBlocks: async () => {
+        order.push("build");
+        return { blocks: undefined, text: "/model grok-4.6", hint: "" };
+      },
+      sendPrompt: async () => {
+        order.push("send");
+        return true;
+      },
+      showNotice: () => {
+        order.push("notice");
+      },
+      clearNotice: () => {
+        order.push("clear-notice");
+      },
+      clearDraftIfUnchanged: () => {
+        order.push("clear-draft");
+      },
+      restoreDraft: () => {
+        order.push("restore-draft");
+      },
+      clearAttachments: () => {
+        order.push("clear-attachments");
+      },
+      stopDictation: () => {
+        order.push("stop-dictation");
+      },
+    });
+    assert.deepEqual(order, ["stop-dictation", "local:/model grok-4.6"]);
+  });
 });
