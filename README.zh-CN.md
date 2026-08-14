@@ -102,7 +102,7 @@ npm run run:both
 
 ### 开发：ai-inspector（⌘-click → Grok Build）
 
-桌面 **dev** 内嵌了 vendored 的 [ide-byebye](https://github.com/dravenLee/ide-byebye)（`apps/desktop/vendor/ai-inspector/`），可点选界面元素、描述改动，并交给 **Grok Build**（以及其他 agent），无需离开 UI，也不需要额外 checkout。
+桌面 **dev** 会挂上意图检查器，可点选界面元素、描述改动，并交给 **Grok Build**（以及其他 agent），无需离开 UI。
 
 - **快捷键**：`Alt+Shift+I` 切换拾取模式
 - **点击**：按住 ⌘（macOS）/ Ctrl（其他）再点组件

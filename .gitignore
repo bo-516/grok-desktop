@@ -74,7 +74,7 @@ Desktop.ini
 *.temp
 .claude/
 
-# ai-inspector (ide-byebye) handoff artifacts during desktop dev
+# ai-inspector handoff artifacts during desktop dev
 .intent-inspector/
 apps/desktop/.intent-inspector/
 docs/

@@ -102,7 +102,7 @@ npm run run:both
 
 ### Dev: ai-inspector (⌘-click → Grok Build)
 
-Desktop **dev** embeds a vendored [ide-byebye](https://github.com/dravenLee/ide-byebye) build (`apps/desktop/vendor/ai-inspector/`) so you can pick a rendered element, describe the change, and hand off to **Grok Build** (and other agents) without leaving the UI. No external checkout is required.
+Desktop **dev** mounts an intent inspector so you can pick a rendered element, describe the change, and hand off to **Grok Build** (and other agents) without leaving the UI.
 
 - **Hotkey**: `Alt+Shift+I` toggles picker mode
 - **Click**: hold ⌘ (macOS) / Ctrl (elsewhere) and click a component

@@ -1,18 +1,14 @@
 /**
- * Dev-only ai-inspector (ide-byebye) integration for the desktop Vite server.
+ * Dev-only ai-inspector integration for the desktop Vite server.
  *
- * Purpose: load the **vendored** single-file plugin under `vendor/ai-inspector/`
+ * Purpose: load the intent-inspector plugin from desktop `devDependencies`
  * so ⌘-click / Alt+Shift+I can hand selected UI source + intent to Grok Build
  * (and other agents) while developing grok-desktop. Production builds never
  * take this path (`apply: 'serve'` inside the plugin).
  *
- * Boundary: imports only the in-repo vendored build — no external monorepo
- * checkout and no `AI_INSPECTOR_PATH`. Missing / unloadable vendor file → empty
- * plugin list (dev still works). Peer packages `unplugin` and
- * `code-inspector-plugin` must be present in desktop `devDependencies`.
+ * Boundary: missing / unloadable package → empty plugin list (dev still works).
  */
 
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginOption } from "vite";
@@ -24,44 +20,63 @@ const DESKTOP_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(DESKTOP_DIR, "../..");
 
 /**
- * Vendored single-file build of ide-byebye (`dist/code-intent-inspector.js`).
- * Refresh by copying a rebuilt artifact into this path (see vendor README).
+ * Factory exported by the intent-inspector package (`default` or named).
+ *
+ * @param options Inspector options forwarded to the package (see package types).
+ * @returns Vite plugin or plugin list.
  */
-const VENDORED_PLUGIN_ENTRY = path.join(
-  DESKTOP_DIR,
-  "vendor/ai-inspector/code-intent-inspector.js",
-);
+type InspectorPluginFactory = (
+  options?: Record<string, unknown>,
+) => PluginOption | PluginOption[];
 
 /**
- * Dynamically load Vite plugins from the vendored ai-inspector build.
+ * Resolve the inspector plugin factory from the installed npm package.
  *
- * Boundary: returns `[]` when the vendor file is absent so `npm run dev` still
- * works. When present, registers code-inspector + inspector bootstrap with Grok
- * Build as the default handoff agent and `projectRoot` = monorepo root (not
- * `apps/desktop`). `codeInspector.importClient` is `"file"` so the locator
- * runtime is not inlined into `main.tsx` (avoids Babel's 500KB deopt note).
+ * Boundary: missing package, import error, or a non-function export →
+ * `undefined` (caller returns an empty plugin list).
+ *
+ * @returns Factory when the package is loadable; otherwise `undefined`.
+ */
+async function loadInspectorPluginFactory(): Promise<
+  InspectorPluginFactory | undefined
+> {
+  try {
+    const mod = (await import("ide-byebye")) as {
+      default?: InspectorPluginFactory;
+      codeIntentInspectorPlugin?: InspectorPluginFactory;
+    };
+    const factory = mod.default ?? mod.codeIntentInspectorPlugin;
+    if (typeof factory === "function") {
+      return factory;
+    }
+    console.warn(
+      `[desktop] ai-inspector package has no default/codeIntentInspectorPlugin export; skipping`,
+    );
+    return undefined;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[desktop] ai-inspector package failed to load; skipping (${detail})`,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Dynamically load Vite plugins from the desktop intent-inspector package.
+ *
+ * Boundary: returns `[]` when the package is absent or unloadable so
+ * `npm run dev` still works. When present, registers source mapping +
+ * inspector bootstrap with Grok Build as the default handoff agent and
+ * `projectRoot` = monorepo root (not `apps/desktop`).
+ * `codeInspector.importClient` is `"file"` so the locator runtime is not
+ * inlined into `main.tsx` (avoids Babel's 500KB deopt note).
  *
  * @returns Vite plugin list (0 or more); safe to spread into `plugins`.
  */
 export async function loadAiInspectorDevPlugins(): Promise<PluginOption[]> {
-  if (!fs.existsSync(VENDORED_PLUGIN_ENTRY)) {
-    console.warn(
-      `[desktop] vendored ai-inspector missing at ${VENDORED_PLUGIN_ENTRY}`,
-    );
-    return [];
-  }
-
-  const mod = (await import(VENDORED_PLUGIN_ENTRY)) as {
-    default?: (options?: Record<string, unknown>) => PluginOption | PluginOption[];
-    codeIntentInspectorPlugin?: (
-      options?: Record<string, unknown>,
-    ) => PluginOption | PluginOption[];
-  };
-  const factory = mod.default ?? mod.codeIntentInspectorPlugin;
-  if (typeof factory !== "function") {
-    console.warn(
-      `[desktop] vendored ai-inspector has no default/codeIntentInspectorPlugin export; skipping`,
-    );
+  const factory = await loadInspectorPluginFactory();
+  if (!factory) {
     return [];
   }
 

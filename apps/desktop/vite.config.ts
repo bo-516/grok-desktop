@@ -1,11 +1,11 @@
 /**
  * Vite config for the desktop UI shell.
  *
- * Purpose: React + UnoCSS app; in `serve` mode mounts the vendored ai-inspector
- * (ide-byebye single-file build) for source-aware intent handoff while developing.
+ * Purpose: React + UnoCSS app; in `serve` mode mounts the dev-only
+ * ai-inspector for source-aware intent handoff while developing.
  *
  * Boundary: production `vite build` does not get inspector injection (plugin
- * `apply: 'serve'`). Missing vendor file only drops that plugin.
+ * `apply: 'serve'`). A missing inspector package only drops that plugin.
  * Sourcemaps are off for both serve and build — we debug via source paths /
  * inspector chips, not browser source maps (avoids multi-MB inline maps).
  * plugin-react uses `babel.compact` so inspector injection cannot trip
