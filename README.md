@@ -1,8 +1,18 @@
+[README](README.md) · [README (zh)](README.zh-CN.md)
+
 # grok-desktop
 
 > **Status: Work in progress (WIP)** — APIs, UI, and commands may change at any time; not recommended for production use.
 
 Desktop ACP client for [grok-build](https://docs.x.ai/build/overview) — **do not rewrite the agent loop**; speak Agent Client Protocol over stdio.
+
+| Doc | Topic |
+|---|---|
+| [`apps/bridge-go/README.md`](apps/bridge-go/README.md) | Go bridge env, pool, CLI channel |
+| [`apps/shell/README.md`](apps/shell/README.md) | Wails host, config, logs |
+| [`docs/design/ui-ux-agent-client.md`](docs/design/ui-ux-agent-client.md) | Shell IA and visual design |
+| [`docs/protocol-freeze-relay-2026-08-10.md`](docs/protocol-freeze-relay-2026-08-10.md) | Bridge ↔ UI WebSocket relay |
+| [`docs/qa/index.md`](docs/qa/index.md) | QA cases by surface |
 
 ## Product rule: real grok-build only
 
@@ -141,13 +151,3 @@ import {
 - Session status: `idle` | `streaming` | `waiting_permission` | `disconnected`
 - Empty Go-bridge `state` frames keep client-owned timeline / goal / subagent maps
 - Occupancy (`contextTokensUsed`) is preserved across `turn_completed` billed counters
-
-## More docs
-
-| Doc | Topic |
-|---|---|
-| [`apps/bridge-go/README.md`](apps/bridge-go/README.md) | Go bridge env, pool, CLI channel |
-| [`apps/shell/README.md`](apps/shell/README.md) | Wails host, config, logs |
-| [`docs/design/ui-ux-agent-client.md`](docs/design/ui-ux-agent-client.md) | Shell IA and visual design |
-| [`docs/protocol-freeze-relay-2026-08-10.md`](docs/protocol-freeze-relay-2026-08-10.md) | Bridge ↔ UI WebSocket relay |
-| [`docs/qa/index.md`](docs/qa/index.md) | QA cases by surface |
