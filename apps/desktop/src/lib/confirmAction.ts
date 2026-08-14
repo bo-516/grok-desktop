@@ -12,15 +12,59 @@ export type IrreversibleKind =
   | "share_upload";
 
 export type ConfirmPrompt = {
+  /** Irreversible action this prompt describes. */
   kind: IrreversibleKind;
+  /** Short question; does not embed the target name (that lives in `subject`). */
   title: string;
+  /**
+   * Named target shown as a chip under the title (session name, worktree
+   * path). Omitted when the action has no distinct object.
+   */
+  subject?: string;
+  /** Consequence lines rendered as paragraphs under the chip. */
   details: string[];
+  /** Primary action label (Delete / Rewind / …). */
   confirmLabel: string;
+  /** Dismiss label. */
   cancelLabel: string;
 };
 
 /**
+ * Tidy a named confirm target for the subject chip.
+ * Trims, unwraps one matching quote pair, and strips leftover markdown
+ * fence ticks that leak from session titles (e.g. a trailing ```).
+ * @param raw Session title, worktree path, or other label; empty/undefined → "".
+ * @returns Display string; empty when there is nothing useful to show.
+ */
+export function formatConfirmSubject(raw: string | undefined): string {
+  if (!raw) {
+    return "";
+  }
+  const trimmed = raw.trim();
+  const pairs: Array<[string, string]> = [
+    ["“", "”"],
+    ['"', '"'],
+    ["'", "'"],
+    ["‘", "’"],
+  ];
+  let value = trimmed;
+  for (const [open, close] of pairs) {
+    if (
+      value.startsWith(open) &&
+      value.endsWith(close) &&
+      value.length > open.length + close.length
+    ) {
+      value = value.slice(open.length, value.length - close.length).trim();
+      break;
+    }
+  }
+  return value.replace(/^`{1,3}/, "").replace(/`{1,3}$/, "").trim();
+}
+
+/**
  * Build a confirm prompt for an irreversible op.
+ * Title stays short; `ctx.label` becomes `subject` so the dialog can
+ * truncate a long session name instead of wrapping it inside the heading.
  * @param kind Action kind.
  * @param ctx Optional context (session title, path, dirty git).
  */
@@ -32,15 +76,15 @@ export function buildConfirmPrompt(
     uploadHost?: string;
   } = {},
 ): ConfirmPrompt {
-  const label = ctx.label ?? "this item";
+  const subject = formatConfirmSubject(ctx.label);
   switch (kind) {
     case "session_delete":
       return {
         kind,
-        title: `Delete session “${label}”?`,
+        title: "Delete session?",
+        subject: subject || undefined,
         details: [
-          "This permanently removes the session from grok history.",
-          "This cannot be undone.",
+          "This permanently removes the session from grok history. This cannot be undone.",
         ],
         confirmLabel: "Delete",
         cancelLabel: "Cancel",
@@ -62,7 +106,8 @@ export function buildConfirmPrompt(
     case "worktree_rm":
       return {
         kind,
-        title: `Remove worktree “${label}”?`,
+        title: "Remove worktree?",
+        subject: subject || undefined,
         details: [
           "The worktree directory will be deleted.",
           "Use dry-run first if you are unsure.",

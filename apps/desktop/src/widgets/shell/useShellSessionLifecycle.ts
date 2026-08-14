@@ -1,14 +1,20 @@
 /**
- * Session bootstrap, environment refresh, and attention notifications.
+ * Session bootstrap, environment refresh, attention notifications,
+ * and 3s live-bridge auto-reconnect while disconnected.
  * Extracted from useAppShellWidget to keep the shell hook under the line budget.
  */
 
 import { useEffect, useRef } from "react";
-import { useSessionStore } from "../../store/sessionStore";
+import {
+  shouldArmBridgeReconnect,
+  startBridgeReconnectLoop,
+} from "../../lib/bridgeReconnect";
 import { setAttentionBadge } from "../../lib/dockBadge";
+import { useSessionStore } from "../../store/sessionStore";
 
 /**
- * Hydrate catalog, resume last session, refresh env, and dock/OS attention badge.
+ * Hydrate catalog, resume last session, refresh env, dock/OS attention badge,
+ * and retry the live bridge every 3s while `connectionMode` is disconnected.
  * @param args Session status fields used for notifications and badge count.
  */
 export function useShellSessionLifecycle(args: {
@@ -26,6 +32,7 @@ export function useShellSessionLifecycle(args: {
   const hydrateCatalog = useSessionStore((s) => s.hydrateCatalog);
   const selectSession = useSessionStore((s) => s.selectSession);
   const reconnect = useSessionStore((s) => s.reconnect);
+  const ensureConnected = useSessionStore((s) => s.ensureConnected);
   const refreshEnvironment = useSessionStore((s) => s.refreshEnvironment);
   const autoStarted = useRef(false);
 
@@ -52,6 +59,20 @@ export function useShellSessionLifecycle(args: {
       refreshEnvironment();
     }
   }, [args.connectionMode, refreshEnvironment]);
+
+  // Bridge down: retry every 3s until live (or the user leaves this screen).
+  useEffect(() => {
+    if (!shouldArmBridgeReconnect(args.connectionMode)) {
+      return;
+    }
+    return startBridgeReconnectLoop(
+      () => ensureConnected(),
+      {
+        setInterval: (handler, ms) => window.setInterval(handler, ms),
+        clearInterval: (id) => window.clearInterval(id),
+      },
+    );
+  }, [args.connectionMode, ensureConnected]);
 
   useEffect(() => {
     if (typeof Notification === "undefined") {

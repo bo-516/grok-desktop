@@ -1,6 +1,10 @@
 /**
  * Session overflow menu (⋯) — pure presentation.
  * Parent owns open state, item list, and action handlers.
+ * Shortcut hints (⌘N) are split onto `top-nav-menu-kbd` so the modifier
+ * is not jammed against the key; slash / status hints stay mono.
+ * Selecting a row focuses the trigger before the list unmounts so the
+ * browser does not scroll a removed menuitem into view.
  * Wrong handlers (e.g. rewind without confirm) are caller bugs, not this view.
  */
 
@@ -22,11 +26,34 @@ export type SessionMenuItem = {
   id: SessionMenuActionId;
   /** Visible label. */
   label: string;
-  /** Optional secondary hint (slash name, shortcut). */
+  /** Optional secondary hint (slash name, shortcut chord). */
   hint?: string;
   /** Danger styling for destructive ops. */
   danger?: boolean;
 };
+
+/** Leading modifier run (⌘⌥⌃⇧) vs the rest of a shortcut hint. */
+const SHORTCUT_HINT = /^([⌘⌥⌃⇧]+)(.+)$/u;
+
+/**
+ * Trailing menu hint. Slash / status copy stays mono. Shortcut chords
+ * (⌘N) switch to the UI sans and insert a gap so the modifier does not
+ * read as a hash jammed against the key.
+ * @param props.hint Visible hint; empty is the caller's job (do not render).
+ */
+function SessionMenuHintView(props: { hint: string }) {
+  const { hint } = props;
+  const parts = SHORTCUT_HINT.exec(hint);
+  if (parts?.[1] && parts[2]) {
+    return (
+      <span className="top-nav-menu-kbd">
+        <span>{parts[1]}</span>
+        <span>{parts[2]}</span>
+      </span>
+    );
+  }
+  return <span className="top-nav-menu-hint">{hint}</span>;
+}
 
 export type SessionActionsMenuViewProps = {
   /** Whether the popover is open. */
@@ -49,6 +76,18 @@ export type SessionActionsMenuViewProps = {
 export function SessionActionsMenuView(props: SessionActionsMenuViewProps) {
   const { open, onClose, onToggle, onSelect, items } = props;
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Dispatch a row then let the parent close the list.
+   * Focus returns to the ⋯ trigger first so unmounting the focused menuitem
+   * cannot scroll a removed node into view (that jump reads as a page shake).
+   * @param id Menu action id; forwarded unchanged to onSelect.
+   */
+  const pickItem = (id: SessionMenuActionId) => {
+    triggerRef.current?.focus({ preventScroll: true });
+    onSelect(id);
+  };
 
   useEffect(() => {
     if (!open) {
@@ -77,6 +116,7 @@ export function SessionActionsMenuView(props: SessionActionsMenuViewProps) {
   return (
     <div className="top-nav-menu" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={cs("top-nav-icon-btn", {
           "top-nav-link-active": open,
@@ -91,19 +131,17 @@ export function SessionActionsMenuView(props: SessionActionsMenuViewProps) {
       {open ? (
         <ul className="top-nav-menu-list" role="menu" aria-label="Session actions">
           {items.map((item) => (
-            <li key={item.id} role="none">
+            <li key={item.id} role="none" className="top-nav-menu-row">
               <button
                 type="button"
                 role="menuitem"
                 className={cs("top-nav-menu-item", {
                   "top-nav-menu-item-danger": Boolean(item.danger),
                 })}
-                onClick={() => onSelect(item.id)}
+                onClick={() => pickItem(item.id)}
               >
                 <span className="top-nav-menu-label">{item.label}</span>
-                {item.hint ? (
-                  <span className="top-nav-menu-hint">{item.hint}</span>
-                ) : null}
+                {item.hint ? <SessionMenuHintView hint={item.hint} /> : null}
               </button>
             </li>
           ))}

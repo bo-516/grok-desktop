@@ -1,6 +1,7 @@
 /**
- * Stateless file body for the preview drawer: line numbers + monospace text.
- * Virtualization is deferred (S2); large files are already truncated on bridge.
+ * Stateless file body for the preview drawer: line numbers + wrapping
+ * monospace text. The table is `table-fixed` so wrap can actually constrain
+ * width; virtualization is deferred (S2); large files are truncated on bridge.
  */
 
 import type { CodeLine } from "@/lib/codeHighlight";

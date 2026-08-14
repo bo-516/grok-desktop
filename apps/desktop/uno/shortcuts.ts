@@ -10,6 +10,7 @@ import { shellShortcuts } from "./shortcuts.shell";
 import { timelineShortcuts } from "./shortcuts.timeline";
 import { composerShortcuts } from "./shortcuts.composer";
 import { chromeShortcuts } from "./shortcuts.chrome";
+import { agentsShortcuts } from "./shortcuts.agents";
 import { previewShortcuts } from "./shortcuts.preview";
 import { codeShortcuts } from "./shortcuts.code";
 import { docShortcuts } from "./shortcuts.doc";
@@ -20,6 +21,7 @@ export const appShortcuts: Record<string, string> = {
   ...timelineShortcuts,
   ...composerShortcuts,
   ...chromeShortcuts,
+  ...agentsShortcuts,
   ...previewShortcuts,
   ...codeShortcuts,
   ...docShortcuts,

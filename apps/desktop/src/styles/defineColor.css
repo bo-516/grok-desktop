@@ -116,6 +116,14 @@
   --color-bg-elevated: var(--color-surface-high);
   --color-bg-timeline: var(--color-surface-lowest);
   --color-bg-composer: var(--color-surface-container);
+  /*
+   * Queue chips sit above `.composer`. One elevate step brighter than the
+   * input card (container → highest) plus a stronger hairline so they cannot
+   * fuse with the dock. Index badge fill is a chip wash, not another surface.
+   */
+  --color-bg-composer-queue: var(--color-surface-highest);
+  --color-border-composer-queue: var(--color-border-muted);
+  --color-bg-composer-queue-index: var(--color-bg-white-chip);
   --color-bg-composer-suggestion: var(--color-surface-high);
   --color-bg-composer-suggestion-hover: var(--color-surface-highest);
   --color-border-composer-suggestion: var(--color-border-subtle);
@@ -314,7 +322,18 @@
     transparent
   );
   --color-diff-row-focus: color-mix(in oklch, var(--seed-ink) 6%, transparent);
-  --color-diff-file-head-bg: var(--color-bg-titlebar);
+  /*
+   * Sticky Changes file heads sit over scrolling banners and hunks. Must be
+   * the opaque drawer surface — never titlebar (12% transparent) or white-*
+   * mixes, or the fragment-alignment banner bleeds through the path.
+   * Hover is the same 3% ink wash as white-faint, mixed into that solid.
+   */
+  --color-diff-file-head-bg: var(--color-bg-surface);
+  --color-diff-file-head-hover: color-mix(
+    in oklch,
+    var(--seed-ink) 3%,
+    var(--color-diff-file-head-bg)
+  );
 
   /*
    * Syntax highlighting (dark) — base hues from VS Code Dark+ / Dark Modern,
@@ -359,8 +378,12 @@
    * Optional pill chip tokens (file/command -bg/-border/-icon) remain for
    * non-caret surfaces that want heavier chrome; not used for draft/history.
    */
-  /* Desaturated accent (was #1479c9); keeps hue identity without IDE-blue pop. */
-  --color-composer-mention: #84b1df;
+  /*
+   * Deeper than the Phase-5 wash (#84b1df) so @file / /command scan on the
+   * dark user bubble and composer mirror; still shy of the old IDE blue
+   * (#1479c9).
+   */
+  --color-composer-mention: #4d94d4;
   --color-mention-file: color-mix(
     in oklch,
     var(--seed-ink) 88%,
@@ -445,6 +468,9 @@
     color-mix(in oklch, var(--seed-canvas) 48%, transparent);
   --shadow-composer-suggestions: 0 12px 28px
     color-mix(in oklch, var(--seed-canvas) 44%, transparent);
+  /* Sticky turn-status pill: smaller lift than popover, no hairline ring. */
+  --shadow-float: 0 4px 16px
+    color-mix(in oklch, var(--seed-canvas) 48%, transparent);
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -455,13 +481,23 @@
 
   /* Layout density (non-color) */
   --sidebar-width: 272px;
+  /*
+   * Reserved width for transcript + composer. The shell collapses the
+   * left rail (then overlays the right drawer) rather than shrink below this.
+   * Keep in sync with MAIN_COLUMN_MIN_WIDTH in lib/shellLayout.ts.
+   */
+  --main-column-min-width: 560px;
   --topnav-height: 48px;
   --rail-right-width: 280px;
-  /* Preview drawer width tokens (width-by-rail-id; plan stays 280) */
+  /* Preview drawer width tokens (preview is its own drawer, not Plan|Agents). */
   --preview-width-default: 560px;
   --preview-width-min: 420px;
   --preview-width-max: 900px;
   --preview-width-plan: 280px;
+  /* Shared Plan|Agents drawer width (both tabs use the same persisted px). */
+  --agents-width-default: 300px;
+  --agents-width-min: 200px;
+  --agents-width-max: 432px;
   --container-padding: clamp(32px, 4.5vw, 80px);
   --chat-max-width: none;
   --gutter: 12px;
@@ -487,8 +523,15 @@
   --line-height-mono-label: 16px;
   --font-size-body-sm: 13px;
   --line-height-body-sm: 1.55;
+  --font-size-code-sm: 12px;
+  --line-height-code-sm: 1.5;
   --font-size-nav-item: 13px;
-  --line-height-nav-item: 15.6px;
+  /*
+   * Must clear Inter's own hhea box (~1.21em) so overflow-hidden rail
+   * labels (folder names, session titles) do not clip descenders (g/y/p).
+   * 15.6px (1.2) was shorter than the glyph box and cut "grok-desktop".
+   */
+  --line-height-nav-item: 20px;
   --font-size-body-md: 15px;
   --line-height-body-md: 1.65;
   --font-size-headline-sm: 20px;
@@ -601,6 +644,21 @@ html[data-theme="light"] {
   --color-bg-surface: var(--color-surface-low);
   --color-bg-elevated: #ffffff;
   --color-bg-composer: #ffffff;
+  /*
+   * Queue must not share the composer's pure white. Ink-tinted fill + a
+   * slightly stronger hairline reads as a pending chip on the gray canvas.
+   */
+  --color-bg-composer-queue: color-mix(in oklch, var(--seed-ink) 5.5%, white);
+  --color-border-composer-queue: color-mix(
+    in oklch,
+    var(--seed-ink) 12%,
+    transparent
+  );
+  --color-bg-composer-queue-index: color-mix(
+    in oklch,
+    var(--seed-ink) 8%,
+    white
+  );
   --color-bg-composer-suggestion: #ffffff;
   --color-bg-composer-suggestion-hover: color-mix(
     in oklch,
@@ -662,6 +720,7 @@ html[data-theme="light"] {
   );
   --color-diff-gap-fg: color-mix(in oklch, var(--seed-ink) 55%, transparent);
   --color-diff-row-focus: color-mix(in oklch, var(--seed-ink) 5%, transparent);
+  /* File-head tokens stay formula-based on --color-bg-surface / --seed-ink. */
 
   /*
    * Syntax highlighting (light) — VS Code's default light theme (Light+ /
@@ -699,6 +758,7 @@ html[data-theme="light"] {
     0 8px 24px color-mix(in oklch, black 5.5%, transparent);
   --shadow-composer-suggestions: 0 10px 26px
     color-mix(in oklch, black 6%, transparent);
+  --shadow-float: 0 4px 14px color-mix(in oklch, black 8%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

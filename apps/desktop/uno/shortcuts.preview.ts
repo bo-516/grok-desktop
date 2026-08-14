@@ -12,6 +12,7 @@ export const previewShortcuts: Record<string, string> = {
    */
   "preview-resize-handle":
     "absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-white-soft",
+  /* min-h-topnav is a custom rule (theme.height does not feed min-h-*). */
   "preview-head":
     "flex items-start justify-between gap-2 h-auto min-h-topnav px-3.5 py-2.5 shrink-0 border-b border-line-subtle bg-titlebar",
   "preview-head-actions": "shrink-0 flex items-center gap-0.5",
@@ -19,21 +20,55 @@ export const previewShortcuts: Record<string, string> = {
   "preview-head-toolbar": "shrink-0 flex items-center gap-1",
   "preview-mode-toggle":
     "flex items-center gap-0.5 p-0.5 rounded-8px bg-white-faint",
-  "preview-mode-btn": "btn-ghost h-6 px-2 text-11px",
+  /* 24px row matches preview-copy-btn / context-drawer-close — rem h-6 +
+   * btn-ghost padding used to sit off the icon-button baseline. */
+  "preview-mode-btn":
+    "inline-flex items-center justify-center box-border h-24px px-2 rounded-control border-none bg-transparent text-11px leading-none text-fg-secondary transition-colors duration-fast ease-soft hover:enabled:(bg-white-soft text-fg) disabled:(opacity-45 cursor-not-allowed)",
   "preview-mode-btn-active": "bg-high text-fg",
+  /*
+   * Own chrome (not btn-ghost): ghost rem padding wins the cascade and
+   * crushes the 16px lucide mark, so the copy face reads as an empty box
+   * with the check + label sitting beside it.
+   */
+  "preview-copy-btn":
+    "shrink-0 inline-flex items-center justify-center gap-1 box-border h-24px min-w-24px px-6px py-0 rounded-control border-none bg-transparent text-11px leading-none whitespace-nowrap text-fg-secondary transition-colors duration-fast ease-soft hover:enabled:(bg-white-soft text-fg) [&_svg]:(block shrink-0)",
+  /*
+   * Path double-click confirmation. Own chrome — do not stack preview-copy-btn:
+   * that face is bg-transparent and would let the path bleed through the chip.
+   * bg-highest is an opaque surface (never white-* / titlebar mixes). fixed +
+   * body portal because the rail uses translate and the title clips overflow.
+   * left/top come from React style (clientX / clientY + offset).
+   */
+  "preview-copy-flash":
+    "fixed z-80 pointer-events-none translate-x-center inline-flex items-center justify-center gap-1 box-border h-24px min-w-24px px-6px py-0 rounded-control border border-line-subtle bg-highest text-11px leading-none whitespace-nowrap text-fg-secondary shadow-popover [&_svg]:(block shrink-0)",
   "preview-head-text": "min-w-0 flex-1 flex flex-col gap-0.5",
+  /*
+   * Title must wrap: nowrap + ellipsis hid ComposerWidget.tsx (and any
+   * long file name) behind the toolbar. overflow-wrap anywhere so a
+   * single long segment still breaks instead of forcing a drawer
+   * scrollbar. PathLabelView wrap=true owns dir/base line breaks.
+   */
   "preview-title":
-    "m-0 text-13px font-medium tracking-tight text-fg text-left overflow-hidden text-ellipsis whitespace-nowrap",
-  /* Path variant: flex row so path-label-dir absorbs the truncation and the
-   * file name stays readable at any drawer width. select-none keeps the
-   * double-click copy gesture from leaving a stray word highlighted (the
-   * heading is not a button, so the browser would select "desktop" & co). */
-  "preview-title-row": "flex items-baseline gap-2 select-none",
+    "m-0 min-w-0 w-full max-w-full text-13px font-medium tracking-tight text-fg text-left [overflow-wrap:anywhere]",
+  /* select-none keeps the double-click copy gesture from leaving a stray
+   * word highlighted (the heading is not a button). */
+  "preview-title-row": "flex items-start select-none",
   "preview-subtitle": "m-0 text-11px text-fg-muted",
   "preview-counts": "m-0 flex items-center gap-2 text-11px tabular-nums",
   "preview-count-add": "text-diff-add tabular-nums",
   "preview-count-del": "text-diff-del tabular-nums",
   "preview-body": "flex flex-col min-h-0 overflow-hidden",
+  /*
+   * Stale-while-refresh stack: keep the last file mounted and frost it
+   * while a later disk read is in flight. Veil is always in the tree so
+   * opacity can fade; pointer-events-none so the old body still scrolls.
+   */
+  "preview-file-stack": "relative flex flex-col flex-1 min-h-0",
+  "preview-file-stack-body": "flex flex-col flex-1 min-h-0",
+  "preview-file-stack-body-refreshing": "blur-2px",
+  "preview-refresh-veil":
+    "absolute inset-0 z-2 pointer-events-none bg-white-soft backdrop-blur-4px opacity-0 transition-opacity duration-fast ease-soft",
+  "preview-refresh-veil-on": "opacity-100",
   "preview-empty":
     "p-4 text-12px leading-snug text-fg-muted",
   "preview-error":
@@ -43,13 +78,24 @@ export const previewShortcuts: Record<string, string> = {
   "preview-banner-warn":
     "text-fg-secondary bg-white-soft",
   "preview-code": "flex flex-col flex-1 min-h-0",
-  "preview-code-scroll": "flex-1 min-h-0 overflow-auto",
-  "preview-code-table": "w-full border-collapse font-mono text-11px leading-relaxed",
+  /*
+   * File preview always wraps (no wrap toggle). Hide X overflow so a
+   * leftover 1px table min-content cannot paint a horizontal bar in
+   * the middle of a squeezed transcript + drawer layout.
+   */
+  "preview-code-scroll": "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
+  /*
+   * table-fixed is the load-bearing bit: auto layout sizes columns to
+   * the longest unbreakable token *before* wrap can kick in, which is
+   * why code-wrap alone still scrolled sideways.
+   */
+  "preview-code-table":
+    "w-full table-fixed border-collapse font-mono text-11px leading-relaxed",
   "preview-code-row": "",
   "preview-code-row-focus": "bg-white-soft",
   "preview-gutter":
     "align-top text-right pr-2 pl-2 py-0.25 text-fg-muted select-none w-10 border-r border-line-subtle",
-  "preview-code-text": "align-top pl-2.5 pr-3 py-0.25 text-fg code-wrap",
+  "preview-code-text": "align-top pl-2.5 pr-3 py-0.25 text-fg min-w-0 code-wrap",
   /* Scroll lives on the inner region so path/banner stay put; body grows.
    * Nowrap horizontal scroll is ONLY on this container (not per-line text) so
    * all rows share one scroll position and stay aligned. */
@@ -75,7 +121,7 @@ export const previewShortcuts: Record<string, string> = {
    * Body text ~12px (Claude-adjacent; pairs with default wrap).
    */
   "preview-diff-row":
-    "grid grid-cols-[3.25rem_1.25rem_1fr] gap-0 font-mono text-12px leading-relaxed relative group",
+    "grid grid-cols-[3.25rem_1.25rem_1fr] gap-0 font-mono text-12px leading-relaxed relative",
   "preview-diff-row-dual": "grid-cols-[2.75rem_2.75rem_1.25rem_1fr]",
   "preview-diff-row-add": "bg-diff-add-bg",
   "preview-diff-row-del": "bg-diff-del-bg",
@@ -119,13 +165,39 @@ export const previewShortcuts: Record<string, string> = {
     "text-diff-del bg-diff-del-bg",
   "preview-diff-hunk": "flex flex-col",
   "preview-change-list": "flex flex-col min-h-0 overflow-auto",
-  /* Sticky heights shared so file heads sit under the summary strip. */
+  /*
+   * Height is content-sized (not a locked 2rem). Counts stay nowrap.
+   * Actions grow into leftover space so @container sees that width.
+   * basis-28 + min-w-28 = four-icon row: wrap only when even icons
+   * cannot sit on the counts line (flex-1's 0% basis would overflow
+   * instead). @[22rem] on children swaps icons → labels. 22rem ≈ the
+   * four labeled buttons including "✓ " prefixes. --preview-summary-h
+   * is measured onto the list so sticky file heads sit under the strip.
+   */
   "preview-change-summary":
-    "sticky top-0 z-2 h-[var(--preview-summary-h,2rem)] px-3.5 py-2 text-12px text-fg-secondary bg-surface border-b border-line-subtle flex items-center gap-2",
+    "sticky top-0 z-2 px-3.5 py-2 text-12px text-fg-secondary bg-surface border-b border-line-subtle flex flex-wrap items-center gap-x-2 gap-y-1",
+  /* Counts + "Edited N files" must not wrap under the pref buttons. */
+  "preview-change-summary-label":
+    "shrink-0 whitespace-nowrap flex items-center gap-2",
+  "preview-change-summary-actions":
+    "@container ml-auto grow shrink basis-28 min-w-28 flex flex-nowrap items-center justify-end gap-0.5",
+  /*
+   * Own chrome (not btn-ghost): rem padding would un-center the 14px
+   * lucide mark in the 24px icon face. @[22rem] restores text padding.
+   */
+  "preview-change-summary-action":
+    "inline-flex items-center justify-center box-border h-24px min-w-24px px-6px py-0 rounded-control border-none bg-transparent text-11px leading-none whitespace-nowrap text-fg-secondary transition-colors duration-fast ease-soft hover:enabled:(bg-white-soft text-fg) [&_svg]:(block shrink-0) @[22rem]:(min-w-0 px-2.5)",
+  "preview-change-summary-action-on": "bg-white-soft text-fg",
+  "preview-change-summary-action-label": "hidden @[22rem]:inline",
+  "preview-change-summary-action-icon": "inline-flex @[22rem]:hidden",
   "preview-change-file":
-    "flex flex-col border-b border-line-subtle last:border-b-0",
+    "flex flex-col shrink-0 border-b border-line-subtle last:border-b-0",
+  /*
+   * Opaque rest + hover (diff-file-head-* tokens). Never white-faint: that
+   * mix is transparent and lets the alignment banner show through the path.
+   */
   "preview-change-file-head":
-    "sticky top-[var(--preview-summary-h,2rem)] z-1 flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--color-diff-file-head-bg)] border-b border-line-subtle cursor-pointer border-none w-full text-left hover:bg-white-faint focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-focus-ring)]",
+    "sticky top-[var(--preview-summary-h,2.5rem)] z-1 flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--color-diff-file-head-bg)] border-b border-line-subtle cursor-pointer border-none w-full text-left hover:bg-[var(--color-diff-file-head-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-focus-ring)]",
   "preview-change-file-path":
     "min-w-0 flex-1 font-mono text-11px text-fg overflow-hidden text-ellipsis whitespace-nowrap",
   "preview-change-file-meta":

@@ -3,6 +3,8 @@
  * Keeps PreviewDrawerWidget thin: async file reads and session diffs live here.
  * Turn changesets rebuild turn units from the live session timeline so the
  * drawer does not depend on TimelineView state.
+ * File targets re-read on every new `target` object (click-to-refresh) but
+ * keep the last file payload while the read is in flight.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -33,6 +35,12 @@ export type PreviewSource =
       content: string;
       truncated?: boolean;
       focusLine?: number;
+      /**
+       * True while a later disk read is in flight. Previous path/content stay
+       * so the drawer can keep the last file painted (blur veil) instead of
+       * flashing the empty "Loading…" body. Click-to-refresh stays allowed.
+       */
+      refreshing?: boolean;
     }
   | {
       status: "diff";
@@ -44,6 +52,34 @@ export type PreviewSource =
     }
   | { status: "changeset"; changeSet: ChangeSet }
   | { status: "error"; message: string };
+
+/**
+ * Snapshot to show while a file target starts (or restarts) a disk read.
+ * Keeps the previous file payload when one exists so a second click of the
+ * same path can refresh without unmounting the body.
+ * @param prev Last file-load result (any status).
+ * @param nextPath Path we are about to read.
+ * @param nextLine Optional focus line from the new target; applied only when
+ *   `nextPath` matches the painted file so a different file's line does not
+ *   highlight the stale body.
+ * @returns `loading` on first paint, or the previous file with `refreshing`.
+ */
+export function beginFilePreviewLoad(
+  prev: PreviewSource,
+  nextPath: string,
+  nextLine?: number,
+): PreviewSource {
+  if (prev.status !== "file") {
+    return { status: "loading" };
+  }
+  /** True when the in-flight read is the same path already painted. */
+  const samePath = prev.path === nextPath;
+  return {
+    ...prev,
+    refreshing: true,
+    focusLine: samePath ? nextLine : prev.focusLine,
+  };
+}
 
 /**
  * Resolve the active preview target against session + bridge.
@@ -63,16 +99,18 @@ export function usePreviewSource(
   const workspace = useSessionStore((s) => s.session.workspace);
   const [fileState, setFileState] = useState<PreviewSource>({ status: "idle" });
 
-  // File targets: async bridge read.
+  // File targets: async bridge read. A new `target` object (including a
+  // second click of the same path) re-reads disk. Do not wipe a painted
+  // file to `{ status: "loading" }` — that unmounts the body and flashes.
   useEffect(() => {
     if (!target || target.kind !== "file") {
       setFileState({ status: "idle" });
       return;
     }
     let cancelled = false;
-    setFileState({ status: "loading" });
     const path = target.path;
     const readCwd = target.cwd ?? (workspace?.trim() || undefined);
+    setFileState((prev) => beginFilePreviewLoad(prev, path, target.line));
     const run = async () => {
       if (!live?.previewWorkspaceFile) {
         if (!cancelled) {
@@ -101,6 +139,7 @@ export function usePreviewSource(
           content: result.content ?? "",
           truncated: result.truncated,
           focusLine: target.line,
+          refreshing: false,
         });
       } catch (e) {
         if (!cancelled) {

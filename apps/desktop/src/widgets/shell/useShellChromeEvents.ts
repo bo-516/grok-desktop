@@ -70,6 +70,8 @@ export function useShellChromeEvents(args: ShellChromeEventsArgs): void {
       }
       if (meta && e.key.toLowerCase() === "n") {
         e.preventDefault();
+        // Palette would keep its autoFocused input over the composer.
+        setPaletteOpen(false);
         onNewSession();
         return;
       }

@@ -59,10 +59,11 @@ export function SettingsSpawnSectionView(props: SettingsSpawnSectionViewProps) {
           onChange={(e) => onPatchDraft({ effort: e.target.value })}
           aria-label="Reasoning effort"
         >
-          {/* SPAWN-time flag; official Grok 4.5 ladder (matches composer defaults). */}
+          {/* SPAWN-time flag; Grok 4.6 Extra High plus the 4.5 ladder. */}
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
+          <option value="xhigh">Extra High</option>
         </Select>
       </label>
       <div className="settings-rule-grid">

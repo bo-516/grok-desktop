@@ -1,11 +1,18 @@
 /**
  * Stateless preview head toolbar: optional rendered|source toggle + copy full text.
  * Mode controls only appear for document-kind files; copy always does.
+ * After a successful clipboard write the copy control flashes CopiedMarkView
+ * (same check + "Copied" the path double-click parks under the pointer).
  */
 
 import cs from "classnames";
 import { Copy } from "lucide-react";
 import type { DocViewMode } from "@/lib/docViewPrefs";
+import {
+  CopiedMarkView,
+  PREVIEW_COPY_ICON_PX,
+  PREVIEW_COPY_ICON_STROKE,
+} from "./CopiedMarkView";
 
 export type PreviewFileToolbarViewProps = {
   /**
@@ -24,13 +31,21 @@ export type PreviewFileToolbarViewProps = {
   modeLocked?: boolean;
   /** Copy the raw file source (not rendered HTML). */
   onCopy: () => void;
-  /** True while the copied flash is showing. */
+  /**
+   * True while the copied flash is showing.
+   * Swaps the copy glyph for a check + "Copied" so a click is visible without
+   * relying on the tooltip (tooltips do not update while the pointer is down).
+   */
   copied?: boolean;
 };
 
 /**
  * Mode toggle + copy cluster for the preview head actions slot.
- * @param props Mode visibility, current mode, and copy handlers.
+ * Copy stays icon-only until `copied`, then flashes check + label and reverts
+ * when the caller clears the flag (typically ~1.2s via useCopyFeedback).
+ * The copy control uses `preview-copy-btn` so rem padding cannot push
+ * the lucide mark off the 24px face.
+ * @param props Mode visibility, current mode, copy handler, and flash flag.
  */
 export function PreviewFileToolbarView(props: PreviewFileToolbarViewProps) {
   return (
@@ -67,12 +82,21 @@ export function PreviewFileToolbarView(props: PreviewFileToolbarViewProps) {
       ) : null}
       <button
         type="button"
-        className="btn-ghost h-6 px-1.5"
+        className="preview-copy-btn"
         onClick={props.onCopy}
-        aria-label="Copy full text"
+        aria-label={props.copied ? "Copied" : "Copy full text"}
+        aria-live="polite"
         title={props.copied ? "Copied" : "Copy full text"}
       >
-        <Copy size={14} strokeWidth={1.75} aria-hidden="true" />
+        {props.copied ? (
+          <CopiedMarkView />
+        ) : (
+          <Copy
+            size={PREVIEW_COPY_ICON_PX}
+            strokeWidth={PREVIEW_COPY_ICON_STROKE}
+            aria-hidden="true"
+          />
+        )}
       </button>
     </div>
   );

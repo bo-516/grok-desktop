@@ -4,10 +4,8 @@
  * Path uses PathLabelView so the file name is never the truncated half.
  */
 
-import cs from "classnames";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
-import type { DiffViewPrefs } from "@/lib/diffViewPrefs";
 import type { PathDisplay } from "@/lib/pathDisplay";
 import { PathLabelView } from "@/widgets/shared";
 
@@ -70,94 +68,5 @@ export function DiffFileSectionView(props: DiffFileSectionViewProps) {
       </button>
       {expanded ? children : null}
     </section>
-  );
-}
-
-/**
- * "Collapse all / Expand all" control for the change-list summary strip,
- * plus shared wrap / dual-gutter / show-full-file prefs so the main Changes
- * entry is not a dead-end for display options.
- */
-export type DiffChangeListChromeProps = {
-  /** File count label text already computed by parent. */
-  summary: ReactNode;
-  /** True when every file section is collapsed. */
-  allCollapsed: boolean;
-  onCollapseAll: () => void;
-  onExpandAll: () => void;
-  /** Shared layout prefs for every file section under this list. */
-  viewPrefs?: DiffViewPrefs;
-  /**
-   * Patch shared prefs (parent persists). When omitted, pref buttons hide.
-   * Prefer-full-file is a toggle: on expands every gap; off collapses back to
-   * the original change-only fragments (gap bands again).
-   * @param patch Partial prefs to merge.
-   */
-  onViewPrefsChange?: (patch: Partial<DiffViewPrefs>) => void;
-};
-
-/**
- * Sticky summary row with bulk collapse + shared diff display prefs.
- * @param props Summary contents + bulk expand handlers + optional prefs.
- */
-export function DiffChangeListChrome(props: DiffChangeListChromeProps) {
-  const {
-    summary,
-    allCollapsed,
-    onCollapseAll,
-    onExpandAll,
-    viewPrefs,
-    onViewPrefsChange,
-  } = props;
-  return (
-    <div className="preview-change-summary">
-      <span className="min-w-0 flex-1">{summary}</span>
-      {viewPrefs && onViewPrefsChange ? (
-        <div className="shrink-0 flex items-center gap-0.5">
-          <button
-            type="button"
-            className="btn-ghost text-11px"
-            aria-pressed={viewPrefs.preferFullFile}
-            title={
-              viewPrefs.preferFullFile
-                ? "Collapse unmodified gaps — show change hunks only"
-                : "Reveal every unmodified gap in expanded files"
-            }
-            onClick={() =>
-              onViewPrefsChange({
-                preferFullFile: !viewPrefs.preferFullFile,
-              })
-            }
-          >
-            {viewPrefs.preferFullFile ? "✓ " : ""}Show full file
-          </button>
-          <button
-            type="button"
-            className="btn-ghost text-11px"
-            aria-pressed={viewPrefs.wrap}
-            onClick={() => onViewPrefsChange({ wrap: !viewPrefs.wrap })}
-          >
-            {viewPrefs.wrap ? "✓ " : ""}Wrap
-          </button>
-          <button
-            type="button"
-            className="btn-ghost text-11px"
-            aria-pressed={viewPrefs.dualGutter}
-            onClick={() =>
-              onViewPrefsChange({ dualGutter: !viewPrefs.dualGutter })
-            }
-          >
-            {viewPrefs.dualGutter ? "✓ " : ""}Dual #
-          </button>
-        </div>
-      ) : null}
-      <button
-        type="button"
-        className={cs("btn-ghost")}
-        onClick={allCollapsed ? onExpandAll : onCollapseAll}
-      >
-        {allCollapsed ? "Expand all" : "Collapse all"}
-      </button>
-    </div>
   );
 }

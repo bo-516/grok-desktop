@@ -6,16 +6,40 @@
 export const composerShortcuts: Record<string, string> = {
     /* ── Composer ── */
     /* In-flow footer (not absolute): height is natural; timeline scrolls above.
-     * shrink-0 keeps the dock from collapsing when the timeline is long. */
+     * shrink-0 keeps the dock from collapsing when the timeline is long.
+     * min-w-0 stops nowrap chips from widening the main column (that was
+     * the middle-column horizontal scrollbar next to a file preview). */
     "composer-dock":
-      "shrink-0 relative z-20 px-container pt-2 pb-5 bg-timeline pointer-events-none",
-    "composer-dock-inner": "w-full pointer-events-auto",
+      "shrink-0 relative z-20 min-w-0 px-container pt-2 pb-5 bg-timeline pointer-events-none",
+    "composer-dock-inner": "w-full min-w-0 pointer-events-auto",
     /*
      * Card chrome: idle and focused look the same (no focus border tint).
      * Field listening / dragover stay on .composer-input-wrap for mode feedback.
      */
     composer:
-      "relative flex flex-col gap-2.5 px-3.5 pt-3.5 pb-2.75 rounded-dock border border-transparent bg-composer shadow-composer transition-[box-shadow,background-color] duration-normal ease-soft",
+      "relative flex flex-col gap-2.5 min-w-0 max-w-full px-3.5 pt-3.5 pb-2.75 rounded-dock border border-transparent bg-composer shadow-composer transition-[box-shadow,background-color] duration-normal ease-soft",
+    /*
+     * Mid-turn follow-up panel (Codex / Claude): sibling ABOVE `.composer`,
+     * never inside the input card. `mx-1.5` + dedicated queue fill/border
+     * keep the chips from reading as a second input. Pair the row with a
+     * literal `group` so Send now / Edit / Cancel reveal on hover / keyboard
+     * focus; width stays reserved so the ellipsis does not jump.
+     */
+    "composer-queue":
+      "flex flex-col gap-1.5 m-0 mb-2 mx-1.5 p-0 list-none",
+    "composer-queue-row":
+      "flex items-center gap-2 min-w-0 px-2.5 py-1.75 rounded-10px border border-line-queue bg-composer-queue",
+    /* 1-based enqueue order (1 drains next). Decorative — row aria-label speaks it. */
+    "composer-queue-index":
+      "shrink-0 inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-pill bg-composer-queue-index text-fg-secondary text-11px font-medium tabular-nums leading-none",
+    "composer-queue-text":
+      "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-13px leading-5 text-fg",
+    /* Hover-reveal send/remove; snap visible, no opacity transition. */
+    "composer-queue-actions":
+      "flex items-center gap-0.5 shrink-0 opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto)",
+    "composer-queue-icon":
+      "flex items-center justify-center w-7 h-7 p-0 m-0 border-none rounded-7px bg-transparent text-fg-secondary cursor-pointer transition-colors duration-fast ease-soft hover:(bg-white-faint text-fg) focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)])",
+    "composer-queue-icon-svg": "w-3.5 h-3.5",
     /*
      * Sole field chrome owner: 1px border + shared metrics; data-state / focus-within
      * change color only. Idle + focus borders are transparent (no nested line box);
@@ -80,9 +104,19 @@ export const composerShortcuts: Record<string, string> = {
     /* Fixed one-line min height so loading ↔ empty copy swaps do not reflow the panel. */
     "composer-suggestions-empty":
       "m-0 p-3 min-h-10 text-fg-suggestion-detail text-body-sm leading-5",
-    "composer-bar": "flex items-center justify-between gap-2 m-0",
-    "composer-bar-left": "flex items-center gap-1.5 min-w-0",
-    "composer-bar-right": "relative flex items-center gap-1.5 min-w-0",
+    /*
+     * Two-level wrap. Groups are shrink-0 (not min-w-0): shrinking the
+     * cluster lets nowrap chips overflow and paint over Mic / Weekly.
+     * When left+right no longer fit, `ml-auto` drops the right cluster
+     * onto its own row and keeps Send on the trailing edge. max-w-full
+     * lets one over-wide cluster wrap its own chips.
+     */
+    "composer-bar":
+      "flex items-center gap-x-2 gap-y-1 m-0 w-full min-w-0 flex-wrap",
+    "composer-bar-left":
+      "flex items-center gap-1.5 shrink-0 max-w-full flex-wrap",
+    "composer-bar-right":
+      "relative ml-auto flex items-center gap-1.5 shrink-0 max-w-full flex-wrap",
     /*
      * Project switcher on the composer bar (session cwd context). Chip-sized
      * trigger; menu opens upward so it does not cover the textarea.
@@ -160,24 +194,28 @@ export const composerShortcuts: Record<string, string> = {
      */
     "composer-attachments":
       "flex flex-wrap items-start gap-2 m-0 mb-1.5 p-0 list-none",
-    /* Pair with literal `group` on the <li> — UnoCSS rejects `group` inside shortcuts. */
+    /* Pair with literal `group` on the <li> — UnoCSS rejects `group` inside shortcuts.
+     * Locked 56×56 (min=max) so a large paste cannot inflate the strip and
+     * reflow the composer card while the thumb decodes. */
     "composer-attachment":
-      "relative shrink-0 w-14 h-14 rounded-10px overflow-hidden border border-line-subtle bg-white-faint",
+      "relative shrink-0 w-14 h-14 min-w-14 min-h-14 max-w-14 max-h-14 rounded-10px overflow-hidden border border-line-subtle bg-white-faint",
     /* Full-tile hit target: open lightbox (previewable) or system viewer. */
     "composer-attachment-open":
-      "block w-full h-full p-0 m-0 border-0 bg-transparent cursor-pointer text-inherit",
+      "relative block w-full h-full min-w-0 min-h-0 p-0 m-0 border-0 bg-transparent cursor-pointer text-inherit overflow-hidden",
+    /* Out of flow so intrinsic screenshot size never contributes min-content. */
     "composer-attachment-thumb":
-      "block w-full h-full object-cover pointer-events-none",
+      "absolute inset-0 block w-full h-full max-w-full max-h-full object-cover pointer-events-none",
     "composer-attachment-fallback":
       "flex items-center justify-center w-full h-full px-1 text-10px text-fg-muted text-center leading-tight break-all",
     /*
      * Remove control stays hidden until the thumb is hovered (or focus lands
      * inside the tile / on the button) so the preview is not cluttered at rest.
-     * z-1 keeps the control above the full-tile open button; pointer-events-none
-     * while hidden lets open clicks fall through.
+     * Snaps visible — no opacity transition. z-1 keeps the control above the
+     * full-tile open button; pointer-events-none while hidden lets open
+     * clicks fall through.
      */
     "composer-attachment-remove":
-      "absolute top-0.5 right-0.5 z-1 flex items-center justify-center w-4.5 h-4.5 p-0 m-0 border border-line-subtle rounded-full bg-elevated text-fg-secondary cursor-pointer opacity-0 pointer-events-none transition-opacity duration-fast ease-soft group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:(bg-high text-fg) focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)])",
+      "absolute top-0.5 right-0.5 z-1 flex items-center justify-center w-4.5 h-4.5 p-0 m-0 border border-line-subtle rounded-full bg-elevated text-fg-secondary cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:(bg-high text-fg) focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)])",
     "composer-attachment-remove-icon": "w-3 h-3",
     /* Aliases → shared image-lightbox (chrome) so composer + timeline stay in sync. */
     "composer-attachment-lightbox": "image-lightbox",
@@ -245,35 +283,68 @@ export const composerShortcuts: Record<string, string> = {
     "composer-stop":
       "flex items-center justify-center h-8 px-3 border border-line-muted rounded-pill bg-white-faint text-fg-secondary text-12px font-medium transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg)",
     /*
-     * Context-usage ring (F-CTX-01): sits in composer-bar-right just left of
-     * the model name chip. 20×20 SVG; stroke colors are token classes only.
+     * Weekly remaining chip (F-CTX-01 sibling): sits immediately left of the
+     * context pie. Pair with literal `group` so group-hover reveals the tip.
+     */
+    "composer-weekly":
+      "relative shrink-0 flex items-center gap-1 h-7.5 px-1 rounded-pill cursor-default select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]",
+    "composer-weekly-period":
+      "text-10px font-medium leading-none text-fg-muted",
+    "composer-weekly-value":
+      "text-11px font-medium tabular-nums leading-none",
+    "composer-weekly-value-ok": "text-fg-secondary",
+    "composer-weekly-value-warn": "text-warning",
+    "composer-weekly-value-danger": "text-danger",
+    /*
+     * Hover + keyboard (:focus-visible) only. group-focus-within would pin the
+     * bubble after a mouse click (tabIndex host keeps :focus until elsewhere).
+     */
+    "composer-weekly-tip":
+      "pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-50 flex w-max max-w-64 translate-x-center flex-col gap-0.5 overflow-hidden rounded-12px border border-line-subtle bg-elevated px-3 py-2 text-left shadow-popover opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 group-focus-visible:opacity-100",
+    /*
+     * Context-usage pie (F-CTX-01): sits in composer-bar-right just left of
+     * the model name chip. 14×14 SVG inside a 30px hit target so the meter
+     * reads at weekly-chip x-height without shrinking the tap area.
+     * Fill (not stroke) and the same fg-secondary / warning / danger tokens
+     * as the weekly chip — never brand/primary, which shouted next to chrome.
      * Pair with literal `group` on the host so group-hover reveals the tip.
+     * Enter motion (`composer-usage-reveal`) is in base.css — grow width
+     * first (pushes Weekly), then fade the disk; not here so fill-mode both
+     * and the gap-cancel margin stay one keyframe.
      */
     "composer-usage":
-      "relative shrink-0 flex items-center justify-center w-7.5 h-7.5 rounded-full cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]",
-    "composer-usage-svg": "block w-5 h-5",
-    "composer-usage-track": "stroke-line-muted opacity-55",
-    "composer-usage-fill":
-      "transition-[stroke-dashoffset] duration-normal ease-soft",
-    "composer-usage-fill-idle": "stroke-fg-faint opacity-40",
-    "composer-usage-fill-ok": "stroke-primary",
-    "composer-usage-fill-warn": "stroke-warning",
-    "composer-usage-fill-danger": "stroke-danger",
+      "relative shrink-0 flex items-center justify-center w-7.5 h-7.5 rounded-full cursor-default select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]",
+    "composer-usage-svg": "block w-14px h-14px",
+    "composer-usage-track": "fill-fg-faint opacity-35",
+    "composer-usage-fill": "block",
+    "composer-usage-fill-idle": "fill-fg-faint opacity-40",
+    "composer-usage-fill-ok": "fill-fg-secondary",
+    "composer-usage-fill-warn": "fill-warning",
+    "composer-usage-fill-danger": "fill-danger",
     /*
-     * Hover tip bubble — centered above the ring (正上方中间).
+     * Hover tip bubble — centered above the meter (正上方中间).
      * left-1/2 + translate-x-center pulls the bubble back by half its own width.
      * translate-x-center is a plain rule in uno.config; presetUno's
      * -translate-x-1/2 needs a preflight this app disables and silently resolves
-     * to transform:none, which parked the bubble's left edge on the ring center.
+     * to transform:none, which parked the bubble's left edge on the meter center.
      * Show/hide is opacity-only so nothing competes for the transform slot.
-     * pointer-events-none so the tip never steals hover from the ring host.
+     * pointer-events-none so the tip never steals hover from the meter host.
+     * group-focus-visible (not focus-within): click must not pin the bubble.
      */
     "composer-usage-tip":
-      "pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-50 flex w-max max-w-64 translate-x-center flex-col gap-0.5 rounded-12px border border-line-subtle bg-elevated px-3 py-2 text-left shadow-popover opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 group-focus-within:opacity-100",
+      "pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-50 flex w-max max-w-64 translate-x-center flex-col gap-0.5 overflow-hidden rounded-12px border border-line-subtle bg-elevated px-3 py-2 text-left shadow-popover opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 group-focus-visible:opacity-100",
     "composer-usage-tip-title":
-      "m-0 text-11px font-medium leading-snug text-fg-secondary",
+      "m-0 text-11px font-medium leading-snug text-fg-muted",
+    /*
+     * Body lines wrap inside max-w-64. nowrap + a sentence-length empty
+     * state overflowed the rounded bubble and pulled the centered tip
+     * over the weekly chip.
+     */
     "composer-usage-tip-line":
-      "m-0 text-12px font-normal leading-snug text-fg whitespace-nowrap",
+      "m-0 text-12px font-normal leading-snug text-fg break-words",
+    /* Hairline between occupancy and last-turn billed usage in the tip. */
+    "composer-usage-tip-divider":
+      "my-1 h-px w-full border-none bg-line-subtle",
     /* Always-mounted status row: fixed one-line height; tone classes change color only. */
     "composer-status":
       "mt-2 mb-0 min-h-4.5 mx-1 text-center text-12px leading-4.5 tracking-normal truncate",

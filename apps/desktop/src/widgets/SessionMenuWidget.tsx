@@ -1,6 +1,6 @@
 /**
  * Stateful session ⋯ menu: session-only ops (+ narrow New chat / ⌘K fallbacks).
- * Fork uses the structured store RPC (thinking strip → switch to child branch);
+ * Fork uses the structured store RPC (restore empty ≥1s → switch to child);
  * drawer / theme / slash media live in sidebar footer and command palette.
  */
 
@@ -55,7 +55,7 @@ export function SessionMenuWidget(props: SessionMenuWidgetProps) {
   const runSessionMenuAction = (id: SessionMenuActionId) => {
     setOpen(false);
     if (id === "fork") {
-      // Thinking strip while RPC runs, then canvas switches to the forked branch.
+      // Centered restore empty, then canvas switches to the forked branch.
       void forkSession();
       return;
     }

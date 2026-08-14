@@ -7,6 +7,11 @@
  * The box stays square-ish (3.5px radius): at ~15px a larger radius reads as a
  * radio, i.e. as a mutually exclusive choice.
  *
+ * Layout: the face wrapper is exactly one label line tall (`1lh`) so the 15px
+ * box is vertically centered on the first line of text — not on the whole
+ * multi-line block (label + description). Without that, `items-start` plus
+ * ad-hoc mt/pt offsets drift off the cap height of the title.
+ *
  * Checked chrome is class-driven (`ui-check-box-on` / `ui-check-mark-on`) from
  * the controlled `checked` prop — not `peer-checked`. Uno shortcuts inline
  * utilities into one rule, so a `peer` token inside a shortcut never becomes a
@@ -39,7 +44,7 @@ export type CheckboxProps = Omit<
 /**
  * Accessible checkbox with tokenized chrome (class-driven checked + focus-within ring).
  * @param props Standard input props + optional label/description; onChange required for controlled use
- * @returns Label wrapping visually hidden native input + custom box
+ * @returns Label wrapping one-line face (native input + custom box) and optional text column
  */
 export function Checkbox(props: CheckboxProps) {
   const { label, description, className, disabled, checked, id, ...rest } =
@@ -60,28 +65,35 @@ export function Checkbox(props: CheckboxProps) {
       )}
       htmlFor={inputId}
     >
-      <input
-        {...rest}
-        id={inputId}
-        type="checkbox"
-        className="ui-check-input"
-        checked={checked}
-        disabled={disabled}
-      />
-      <span
-        className={cs("ui-check-box", { "ui-check-box-on": isOn })}
-        aria-hidden="true"
-      >
-        {/*
-         * Always mounted so scale/opacity can animate; hidden when off.
-         * size 11 + stroke 2.5 keeps the glyph crisp inside a 15px face.
-         */}
-        <Check
-          className={cs("ui-check-mark", { "ui-check-mark-on": isOn })}
-          size={11}
-          strokeWidth={2.5}
-          aria-hidden
+      {/*
+       * Face is one label-line tall so the box centers on the title, not the
+       * whole label+description stack. Input lives here so hit/focus geometry
+       * matches the visible square even when the outer row has padding.
+       */}
+      <span className="ui-check-face">
+        <input
+          {...rest}
+          id={inputId}
+          type="checkbox"
+          className="ui-check-input"
+          checked={checked}
+          disabled={disabled}
         />
+        <span
+          className={cs("ui-check-box", { "ui-check-box-on": isOn })}
+          aria-hidden="true"
+        >
+          {/*
+           * Always mounted so scale/opacity can animate; hidden when off.
+           * size 11 + stroke 2.5 keeps the glyph crisp inside a 15px face.
+           */}
+          <Check
+            className={cs("ui-check-mark", { "ui-check-mark-on": isOn })}
+            size={11}
+            strokeWidth={2.5}
+            aria-hidden
+          />
+        </span>
       </span>
       {label ? (
         <span className="ui-check-text">

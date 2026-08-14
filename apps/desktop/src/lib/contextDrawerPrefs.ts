@@ -1,7 +1,9 @@
 /**
  * Context-drawer layout prefs (push vs overlay).
  * Pure helpers + localStorage — no React. Global for all sessions.
- * Narrow viewports clamp effective layout to overlay without rewriting storage.
+ * Narrow-window clamp lives in `resolveShellLayout` so it can see the
+ * live rail width and the main-column minimum; this module only persists
+ * the user's preference.
  */
 
 /** localStorage key for context-drawer layout prefs (global, all sessions). */
@@ -18,12 +20,6 @@ export type ContextDrawerPrefs = {
 
 /** Default: push — the drawer never covers the transcript. */
 const DEFAULT_PREFS: ContextDrawerPrefs = { layout: "push" };
-
-/**
- * Viewport width (px) at and above which push is allowed when preferred.
- * Below this, effective layout is always overlay (stored preference unchanged).
- */
-export const DRAWER_PUSH_MIN_WIDTH = 1200;
 
 /**
  * Normalize a prefs blob from storage or partial input.
@@ -80,22 +76,4 @@ export function saveContextDrawerPrefs(prefs: ContextDrawerPrefs): void {
   }
 }
 
-/**
- * Effective layout after the narrow-window clamp.
- * Never mutates the stored preference — only returns what the shell should apply.
- * @param pref Stored user preference.
- * @param viewportWidth Current window width in px.
- * @returns "push" only when the user asked for it and the window can afford it.
- */
-export function effectiveDrawerLayout(
-  pref: DrawerLayout,
-  viewportWidth: number,
-): DrawerLayout {
-  if (pref !== "push") {
-    return "overlay";
-  }
-  if (viewportWidth < DRAWER_PUSH_MIN_WIDTH) {
-    return "overlay";
-  }
-  return "push";
-}
+

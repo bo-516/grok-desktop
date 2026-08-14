@@ -51,9 +51,10 @@ export function MarkdownCodeWidget(props: MarkdownCodeWidgetProps) {
   );
   const lines = useCodeHighlight(text, language);
   /*
-   * Flattened, not per-line wrappers: `md-pre` sets whitespace-pre on the
-   * <code>, so explicit "\n" runs lay the block out exactly as the plain-text
-   * fallback did. Extra per-line elements would change selection and copy.
+   * Flattened, not per-line wrappers: `md-pre` / `doc-pre` set pre-wrap on
+   * the <code> (via code-wrap), so explicit "\n" runs still lay the block
+   * out like the plain-text fallback while long lines wrap. Extra per-line
+   * elements would change selection and copy.
    */
   const tokens = useMemo(
     () => (lines ? flattenCodeLines(lines) : undefined),

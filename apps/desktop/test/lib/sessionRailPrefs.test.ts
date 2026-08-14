@@ -5,8 +5,11 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-  applyWorkspaceSessionOrder,
+  collapseWorkspacePreview,
   expandWorkspacePreview,
+} from "@/lib/sessionRailPreview";
+import {
+  applyWorkspaceSessionOrder,
   isPreviewExpanded,
   isSessionPinned,
   isWorkspaceCollapsed,
@@ -184,6 +187,18 @@ describe("sessionRailPrefs", () => {
     assert.equal(isPreviewExpanded(prefs, "/ws"), true);
     prefs = expandWorkspacePreview(prefs, "/ws");
     assert.deepEqual(prefs.previewExpandedWorkspaces, ["/ws"]);
+  });
+
+  it("collapseWorkspacePreview restores preview without collapsing the folder", () => {
+    let prefs = normalizeSessionRailPrefs({
+      previewExpandedWorkspaces: ["/ws", "/other"],
+    });
+    prefs = collapseWorkspacePreview(prefs, "/ws/");
+    assert.equal(isPreviewExpanded(prefs, "/ws"), false);
+    assert.equal(isPreviewExpanded(prefs, "/other"), true);
+    assert.equal(isWorkspaceCollapsed(prefs, "/ws"), false);
+    const same = collapseWorkspacePreview(prefs, "/ws");
+    assert.equal(same, prefs);
   });
 
   it("save/load roundtrip keeps collapsed workspaces across remount", () => {

@@ -6,8 +6,11 @@
 
 import { useCallback, useMemo, useState } from "react";
 import {
-  applyWorkspaceSessionOrder,
+  collapseWorkspacePreview,
   expandWorkspacePreview,
+} from "@/lib/sessionRailPreview";
+import {
+  applyWorkspaceSessionOrder,
   isPreviewExpanded,
   isSessionPinned,
   isWorkspaceCollapsed,
@@ -37,12 +40,23 @@ export type SessionRailWidgetProps = {
    */
   onRequestDelete?: (id: string, title: string) => void;
   /**
-   * Narrow-viewport overlay open flag. Above `sm` the rail is always visible;
-   * below `sm` it is off-canvas until open.
+   * Overlay open flag. When `sidebarDocked` is false the rail is off-canvas
+   * until this is true; when docked the flag is ignored (rail always shows).
    */
   open?: boolean;
+  /**
+   * True when the rail occupies layout space. False applies the off-canvas
+   * slide + backdrop so the main column can keep its minimum width.
+   */
+  sidebarDocked?: boolean;
   /** Close overlay (backdrop / after select). Ignored when always-docked. */
   onClose?: () => void;
+  /**
+   * Hide the rail from the header collapse control (always mounted).
+   * Docked: persist hide. Overlay: same as `onClose`. Missing handler
+   * leaves the button visible but inert (tests / isolated mounts).
+   */
+  onCollapse?: () => void;
   /**
    * Footer "N running" count: sessions currently streaming (AI outputting).
    * Missing → derived from poolEntries (`live && status === "streaming"`).
@@ -66,9 +80,15 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   const selectSession = useSessionStore((s) => s.selectSession);
   const newSession = useSessionStore((s) => s.newSession);
   const removeSession = useSessionStore((s) => s.removeSession);
+  const renameSession = useSessionStore((s) => s.renameSession);
   const reconnect = useSessionStore((s) => s.reconnect);
   const runCli = useSessionStore((s) => s.runCli);
   const [query, setQuery] = useState("");
+  /**
+   * Session id whose title is currently an input. Draft text stays in the
+   * row's uncontrolled field so keystrokes do not re-render the rail.
+   */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
    * Pin + collapse + preview-expand prefs. Seeded from memory cache /
    * localStorage so remounts restore the last collapse state instead of
@@ -78,6 +98,8 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     loadSessionRailPrefs(),
   );
   const railOpen = props.open ?? false;
+  /** Missing means isolated mounts stay docked (tests / story). */
+  const sidebarDocked = props.sidebarDocked ?? true;
 
   /** sessionId → pool status so background chats still show activity. */
   const poolStatusById = useMemo(() => {
@@ -209,12 +231,25 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
 
   /**
    * Reveal sessions past the preview cap for one project ("Show more").
-   * Persisted so remount keeps the full list open until collapse.
+   * Persisted so remount keeps the full list open until "Show less"
+   * or the folder is collapsed.
    * @param workspace Absolute path key for the group.
    */
   const onExpandPreview = useCallback(
     (workspace: string) => {
       commitRailPrefs((prev) => expandWorkspacePreview(prev, workspace));
+    },
+    [commitRailPrefs],
+  );
+
+  /**
+   * Restore the preview cap for one project ("Show less").
+   * Persisted so remount does not re-open the full list.
+   * @param workspace Absolute path key for the group.
+   */
+  const onCollapsePreview = useCallback(
+    (workspace: string) => {
+      commitRailPrefs((prev) => collapseWorkspacePreview(prev, workspace));
     },
     [commitRailPrefs],
   );
@@ -313,7 +348,8 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   );
 
   /**
-   * Whether "Show more" is sticky for this workspace (full list past preview).
+   * Whether "Show more" is sticky for this workspace (full list past preview
+   * until "Show less" or folder collapse).
    * @param workspace Absolute path key for the group.
    */
   const isGroupPreviewExpanded = useCallback(
@@ -321,9 +357,39 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     [railPrefs],
   );
 
+  /**
+   * Open the title input on this row; any other row leaves edit.
+   * @param id Catalog session id.
+   */
+  const beginRename = useCallback((id: string) => {
+    setRenamingId(id);
+  }, []);
+
+  /**
+   * Persist the typed title and close the input. Empty values no-op in the store.
+   * @param id Catalog session id.
+   * @param title Typed value from the row input.
+   */
+  const commitRename = useCallback(
+    (id: string, title: string) => {
+      renameSession(id, title);
+      setRenamingId(null);
+    },
+    [renameSession],
+  );
+
+  /**
+   * Close the title input without writing.
+   */
+  const cancelRename = useCallback(() => {
+    setRenamingId(null);
+  }, []);
+
   return {
     railOpen,
+    sidebarDocked,
     onClose: props.onClose,
+    onCollapse: props.onCollapse,
     query,
     setQuery,
     groups,
@@ -348,6 +414,11 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     isGroupPreviewExpanded,
     onToggleCollapse,
     onExpandPreview,
+    onCollapsePreview,
+    renamingId,
+    beginRename,
+    commitRename,
+    cancelRename,
   };
 }
 

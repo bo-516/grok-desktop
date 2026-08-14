@@ -43,6 +43,20 @@ describe("UI surface presence", () => {
     assert.match(userMsg, /userTextFromBlocks|userImagesFromBlocks/);
     assert.match(userMsg, /data-kind="user"/);
     assert.match(userMsg, /msg-user-attachment-thumb/);
+    // Reserved 80×80 tile + explicit img box so decode cannot reflow the page.
+    assert.match(userMsg, /USER_THUMB_PX/);
+    assert.match(userMsg, /width=\{USER_THUMB_PX\}/);
+    assert.match(userMsg, /height=\{USER_THUMB_PX\}/);
+    assert.match(userMsg, /user-img-\$\{index\}/);
+    const timelineShortcuts = readDesktopRoot("uno/shortcuts.timeline.ts");
+    assert.match(
+      timelineShortcuts,
+      /"msg-user-attachment":\s*"[^"]*min-w-20[^"]*max-w-20/,
+    );
+    assert.match(
+      timelineShortcuts,
+      /"msg-user-attachment-thumb":\s*"[^"]*absolute inset-0/,
+    );
     // Click-to-preview uses the shared ImageLightboxView (composer + history).
     assert.match(userMsg, /ImageLightboxView|handleOpenImage|lightboxIndex/);
     const lightbox = readSrc("widgets/shared/stateless/ImageLightboxView.tsx");
@@ -70,6 +84,10 @@ describe("UI surface presence", () => {
     const input = readSrc("widgets/composer/ComposerInputView.tsx");
     const status = readSrc("widgets/composer/composerStatus.ts");
     assert.match(view, /composer-dock/);
+    // Live-turn strip sits in the dock, not the timeline scroller (answer punch-through).
+    assert.match(view, /TurnStatusWidget/);
+    const timeline = readSrc("widgets/timeline/TimelineView.tsx");
+    assert.doesNotMatch(timeline, /TurnStatusWidget/);
     // Default shortcut copy (incl. @ files) lives in the pure status resolver.
     assert.match(status, /@ files?/);
     // One status path: pure resolver + always-mounted row (no dual sendHint + footer).
@@ -81,6 +99,35 @@ describe("UI surface presence", () => {
     assert.match(view, /ComposerModelMenuView/);
     assert.match(view, /ComposerModeControlView/);
     assert.match(view, /ComposerInputView/);
+    // Mid-turn follow-ups sit ABOVE the composer card, never inside it.
+    assert.match(view, /ComposerQueueView/);
+    assert.match(view, /useComposerQueue/);
+    const queueBeforeCard = view.search(/<ComposerQueueView[\s\S]*?<div className="composer">/);
+    const queueInsideCard = view.search(
+      /<div className="composer">[\s\S]*?<ComposerQueueView/,
+    );
+    assert.ok(queueBeforeCard >= 0, "queue panel must render before .composer");
+    assert.equal(queueInsideCard, -1, "queue panel must not live inside .composer");
+    const queueView = readSrc("widgets/composer/ComposerQueueView.tsx");
+    assert.match(queueView, /Send now/);
+    assert.match(queueView, /aria-label="Edit"/);
+    assert.match(queueView, /aria-label="Cancel"/);
+    assert.match(queueView, /composer-queue-index/);
+    assert.match(queueView, /Queued follow-up \$\{position\}/);
+    const shortcuts = readAllUnoShortcuts();
+    const queueRow = shortcuts.match(/"composer-queue-row":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(queueRow, /\bbg-composer-queue\b/);
+    assert.match(queueRow, /\bborder-line-queue\b/);
+    assert.doesNotMatch(queueRow, /\bbg-elevated\b/);
+    const queueActions =
+      shortcuts.match(/"composer-queue-actions":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(queueActions, /opacity-0/);
+    assert.match(queueActions, /group-hover:\(opacity-100/);
+    const queueStore = readSrc("store/sessionStore.ts");
+    assert.match(queueStore, /sendQueuedPromptNow|sendQueuedNowAction/);
+    assert.match(queueStore, /removeQueuedPrompt/);
+    const banners = readSrc("widgets/shell/ShellBannersView.tsx");
+    assert.doesNotMatch(banners, /prompt\(s\) queued/);
     // Mic chip toggles listening chrome that mirrors into the input field.
     assert.match(view, /toggleDictation/);
     assert.match(view, /aria-pressed=\{widget\.dictating\}/);
@@ -155,6 +202,11 @@ describe("UI surface presence", () => {
     assert.match(src, /ComposerWidget/);
     assert.match(src, /TopNavWidget/);
     assert.match(src, /main-column/);
+    assert.match(src, /main-column-flush/);
+    assert.match(src, /data-sidebar/);
+    assert.match(src, /sidebarDocked/);
+    assert.match(src, /onCollapse=\{shell\.collapseSidebar\}/);
+    assert.match(src, /onToggleRail=\{shell\.toggleRail\}/);
     assert.match(src, /ContextDrawerWidget/);
     assert.match(src, /ShellBannersView/);
     assert.match(src, /useAppShellWidget/);
@@ -193,6 +245,10 @@ describe("UI surface presence", () => {
     assert.match(confirm, /stopImmediatePropagation/);
     assert.match(confirm, /onBackdropClick|onClick/);
     assert.match(confirm, /trapFocusTab/);
+    assert.match(confirm, /confirm-head/);
+    assert.match(confirm, /confirm-subject/);
+    assert.match(confirm, /confirm-actions/);
+    assert.match(confirm, /"btn-danger": isDanger/);
     const plan = readSrc("widgets/PlanPanelView.tsx");
     assert.doesNotMatch(plan, /Approve|plan-approval|sendPrompt|useSessionStore/);
     assert.doesNotMatch(plan, /showApproval|PlanApprovalDock/);
@@ -227,8 +283,21 @@ describe("UI surface presence", () => {
     assert.match(drawer, /Escape/);
     assert.match(drawer, /from "@\/components\/ui\/Checkbox"/);
     assert.match(drawer, /Checkbox/);
+    assert.match(drawer, /data-drawer-width/);
+    assert.match(drawer, /Resize session rail/);
     assert.doesNotMatch(drawer, /type="checkbox"/);
     assert.doesNotMatch(drawer, /showApproval|PlanApprovalDock|sendPrompt/);
+    // Plan|Agents is one drawer: no per-tab width attribute or Agents-only handle.
+    assert.doesNotMatch(drawer, /data-agents-width/);
+    assert.doesNotMatch(drawer, /activeTab === "agents" \? chrome\.drawerWidth/);
+
+    const drawerChrome = readSrc("widgets/contextRail/useContextDrawerChrome.ts");
+    assert.match(drawerChrome, /drawerWidth = dragWidth \?\? storedWidth/);
+    assert.doesNotMatch(drawerChrome, /PLAN_RAIL_WIDTH/);
+    assert.doesNotMatch(
+      drawerChrome,
+      /activeTab === "agents" \? (?:agentsWidth|drawerWidth)/,
+    );
 
     const top = readSrc("widgets/TopNavWidget.tsx");
     assert.match(top, /aria-expanded=\{props\.contextRailOpen\}/);
@@ -238,12 +307,18 @@ describe("UI surface presence", () => {
 
     const shellHook = readSrc("widgets/shell/useAppShellWidget.ts");
     assert.match(shellHook, /loadContextDrawerPrefs|saveContextDrawerPrefs/);
-    assert.match(shellHook, /effectiveDrawerLayout|DRAWER_PUSH_MIN_WIDTH/);
-    assert.match(shellHook, /matchMedia/);
-    // Plan|Agents share push content so tab switches do not jump main width.
+    assert.match(shellHook, /resetForSession|resetAgentsForSession/);
+    assert.match(shellHook, /resolveShellLayout/);
+    assert.match(shellHook, /useSidebarVisibility/);
+    assert.match(shellHook, /collapseSidebar|toggleRail/);
+    assert.match(shellHook, /innerWidth|resize/);
+    const sidebarHook = readSrc("widgets/shell/useSidebarVisibility.ts");
+    assert.match(sidebarHook, /loadSidebarPrefs|saveSidebarPrefs/);
+    assert.match(sidebarHook, /collapseSidebar/);
+    assert.match(sidebarHook, /toggleRail/);
+    // Open rail always pushes (empty Plan/Agents included); no content gate.
     assert.match(shellHook, /contextRailHasContent/);
-    assert.match(shellHook, /agentItemCount/);
-    assert.match(shellHook, /backgroundTasks/);
+    assert.doesNotMatch(shellHook, /agentItemCount/);
     // Reject the old per-active-tab content checks (caused Plan→Agents resize).
     assert.doesNotMatch(
       shellHook,
@@ -256,9 +331,11 @@ describe("UI surface presence", () => {
 
     const prefs = readSrc("lib/contextDrawerPrefs.ts");
     assert.match(prefs, /export function normalizeContextDrawerPrefs/);
-    assert.match(prefs, /export function effectiveDrawerLayout/);
     assert.match(prefs, /export function loadContextDrawerPrefs/);
     assert.match(prefs, /export function saveContextDrawerPrefs/);
+    const shellLayout = readSrc("lib/shellLayout.ts");
+    assert.match(shellLayout, /export function resolveShellLayout/);
+    assert.match(shellLayout, /MAIN_COLUMN_MIN_WIDTH/);
 
     const chrome = readDesktopRoot("uno/shortcuts.chrome.ts");
     assert.match(chrome, /"context-drawer":/);
@@ -275,11 +352,11 @@ describe("UI surface presence", () => {
     // *-railed still eases padding/right while the drawer translates out.
     assert.match(
       shellShortcuts,
-      /"main-body":\s*[\s\S]*?transition-\[padding-right\][\s\S]*?duration-slow/,
+      /"main-body":\s*[\s\S]*?transition-padding-right[\s\S]*?duration-slow/,
     );
     assert.match(
       shellShortcuts,
-      /"top-nav":\s*[\s\S]*?transition-\[right\][\s\S]*?duration-slow/,
+      /"top-nav":\s*[\s\S]*?transition-left-right[\s\S]*?duration-slow/,
     );
     assert.doesNotMatch(
       shellShortcuts,
@@ -288,26 +365,37 @@ describe("UI surface presence", () => {
 
     const uno = readDesktopRoot("uno.config.ts");
     assert.match(uno, /translate-x-rail/);
+    assert.match(uno, /"transition-padding-right"/);
+    assert.match(uno, /"transition-left-right"/);
+    assert.match(uno, /"transition-margin-left"/);
+    assert.match(uno, /"min-h-topnav"/);
+    assert.match(uno, /float:\s*"var\(--shadow-float\)"/);
     assert.match(uno, /translate-x-full/);
     assert.match(uno, /translate-x-none/);
     assert.match(uno, /"right-rail"/);
     assert.match(uno, /"pr-rail"/);
 
     const colors = readSrc("styles/defineColor.css");
+    assert.match(colors, /--shadow-float:/);
     assert.match(colors, /--rail-right-width:\s*280px/);
+    assert.match(colors, /--main-column-min-width:\s*560px/);
+    assert.match(colors, /--sidebar-width:\s*272px/);
     assert.match(colors, /--preview-width-default:\s*560px/);
     assert.match(colors, /--preview-width-min:\s*420px/);
     assert.match(colors, /--preview-width-max:\s*900px/);
+    assert.match(colors, /--agents-width-default:\s*300px/);
+    assert.match(colors, /--agents-width-min:\s*200px/);
+    assert.match(colors, /--agents-width-max:\s*432px/);
 
     const panels = readSrc("widgets/shell/shellPanels.ts");
     assert.match(panels, /ContextRailId\s*=\s*"plan"\s*\|\s*"preview"/);
     assert.match(panels, /contextRailWidthPx/);
     assert.match(panels, /export function contextRailHasContent/);
-    // Shared companion: either Plan or Agents content drives both tabs.
-    assert.match(
-      panels,
-      /rail === "plan" \|\| rail === "agents"[\s\S]*?planCount > 0 \|\| agentItemCount > 0/,
-    );
+    // Open rail always reserves push space (empty companion included).
+    assert.match(panels, /return rail !== null/);
+    assert.doesNotMatch(panels, /planCount > 0 \|\| agentItemCount > 0/);
+    // Plan and Agents share companionWidth — tab switch must not change push px.
+    assert.match(panels, /rail === "plan" \|\| rail === "agents"/);
 
     const previewDrawer = readSrc("widgets/preview/PreviewDrawerWidget.tsx");
     assert.match(previewDrawer, /id="preview-rail"/);
@@ -322,6 +410,11 @@ describe("UI surface presence", () => {
 
     const previewSource = readSrc("widgets/preview/usePreviewSource.ts");
     assert.match(previewSource, /buildTurnChangeSetById/);
+    // Click-to-refresh must keep the last file painted (no empty loading flash).
+    assert.match(previewSource, /beginFilePreviewLoad/);
+    assert.match(previewSource, /refreshing/);
+    assert.match(previewDrawer, /PreviewFileStackView/);
+    assert.match(previewDrawer, /preview-refresh-veil|PreviewFileStackView/);
 
     const shellPanelsSrc = readSrc("widgets/shell/shellPanels.ts");
     // Preview rail must not be auto-stolen by plan open.
@@ -338,6 +431,9 @@ describe("UI surface presence", () => {
     assert.match(shortcuts, /"btn-ghost":/);
     assert.match(shortcuts, /"side-panel-close":/);
     assert.match(shortcuts, /"modal-panel":/);
+    assert.match(shortcuts, /"confirm-head":/);
+    assert.match(shortcuts, /"confirm-subject":/);
+    assert.match(shortcuts, /"confirm-actions":/);
   });
 
   it("top-nav shortcuts cover slim chrome only (no mode tabs)", () => {
@@ -347,7 +443,9 @@ describe("UI surface presence", () => {
     const shortcutNames = [
       "top-nav",
       "top-nav-left",
+      "top-nav-session",
       "top-nav-session-title",
+      "top-nav-session-id",
       "top-nav-sync",
       "top-nav-right",
       "top-nav-icon-btn",
@@ -364,7 +462,9 @@ describe("UI surface presence", () => {
     const usedInTop = [
       "top-nav",
       "top-nav-left",
+      "top-nav-session",
       "top-nav-session-title",
+      "top-nav-session-id",
       "top-nav-sync",
       "top-nav-right",
       "top-nav-icon-btn",
@@ -374,6 +474,14 @@ describe("UI surface presence", () => {
       assert.match(top, new RegExp(name), `TopNav should use ${name}`);
     }
     assert.match(menuView, /top-nav-menu/);
+    assert.match(menuView, /top-nav-menu-row/);
+    assert.match(menuView, /top-nav-menu-kbd/);
+    // Labels must not wrap ("Fork session" onto Rewind) — see shortcuts.
+    assert.match(shortcuts, /"top-nav-menu-label":[\s\S]*?whitespace-nowrap/);
+    assert.match(shortcuts, /"top-nav-menu-list":[\s\S]*?w-max/);
+    // Shortcut chords (⌘N) must not sit in font-mono — ⌘ reads as #N.
+    assert.match(shortcuts, /"top-nav-menu-kbd":[\s\S]*?font-sans/);
+    assert.match(shortcuts, /"top-nav-menu-kbd":[\s\S]*?gap-1/);
     // Left slot must grow + clip so title does not collapse under right nav
     assert.match(shortcuts, /"top-nav-left":[\s\S]*?flex-1[\s\S]*?overflow-hidden/);
     // Removed IA: no top-nav mode chip or Chat|Plan tablist (permanent chrome)
@@ -393,11 +501,29 @@ describe("UI surface presence", () => {
   it("settings sticky apply, dirty helpers, no ticket ids, tokenized controls", () => {
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
     const security = readSrc("widgets/settings/SettingsSecuritySectionView.tsx");
+    const account = readSrc("widgets/settings/SettingsAccountSectionView.tsx");
     const shell = readSrc("widgets/SidePanelShell.tsx");
     const draft = readSrc("lib/settingsDraft.ts");
     const shortcuts = readAllUnoShortcuts();
     assert.match(shell, /footer/);
+    assert.match(shell, /toolbar/);
+    assert.match(shell, /stickySection/);
     assert.match(shortcuts, /"side-panel-footer":/);
+    assert.match(shortcuts, /"side-panel-toolbar":/);
+    assert.match(shortcuts, /"side-panel-sticky":/);
+    // Account is pinned outside the scroll body, not a body child.
+    assert.match(settings, /stickySection=/);
+    assert.match(settings, /SettingsAccountSectionView/);
+    assert.match(settings, /loggedIn=\{loggedIn\}/);
+    assert.match(settings, /environment\?\.authed === true/);
+    // Login and Logout are mutually exclusive (never both in the same tree).
+    assert.match(account, /loggedIn \? \(/);
+    assert.match(account, /auth_logout/);
+    assert.match(account, /auth_login/);
+    assert.doesNotMatch(
+      account,
+      /onRunCli\("auth_login"\)[\s\S]*onRunCli\("auth_logout"\)/,
+    );
     assert.match(settings, /isSettingsDraftDirty|dirty/);
     assert.match(settings, /Discard unsaved|requestClose/);
     assert.doesNotMatch(settings, /J-06/);
@@ -408,6 +534,11 @@ describe("UI surface presence", () => {
     const checkbox = readSrc("components/ui/Checkbox.tsx");
     assert.match(checkbox, /type="checkbox"/);
     assert.match(checkbox, /ui-check/);
+    // Face wrapper centers the 15px box on the first label line (1lh).
+    assert.match(checkbox, /ui-check-face/);
+    const chrome = readDesktopRoot("uno/shortcuts.chrome.ts");
+    assert.match(chrome, /ui-check-face/);
+    assert.match(chrome, /h-\[1lh\]/);
   });
 
   it("focus-visible tokens and FadeContent reduced-motion / default readable", () => {
@@ -438,10 +569,12 @@ describe("UI surface presence", () => {
     const shortcuts = readAllUnoShortcuts();
     const sideNav = readDesktopRoot("uno/shortcuts.sidenav.ts");
     const base = readSrc("styles/base.css");
-    // ≤900px: rail overlays so tablet/narrow laptop keep chat width.
-    assert.match(shortcuts, /"main-column":[\s\S]*?max-\[900px\]:ml-0/);
-    assert.match(shortcuts, /"top-nav":[\s\S]*?max-\[900px\]:left-0/);
+    // Off-canvas rail is a JS-driven class, not a 900px media query, so the
+    // main column can undock whenever the open right rail would crush it.
+    assert.match(shortcuts, /"main-column-flush":\s*"ml-0"/);
+    assert.match(shortcuts, /"top-nav-flush":\s*"left-0"/);
     assert.match(shortcuts, /"top-nav-rail-btn":/);
+    assert.match(shortcuts, /"side-nav-offcanvas":/);
     // Narrow shell lives only in Uno (no duplicate base.css media query).
     assert.doesNotMatch(base, /@media \(max-width:\s*639px\)/);
     /*
@@ -456,12 +589,15 @@ describe("UI surface presence", () => {
     // the broken spellings on purpose, so a whole-file negative would trip.
     const sideNavClasses =
       sideNav.match(/"side-nav":\s*\n?\s*"([^"]+)"/)?.[1] ?? "";
-    assert.match(sideNavClasses, /max-\[900px\]:translate-x-full-left/);
-    assert.match(
-      sideNavClasses,
-      /max-\[900px\]:data-\[open=true\]:translate-x-none/,
-    );
+    const offcanvasClasses =
+      sideNav.match(/"side-nav-offcanvas":\s*\n?\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(offcanvasClasses, /translate-x-full-left/);
+    assert.match(offcanvasClasses, /data-\[open=true\]:translate-x-none/);
     assert.doesNotMatch(sideNavClasses, /translate-x-\[-100%\]|translate-x-0\b/);
+    assert.doesNotMatch(
+      offcanvasClasses,
+      /translate-x-\[-100%\]|translate-x-0\b/,
+    );
     assert.match(
       readDesktopRoot("uno.config.ts"),
       /\["translate-x-full-left",\s*\{\s*transform:\s*"translateX\(-100%\)"\s*\}\]/,
@@ -470,6 +606,14 @@ describe("UI surface presence", () => {
     assert.match(top, /onToggleRail|top-nav-rail-btn/);
     const rail = readSrc("widgets/sessionRail/SessionRailView.tsx");
     assert.match(rail, /data-open|onClose|railOpen/);
+    // Header collapse is always mounted (right of "Grok"), not hamburger-only.
+    assert.match(rail, /side-nav-collapse-btn/);
+    assert.match(rail, /onCollapse/);
+    assert.match(rail, /PanelLeftClose/);
+    assert.match(
+      rail,
+      /<div className="side-nav-header">[\s\S]*?side-nav-collapse-btn/,
+    );
     assert.match(
       sideNav,
       /"side-nav-search":[\s\S]*?focus-visible:\(outline-none ring-2/,
@@ -531,14 +675,31 @@ describe("UI surface presence", () => {
     assert.match(label, /path-label-dir/);
     assert.match(label, /path-label-base/);
     const shortcuts = readAllUnoShortcuts();
-    // Only the directory half may be ellipsized — the file name stays whole.
+    // One-line chips: only the directory half may be ellipsized.
     assert.match(shortcuts, /"path-label-dir":[^"]*"[^"]*text-ellipsis/);
     assert.match(shortcuts, /"path-label-base":[^"]*"[^"]*shrink-0/);
+    // Preview head uses the wrap variants so a long file name is not clipped.
+    assert.match(shortcuts, /"path-label-wrap":/);
+    assert.match(shortcuts, /"path-label-base-wrap":[^"]*"[^"]*break-all/);
+    const previewTitle =
+      shortcuts.match(/"preview-title":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(previewTitle, /overflow-wrap:anywhere/);
+    assert.doesNotMatch(previewTitle, /whitespace-nowrap/);
+    const previewCodeTable =
+      shortcuts.match(/"preview-code-table":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(previewCodeTable, /table-fixed/);
+    const previewCodeScroll =
+      shortcuts.match(/"preview-code-scroll":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(previewCodeScroll, /overflow-x-hidden/);
+    assert.doesNotMatch(previewCodeScroll, /overflow-auto/);
     // Preview drawer head speaks the same path language as the timeline.
     const previewHead = readSrc("widgets/preview/PreviewHeadView.tsx");
     assert.match(previewHead, /PathLabelView/);
+    assert.match(previewHead, /display=\{display\} wrap/);
     assert.match(previewHead, /data-path=\{display\.full\}/);
-    assert.match(previewHead, /onDoubleClick=\{onCopyPath\}/);
+    assert.match(previewHead, /onDoubleClick=\{handleDoubleClick\}/);
+    assert.match(previewHead, /CopiedCursorFlashView/);
+    assert.doesNotMatch(previewHead, /path-copied-flag/);
     // Dead copy-class helper is gone now that the head owns a real copy path.
     assert.doesNotMatch(previewHead, /previewCopyClass/);
     const previewDrawer = readSrc("widgets/preview/PreviewDrawerWidget.tsx");
@@ -560,6 +721,11 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(turnIndex, /ProcessGroupView/);
     const grouping = readSrc("lib/turnGrouping.ts");
     assert.match(grouping, /groupTimelineTurns|isTurnLive/);
+    const wrap = readSrc("lib/goalWrapUp.ts");
+    assert.match(wrap, /resolveGoalWrapUp|findGoalWrapUpUnitIndex/);
+    const turnBlock = readSrc("widgets/timeline/TurnBlockWidget.tsx");
+    assert.match(turnBlock, /fallbackAnswer/);
+    assert.match(turnAnswer, /wrapUp/);
   });
 
   it("React Bits adaptations ship and wire into shell surfaces", () => {
@@ -591,18 +757,25 @@ describe("UI surface presence", () => {
   it("overview, agents rail, tool group, fork/rewind surfaces exist", () => {
     const app = readSrc("App.tsx");
     assert.match(app, /MultiSessionOverviewWidget/);
+    const overview = readSrc("widgets/MultiSessionOverviewWidget.tsx");
+    assert.match(overview, /buildOverviewSessions/);
+    // Search pins in the shell toolbar, not inside the scrolling body.
+    assert.match(overview, /toolbar=\{/);
+    assert.doesNotMatch(overview, /pe\?\.status \?\? c\.status/);
     assert.doesNotMatch(app, /TasksPanelWidget/);
     assert.match(app, /ContextDrawerWidget/);
     assert.match(app, /buildRewindCommand/);
-    const agents = readSrc("widgets/agentsRail/AgentsRailWidget.tsx");
-    assert.match(agents, /AgentsRailView/);
+    const agents = readSrc("widgets/agentsRail/AgentsPanelWidget.tsx");
+    assert.match(agents, /AgentsRosterView|useAgentsPanelWidget/);
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
     assert.match(menu, /forkSession|runSessionMenuAction/);
     const timeline = readSrc("widgets/timeline/TimelineView.tsx");
     const hook = readSrc("widgets/timeline/useTimelineWidget.ts");
+    const model = readSrc("widgets/timeline/useTimelineModel.ts");
     const pipeline = readSrc("lib/timelinePipeline.ts");
     assert.match(pipeline, /buildTimelineRenderUnits/);
-    assert.match(hook, /buildTimelineRenderUnits/);
+    assert.match(hook, /useTimelineModel/);
+    assert.match(model, /buildTimelineRenderUnits/);
     assert.match(timeline, /TurnBlockWidget|TurnStepView/);
     // Residual tool/thought groups must not keep a parallel JSX tree.
     assert.doesNotMatch(timeline, /ToolGroupView|ThoughtGroupView/);
@@ -623,8 +796,44 @@ describe("UI surface presence", () => {
     assert.match(paletteLib, /toggle_theme|Toggle light/);
     assert.match(paletteLib, /prefill_imagine|\/imagine|usage|privacy|release-notes/);
     assert.match(paletteLib, /imagine-video|prefillComposer/);
+    // Kind / title / description share one column template (ACTION vs COMMAND
+    // must not shift the text columns).
+    const paletteChrome = readDesktopRoot("uno/shortcuts.chrome.ts");
+    assert.match(
+      paletteChrome,
+      /palette-item[\s\S]{0,280}?grid-cols-\[5\.5rem_minmax\(0,1fr\)_minmax\(0,1fr\)\]/,
+    );
+    const paletteWidget = readSrc("widgets/CommandPaletteWidget.tsx");
+    assert.match(paletteWidget, /CommandPaletteItemView/);
+    assert.doesNotMatch(paletteWidget, /sessionsToPaletteItems/);
+    const paletteHook = readSrc("widgets/useCommandPaletteWidget.ts");
+    assert.match(paletteHook, /buildPaletteCatalog/);
+    assert.match(paletteHook, /selectMcpRows|selectSkillRows/);
+    assert.doesNotMatch(paletteHook, /sessionsToPaletteItems/);
+    const paletteRow = readSrc("widgets/CommandPaletteItemView.tsx");
+    assert.match(paletteRow, /OverflowTextView/);
+    assert.match(paletteLib, /kind: \"mcp\"|kind: \"skill\"/);
+    assert.match(paletteLib, /buildPaletteCatalog/);
     const composer = readSrc("widgets/composer/useComposerWidget.ts");
-    assert.match(composer, /grok-desktop:prefill-composer/);
+    assert.match(composer, /useComposerFocusEvents/);
+    assert.match(composer, /useComposerSlashCatalog/);
+    const slashHook = readSrc("widgets/composer/useComposerSlashCatalog.ts");
+    assert.match(slashHook, /resolveSlashCatalog/);
+    assert.match(slashHook, /loadEnv\(runCli\)/);
+    const slashLib = readSrc("lib/slashCatalog.ts");
+    assert.match(slashLib, /withCachedSlashCatalog/);
+    assert.match(slashLib, /desktopSlashCommands/);
+    assert.match(readSrc("lib/slashBuiltins.ts"), /name: \"model\"|name: \"effort\"/);
+    assert.match(composer, /bindTryLocalSlashFromBar|tryLocalSlash/);
+    assert.match(composer, /applyLocalSlashDraftFromBar|applyArgDraft/);
+    assert.match(paletteLib, /prefill_model|prefill_effort/);
+    assert.doesNotMatch(
+      readSrc("widgets/composer/composerCompletion.ts"),
+      /Waiting for live grok-build to provide commands/,
+    );
+    const composerFocus = readSrc("widgets/composer/useComposerFocusEvents.ts");
+    assert.match(composerFocus, /PREFILL_COMPOSER_EVENT|prefill-composer/);
+    assert.match(composerFocus, /FOCUS_COMPOSER_EVENT|focus-composer/);
     const diff = readSrc("widgets/preview/DiffReviewWidget.tsx");
     assert.match(diff, /applyHunkDecisions/);
     assert.match(diff, /writeWorkspaceFile|Accept|Reject/);
@@ -657,11 +866,27 @@ describe("UI surface presence", () => {
     assert.match(appearance, /COLOR_PALETTE_OPTIONS|UI color|Appearance/);
     // F-CTX-01: Settings toggle + composer ring left of Send.
     assert.match(appearance, /Show context usage|showContextUsage/);
+    assert.match(appearance, /Show weekly remaining|showWeeklyUsage/);
     assert.match(settings, /saveContextUsagePrefs|showContextUsage/);
+    assert.match(settings, /showWeeklyUsage|setWeeklyUsageVisible/);
     const composerWidget = readSrc("widgets/composer/ComposerWidget.tsx");
     assert.match(composerWidget, /ComposerContextUsageView|contextUsageDisplay/);
+    assert.match(composerWidget, /ComposerWeeklyUsageView|weeklyUsageDisplay/);
+    const contextUsageHook = readSrc("widgets/composer/useContextUsageDisplay.ts");
+    assert.match(contextUsageHook, /isContextUsageReady/);
+    const usageRevealCss = readBaseStyles();
+    assert.match(usageRevealCss, /@keyframes composer-usage-reveal/);
+    assert.match(usageRevealCss, /margin-inline-end:\s*-0\.375rem/);
+    const contextTip = readSrc("widgets/composer/ComposerContextUsageView.tsx");
+    assert.match(contextTip, /tooltip\.occupancyLine/);
+    assert.match(contextTip, /tooltip\.usageLine/);
+    assert.match(contextTip, /composer-usage-tip-divider/);
+    assert.match(contextTip, /onMouseDown/);
+    const weeklyTipView = readSrc("widgets/composer/ComposerWeeklyUsageView.tsx");
+    assert.match(weeklyTipView, /onMouseDown/);
     const contextPrefs = readSrc("lib/contextUsagePrefs.ts");
     assert.match(contextPrefs, /showContextUsage|CONTEXT_USAGE_PREFS_KEY/);
+    assert.match(contextPrefs, /showWeeklyUsage/);
     /*
      * The usage tip must center on the ring. presetUno's own translate/scale
      * utilities compose through --un-* vars that only its preflight defines,
@@ -670,11 +895,40 @@ describe("UI surface presence", () => {
      * shortcut has to come from a plain rule in uno.config.
      */
     const composerShortcutSrc = readDesktopRoot("uno/shortcuts.composer.ts");
+    const usageSvg =
+      composerShortcutSrc.match(/"composer-usage-svg":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(usageSvg, /\bw-14px\b/);
+    assert.match(usageSvg, /\bh-14px\b/);
     const usageTip =
       composerShortcutSrc.match(/"composer-usage-tip":\s*"([^"]+)"/)?.[1] ?? "";
     assert.match(usageTip, /\bleft-1\/2\b/);
     assert.match(usageTip, /\btranslate-x-center\b/);
+    assert.match(usageTip, /\boverflow-hidden\b/);
     assert.doesNotMatch(usageTip, /-translate-x-1\/2/);
+    const usageTipLine =
+      composerShortcutSrc.match(/"composer-usage-tip-line":\s*"([^"]+)"/)?.[1] ??
+      "";
+    assert.match(usageTipLine, /\bbreak-words\b/);
+    assert.doesNotMatch(usageTipLine, /whitespace-nowrap/);
+    // Click focus must not pin the bubble; keyboard still uses :focus-visible.
+    assert.match(usageTip, /group-hover:opacity-100/);
+    assert.match(usageTip, /group-focus-visible:opacity-100/);
+    assert.doesNotMatch(usageTip, /group-focus-within/);
+    const weeklyTip =
+      composerShortcutSrc.match(/"composer-weekly-tip":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(weeklyTip, /group-hover:opacity-100/);
+    assert.match(weeklyTip, /group-focus-visible:opacity-100/);
+    assert.doesNotMatch(weeklyTip, /group-focus-within/);
+    // Bar clusters must not shrink (min-w-0 let Weekly paint over Mic).
+    const composerBarLeft =
+      composerShortcutSrc.match(/"composer-bar-left":\s*"([^"]+)"/)?.[1] ?? "";
+    const composerBarRight =
+      composerShortcutSrc.match(/"composer-bar-right":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(composerBarLeft, /\bshrink-0\b/);
+    assert.match(composerBarRight, /\bshrink-0\b/);
+    assert.match(composerBarRight, /\bml-auto\b/);
+    assert.doesNotMatch(composerBarLeft, /\bmin-w-0\b/);
+    assert.doesNotMatch(composerBarRight, /\bmin-w-0\b/);
     const unoConfig = readDesktopRoot("uno.config.ts");
     assert.match(
       unoConfig,
@@ -692,6 +946,8 @@ describe("UI surface presence", () => {
     assert.match(input, /onDrop|onDragOver/);
     assert.match(input, /data-drag-over|data-state/);
     assert.match(input, /composer-attachment-thumb|attachmentPreviewSrc/);
+    assert.match(input, /COMPOSER_THUMB_PX/);
+    assert.match(input, /width=\{COMPOSER_THUMB_PX\}/);
     assert.match(input, /canInlinePreviewAttachment|openAttachmentExternally/);
     assert.match(input, /ImageLightboxView|handleOpenAttachment/);
     assert.match(input, /onRemoveAttachment/);
@@ -707,6 +963,15 @@ describe("UI surface presence", () => {
     assert.match(
       composerShortcuts,
       /"composer-attach-input":\s*"[^"]*fixed[^"]*h-0[^"]*w-0/,
+    );
+    // Locked 56×56 tile + out-of-flow thumb (large paste must not reflow the dock).
+    assert.match(
+      composerShortcuts,
+      /"composer-attachment":\s*"[^"]*min-w-14[^"]*max-w-14/,
+    );
+    assert.match(
+      composerShortcuts,
+      /"composer-attachment-thumb":\s*"[^"]*absolute inset-0/,
     );
     assert.doesNotMatch(composerShortcuts, /composer-attach-input[\s\S]{0,200}clip:rect/);
     assert.match(hook, /useComposerAttachments|agentCapabilities/);
@@ -753,6 +1018,8 @@ describe("UI surface presence", () => {
     assert.match(newSessionFn, /send a message to start|local New chat draft/i);
     assert.doesNotMatch(newSessionFn, /startLiveBridgeSession/);
     assert.doesNotMatch(newSessionFn, /forceNew/);
+    // Every New chat entry (rail / ⌘N / palette / ⋯) focuses the composer.
+    assert.match(newSessionFn, /focusComposer/);
     const prompt = readSrc("store/sessionStorePrompt.ts");
     assert.match(prompt, /ensureSessionForSend|forceNew:\s*true/);
     assert.match(prompt, /waitForCanvasSessionId|creatingSession/);
@@ -779,12 +1046,18 @@ describe("UI surface presence", () => {
     assert.match(loose, /No project/);
     assert.match(loose, /loose-group/);
     assert.doesNotMatch(loose, /useSessionStore/);
+    // Quiet section label (chevron + caps + count). A 14px stroke glyph next
+    // to 10px tracked type reads as a fake folder and looks noisy.
+    assert.doesNotMatch(loose, /MessagesSquare|loose-group-icon/);
     // Pin is per-session, not per folder.
     assert.match(railHook, /orderGroupsBySessionPin/);
     assert.match(railHook, /toggleCollapsedWorkspace|onToggleCollapse/);
     assert.match(railHook, /loadSessionRailPrefs|saveSessionRailPrefs/);
     assert.match(railHook, /expandWorkspacePreview|onExpandPreview/);
+    assert.match(railHook, /collapseWorkspacePreview|onCollapsePreview/);
     assert.match(railHook, /togglePinnedSession|onTogglePin/);
+    assert.match(railHook, /renameSession/);
+    assert.match(railHook, /beginRename|commitRename/);
     assert.doesNotMatch(railHook, /togglePinnedWorkspace|pinnedWorkspaces/);
     assert.match(rail, /New chat/);
     assert.match(railHook, /selectSession/);
@@ -861,13 +1134,24 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(groupView, /onTogglePin|project-group-pin/);
     assert.match(groupView, /project-group-chevron|ChevronDown/);
     assert.match(groupView, /FolderOpen|Folder/);
-    assert.match(groupView, /Show .+ more|Show more/);
+    assert.match(groupView, /Show .+ more|Show more|SessionRailGroupMoreView/);
     assert.match(groupView, /PROJECT_SESSION_PREVIEW/);
+    assert.match(groupView, /PROJECT_SESSION_EXPANDED_CAP/);
     assert.match(groupView, /onToggleCollapse/);
-    // Collapse / "Show more" are controlled from rail prefs (not local useState).
+    // Collapse / "Show more" / "Show less" are controlled from rail prefs.
     assert.match(groupView, /previewExpanded/);
     assert.match(groupView, /onExpandPreview/);
+    assert.match(groupView, /onCollapsePreview/);
+    assert.match(groupView, /project-group-session-list-scroll/);
     assert.doesNotMatch(groupView, /useState/);
+    const moreView = readSrc("widgets/SessionRailGroupMoreView.tsx");
+    assert.match(moreView, /Show \{.*\} more/);
+    assert.match(moreView, /Show less/);
+    assert.doesNotMatch(moreView, /useState/);
+    const looseGroup = readSrc("widgets/SessionRailNoProjectGroupView.tsx");
+    assert.match(looseGroup, /onCollapsePreview/);
+    assert.match(looseGroup, /SessionRailGroupMoreView/);
+    assert.match(looseGroup, /project-group-session-list-scroll/);
     // Title | trailing actions (pin + meta). No leading status dot.
     const sessionRow = readSrc("widgets/SessionRailSessionRowView.tsx");
     assert.match(sessionRow, /sess-actions/);
@@ -875,6 +1159,15 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(sessionRow, /sess-status/);
     assert.match(sessionRow, /sess-pin/);
     assert.match(sessionRow, /onTogglePin/);
+    // Inline rename: double-click title + reserved control next to pin.
+    assert.match(sessionRow, /sess-rename/);
+    assert.match(sessionRow, /onBeginRename/);
+    assert.match(sessionRow, /onCommitRename/);
+    assert.match(sessionRow, /SessionRailSessionTitleView/);
+    const titleView = readSrc("widgets/SessionRailSessionTitleView.tsx");
+    assert.match(titleView, /sess-title-input/);
+    assert.match(titleView, /onDoubleClick/);
+    assert.doesNotMatch(titleView, /style=\{\{/);
     // Drag reorder within a project (user order > recency auto-sort).
     assert.match(sessionRow, /draggable/);
     assert.match(sessionRow, /onReorder/);
@@ -892,10 +1185,34 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(shortcuts, /"sess-status"/);
     assert.match(
       shortcuts,
-      /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-normal[\s\S]*?leading-snug/,
+      /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-normal/,
     );
+    // text-nav owns line-height; a leading-* here loses on Uno emit order
+    // and a tight --line-height-nav-item clips descenders (g/y/p).
+    const groupNameShortcut =
+      shortcuts.match(/"project-group-name":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.doesNotMatch(groupNameShortcut, /\bleading-/);
+    const sessTitleShortcut =
+      shortcuts.match(/"sess-title":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(sessTitleShortcut, /\btext-nav\b/);
+    assert.doesNotMatch(sessTitleShortcut, /\bleading-/);
+    const tokens = readSrc("styles/defineColor.css");
+    assert.match(tokens, /--line-height-nav-item:\s*20px;/);
     assert.match(shortcuts, /"project-section-label":/);
     assert.match(shortcuts, /"project-group-sessions":/);
+    assert.match(shortcuts, /"project-group-session-list":/);
+    assert.match(
+      shortcuts,
+      /"project-group-session-list-scroll":[\s\S]*?max-h-\[calc\(36px\*8/,
+    );
+    {
+      const moreChip =
+        shortcuts.match(/"project-group-more":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.match(moreChip, /appearance-none/);
+      assert.match(moreChip, /rounded-7px/);
+      assert.match(moreChip, /overflow-hidden/);
+      assert.match(moreChip, /h-\[28px\]/);
+    }
     // Active selection is elevated fill + medium title only (no border ring /
     // left accent bar / inset crescent — those fight rounded-7px and read
     // loud on the rail).
@@ -938,6 +1255,20 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(countShortcut[1], /group-hover:opacity-0/);
     assert.match(shortcuts, /"sess-pin":/);
     assert.match(shortcuts, /"sess-pin-active":/);
+    assert.match(shortcuts, /"sess-rename":/);
+    assert.match(shortcuts, /"sess-title-input":/);
+    // Rename field must not grow the row or paint a focus ring / border.
+    const titleInputShortcut =
+      shortcuts.match(/"sess-title-input":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(titleInputShortcut, /border-none/);
+    assert.match(titleInputShortcut, /h-\[20px\]/);
+    assert.doesNotMatch(titleInputShortcut, /ring-2|shadow-\[/);
+    // Reserved rename slot (same 16×28 as pin) so hover-reveal does not jitter.
+    assert.match(shortcuts, /"sess-rename":[\s\S]*?w-4 h-7/);
+    assert.match(
+      shortcuts,
+      /"sess-row-editing":[\s\S]*?\[&_\.sess-rename\]:\(opacity-100/,
+    );
     // Pinned visibility must win over base `.sess-pin { opacity:0 }` via parent
     // selector — same-element active class alone loses on Uno cascade order.
     assert.match(
@@ -958,7 +1289,15 @@ describe("UI surface presence", () => {
     // Close control must zero native button padding; ≥28px hit target is centered.
     assert.match(shortcuts, /"sess-remove":[\s\S]*?p-0/);
     assert.match(shortcuts, /"sess-remove":[\s\S]*?justify-center/);
-    assert.match(shortcuts, /"sess-pin":[\s\S]*?w-7 h-7/);
+    assert.match(shortcuts, /"sess-pin":[\s\S]*?w-4 h-7/);
+    // Hover-reveal pin / time / remove snap — no opacity transition.
+    const pinShortcut = shortcuts.match(/"sess-pin":\s*"([^"]+)"/)?.[1] ?? "";
+    const timeShortcut = shortcuts.match(/"sess-time":\s*"([^"]+)"/)?.[1] ?? "";
+    const removeShortcut =
+      shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.doesNotMatch(pinShortcut, /transition-opacity|duration-reveal/);
+    assert.doesNotMatch(timeShortcut, /transition-opacity|duration-reveal/);
+    assert.doesNotMatch(removeShortcut, /transition-opacity|duration-reveal/);
   });
 
   it("tool card normalizes array content and plan empty is en-US", () => {
@@ -1000,11 +1339,21 @@ describe("UI surface presence", () => {
     assert.match(list, /PathLabelView|toPathDisplay/);
     assert.match(list, /hideToolbar/);
     // hideToolbar is intentional when chrome owns prefs — chrome must still expose them.
-    const chrome = readSrc("widgets/preview/DiffFileSectionView.tsx");
+    const fileSection = readSrc("widgets/preview/DiffFileSectionView.tsx");
+    assert.match(fileSection, /PathLabelView/);
+    const chrome = readSrc("widgets/preview/DiffChangeListChrome.tsx");
     // Show full file is a sticky toggle (preferFullFile) — off returns to change-only fragments.
     assert.match(chrome, /Wrap|Dual|Show full file|onViewPrefsChange/);
     assert.match(chrome, /preferFullFile/);
-    assert.match(chrome, /PathLabelView/);
+    // Icon + label share each button; CSS picks the face from leftover width.
+    assert.match(chrome, /preview-change-summary-action-icon/);
+    assert.match(chrome, /preview-change-summary-action-label/);
+    assert.match(chrome, /UnfoldVertical|WrapText|Columns2|ChevronsDownUp/);
+    // Summary counts stay nowrap; host measures the strip for sticky offset.
+    assert.match(chrome, /preview-change-summary-label/);
+    assert.match(chrome, /chromeRef/);
+    assert.match(list, /ResizeObserver|offsetHeight|--preview-summary-h/);
+    assert.doesNotMatch(list, /"--preview-summary-h"[^}]*2rem/);
 
     const shortcuts = readDesktopRoot("uno/shortcuts.preview.ts");
     // Horizontal scroll only on the shared container, not per-line text.
@@ -1014,6 +1363,57 @@ describe("UI surface presence", () => {
     );
     assert.match(shortcuts, /preview-diff-scroll-nowrap|preview-diff-text-nowrap":\s*"whitespace-pre min-w-max/);
     assert.match(shortcuts, /preview-diff-row":[\s\S]*?text-12px/);
+    // Sticky file heads stay opaque (surface + opaque hover) — titlebar /
+    // white-faint are translucent and let the alignment banner bleed through.
+    {
+      const fileHead =
+        shortcuts.match(/"preview-change-file-head":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.match(fileHead, /color-diff-file-head-bg/);
+      assert.match(fileHead, /hover:bg-\[var\(--color-diff-file-head-hover\)\]/);
+      assert.doesNotMatch(fileHead, /hover:bg-white-/);
+      assert.doesNotMatch(fileHead, /titlebar/);
+      const summary =
+        shortcuts.match(/"preview-change-summary":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.doesNotMatch(summary, /h-\[var\(--preview-summary-h/);
+      assert.match(summary, /flex-wrap/);
+      const label =
+        shortcuts.match(
+          /"preview-change-summary-label":\s*"([^"]+)"/,
+        )?.[1] ?? "";
+      assert.match(label, /whitespace-nowrap/);
+      assert.doesNotMatch(label, /min-w-0 flex-1/);
+      // Icons first (container query @ 22rem), wrap only below the icon row.
+      const actions =
+        shortcuts.match(
+          /"preview-change-summary-actions":\s*"([^"]+)"/,
+        )?.[1] ?? "";
+      assert.match(actions, /@container/);
+      assert.match(actions, /min-w-28/);
+      assert.match(actions, /basis-28/);
+      assert.match(actions, /flex-nowrap/);
+      assert.doesNotMatch(actions, /flex-wrap/);
+      assert.doesNotMatch(actions, /flex-1/);
+      const actionLabel =
+        shortcuts.match(
+          /"preview-change-summary-action-label":\s*"([^"]+)"/,
+        )?.[1] ?? "";
+      assert.match(actionLabel, /@\[22rem\]:inline/);
+      const actionIcon =
+        shortcuts.match(
+          /"preview-change-summary-action-icon":\s*"([^"]+)"/,
+        )?.[1] ?? "";
+      assert.match(actionIcon, /@\[22rem\]:hidden/);
+    }
+    const colors = readSrc("styles/defineColor.css");
+    assert.match(
+      colors,
+      /--color-diff-file-head-bg:\s*var\(--color-bg-surface\)/,
+    );
+    assert.match(colors, /--color-diff-file-head-hover:/);
+    assert.doesNotMatch(
+      colors,
+      /--color-diff-file-head-bg:\s*var\(--color-bg-titlebar\)/,
+    );
   });
 
   it("preview entry points: mention file tokens and tool locations open preview", () => {
@@ -1067,6 +1467,8 @@ describe("UI surface presence", () => {
     assert.match(docWidget, /urlTransform/);
 
     const docView = readSrc("widgets/preview/PreviewDocView.tsx");
+    // Literal `group` — Uno shortcuts never emit a real .group class.
+    assert.match(docComponents, /doc-pre-wrap group/);
     assert.doesNotMatch(docView, /useSessionStore|usePreviewStore/);
     assert.match(docView, /doc-root|doc-scroll/);
 
@@ -1074,7 +1476,24 @@ describe("UI surface presence", () => {
     assert.match(head, /actions\?:/);
     assert.match(head, /preview-head-actions/);
 
+    const toolbar = readSrc("widgets/preview/PreviewFileToolbarView.tsx");
+    // Copy click must flash the shared check + "Copied" mark — not tooltip-only.
+    assert.match(toolbar, /CopiedMarkView/);
+    assert.match(toolbar, /preview-copy-btn/);
+    assert.doesNotMatch(toolbar, /className=\{?cs\("btn-ghost|className="btn-ghost/);
+    const mark = readSrc("widgets/preview/CopiedMarkView.tsx");
+    assert.match(mark, /<span>Copied<\/span>/);
+    const flash = readSrc("widgets/preview/CopiedCursorFlashView.tsx");
+    assert.match(flash, /createPortal/);
+    assert.match(flash, /preview-copy-flash/);
+    // Transparent copy-button chrome stacked on the chip lets the path bleed.
+    assert.doesNotMatch(flash, /preview-copy-btn/);
+
     const shortcuts = readAllUnoShortcuts();
+    const flashFace = shortcuts.match(/"preview-copy-flash":\s*"([^"]*)"/);
+    assert.ok(flashFace?.[1], "preview-copy-flash shortcut present");
+    assert.match(flashFace[1], /bg-highest/);
+    assert.doesNotMatch(flashFace[1], /bg-transparent|bg-titlebar|bg-white-/);
     // doc-hr must be a visible rule — never copy md-hr's hidden token.
     assert.match(shortcuts, /"doc-hr":/);
     const docHrMatch = shortcuts.match(/"doc-hr":\s*"([^"]*)"/);
@@ -1162,6 +1581,14 @@ describe("UI surface presence", () => {
     );
     assert.match(
       darkRoot,
+      /--color-bg-composer-queue:\s*var\(--color-surface-highest\);/,
+    );
+    assert.match(
+      darkRoot,
+      /--color-border-composer-queue:\s*var\(--color-border-muted\);/,
+    );
+    assert.match(
+      darkRoot,
       /--color-bg-sidebar:\s*var\(--color-surface-lowest\);/,
     );
     // Soft fills for md scale.
@@ -1187,10 +1614,11 @@ describe("UI surface presence", () => {
     assert.match(darkRoot, /--color-code-variable:\s*#bde2f7;/i);
     assert.match(darkRoot, /--color-code-parameter:\s*#bde2f7;/i);
     assert.match(darkRoot, /--color-code-link:\s*#84a1d1;/i);
-    assert.match(darkRoot, /--color-composer-mention:\s*#84b1df;/i);
+    assert.match(darkRoot, /--color-composer-mention:\s*#4d94d4;/i);
     // Pre-desaturate VS Code literals must not remain on the dark ladder.
     assert.doesNotMatch(darkRoot, /--color-code-keyword:\s*#569cd6;/i);
     assert.doesNotMatch(darkRoot, /--color-composer-mention:\s*#1479c9;/i);
+    assert.doesNotMatch(darkRoot, /--color-composer-mention:\s*#84b1df;/i);
     // Diff wash alphas untouched (hard cap for AA on dark surfaces).
     assert.match(
       darkRoot,
@@ -1209,12 +1637,15 @@ describe("UI surface presence", () => {
     assert.match(lightBlock, /--scheme-elevate-5:\s*0%;/);
     assert.match(lightBlock, /--color-bg-elevated:\s*#ffffff;/i);
     assert.match(lightBlock, /--color-bg-composer:\s*#ffffff;/i);
+    assert.match(lightBlock, /--color-bg-composer-queue:\s*color-mix/i);
     assert.match(lightBlock, /--color-bg-user:\s*#ffffff;/i);
 
     // Uno bg aliases for the new soft fills.
     const uno = readDesktopRoot("uno.config.ts");
     assert.match(uno, /"white-code":\s*"var\(--color-bg-white-code\)"/);
     assert.match(uno, /"white-chip":\s*"var\(--color-bg-white-chip\)"/);
+    assert.match(uno, /"composer-queue":\s*"var\(--color-bg-composer-queue\)"/);
+    assert.match(uno, /"line-queue":\s*"var\(--color-border-composer-queue\)"/);
 
     // Timeline md fills + table chrome (one signal: fill/line, no outer box).
     const shortcuts = readAllUnoShortcuts();
@@ -1223,7 +1654,25 @@ describe("UI surface presence", () => {
     const mdThead = shortcuts.match(/"md-thead":\s*"([^"]+)"/)?.[1] ?? "";
     const mdTableWrap =
       shortcuts.match(/"md-table-wrap":\s*"([^"]+)"/)?.[1] ?? "";
+    const timeline =
+      shortcuts.match(/timeline:\s*\n\s*"([^"]+)"/)?.[1] ??
+      shortcuts.match(/"timeline":\s*"([^"]+)"/)?.[1] ??
+      "";
     assert.match(mdPre, /\bbg-white-code\b/);
+    assert.match(mdPre, /\bcode-wrap\b/);
+    assert.match(mdPre, /overflow-x-hidden/);
+    assert.match(timeline, /\bmin-w-0\b/);
+    assert.match(timeline, /overflow-x-hidden/);
+    assert.match(timeline, /\bbg-timeline\b/);
+    const turnStatus =
+      shortcuts.match(/"turn-status":\s*"([^"]+)"/)?.[1] ?? "";
+    // Opaque canvas fill outside the transcript scroller: inherit used to
+    // compute transparent and let the streaming answer punch through.
+    assert.match(turnStatus, /\bbg-timeline\b/);
+    assert.match(turnStatus, /\bz-10\b/);
+    assert.match(turnStatus, /\bisolate\b/);
+    assert.doesNotMatch(turnStatus, /\bbg-inherit\b/);
+    assert.doesNotMatch(turnStatus, /\bsticky\b/);
     assert.match(mdInline, /\bbg-white-chip\b/);
     assert.match(mdThead, /\bbg-white-soft\b/);
     assert.match(mdThead, /border-b\b/);
@@ -1350,11 +1799,36 @@ describe("UI surface presence", () => {
       readSrc("widgets/composer/composerCompletion.ts"),
       /ignored:\s*entry\.ignored === true/,
     );
+    // Pointer must move activeIndex — CSS hover alone leaves Enter on the
+    // keyboard row, so the highlight looks stuck on the first option.
+    assert.match(menu, /onHighlight:\s*\(index: number\) => void/);
+    assert.match(menu, /onMouseEnter=\{\(\) => onHighlight\(index\)\}/);
+    assert.match(menu, /onMouseMove=\{\(\) => onHighlight\(index\)\}/);
+    assert.match(
+      readSrc("widgets/composer/ComposerWidget.tsx"),
+      /onHighlight=\{widget\.highlightSuggestion\}/,
+    );
+    assert.match(
+      readSrc("widgets/composer/useComposerCompletion.ts"),
+      /const highlightSuggestion = \(index: number\) =>/,
+    );
+    // ArrowUp/Down must keep the active row inside max-h-80; only the list
+    // scrollTop moves so the timeline / page do not jump with the highlight.
+    assert.match(
+      menu,
+      /ref=\{index === activeIndex \? revealActiveSuggestion : undefined\}/,
+    );
+    const scroll = readSrc("widgets/composer/composerSuggestionScroll.ts");
+    assert.match(scroll, /export function revealActiveSuggestion/);
+    assert.match(scroll, /export function scrollTopToRevealItem/);
+    assert.match(scroll, /port\.scrollTop = next/);
+    assert.match(scroll, /el\.closest\("#composer-suggestions"\)/);
   });
 
   it("shell keyboard maps ⌘N ⌘, ⌘\\ and drawers have dual reachability", () => {
     const events = readSrc("widgets/shell/useShellChromeEvents.ts");
     assert.match(events, /key\.toLowerCase\(\) === "n"/);
+    assert.match(events, /setPaletteOpen\(false\)/);
     assert.match(events, /key === ",/);
     assert.match(events, /Backslash|\\\\/);
     // Workspace menu dispatches open-panel / open-environment (Settings / Overview / Environment).
@@ -1514,13 +1988,156 @@ describe("UnoCSS transform utilities emit literal values", () => {
     assert.deepEqual(empty, []);
   });
 
-  it("side-nav drawer is off-canvas at <=900px and slides in on data-open", async () => {
+  it("rail folder and session titles use nav line-height (descenders fit)", async () => {
     const uno = await createGenerator(unoConfigModule);
-    const { css } = await uno.generate("side-nav", { preflights: false });
-    const media = css.match(/@media \(max-width: 900px\)\{([\s\S]+?)\n\}/)?.[1] ?? "";
+    const { css } = await uno.generate("project-group-name sess-title", {
+      preflights: false,
+    });
+    assert.match(
+      css,
+      /\.project-group-name\{[^}]*line-height:var\(--line-height-nav-item\)/,
+    );
+    assert.match(
+      css,
+      /\.sess-title\{[^}]*line-height:var\(--line-height-nav-item\)/,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.project-group-name\{[^}]*line-height:(?:1(?:\.375)?|15\.6px)/,
+    );
+  });
+
+  it("named shortcuts that used to warn emit real CSS", async () => {
+    const warnings: string[] = [];
+    const orig = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      const uno = await createGenerator(unoConfigModule);
+      const { css } = await uno.generate(
+        [
+          "main-body",
+          "preview-head",
+          "preview-diff-row",
+          "doc-pre-wrap",
+          "prompt-badge-overridden",
+          "turn-status",
+        ].join(" "),
+        { preflights: false },
+      );
+      assert.match(css, /\.main-body\{[^}]*transition-property:padding-right/);
+      assert.match(css, /\.preview-head\{[^}]*min-height:var\(--topnav-height\)/);
+      assert.match(css, /\.turn-status\{[^}]*--un-shadow:/);
+      assert.match(
+        css,
+        /\.turn-status\{[^}]*background-color:var\(--color-bg-timeline\)/,
+      );
+      assert.match(css, /\.turn-status\{[^}]*z-index:10/);
+      assert.match(css, /\.turn-status\{[^}]*isolation:isolate/);
+      assert.match(css, /\.prompt-badge-overridden\{[^}]*text-decoration:none/);
+      assert.doesNotMatch(css, /unmatched/);
+    } finally {
+      console.warn = orig;
+    }
+    assert.deepEqual(
+      warnings.filter((w) => w.includes("unmatched utility")),
+      [],
+    );
+  });
+
+  it("side-nav offcanvas slides in on data-open via own-width transforms", async () => {
+    const uno = await createGenerator(unoConfigModule);
+    const { css } = await uno.generate("side-nav-offcanvas", {
+      preflights: false,
+    });
     // Closed: pushed a full own-width left. Open: back to 0, via the
     // higher-specificity attribute selector (wins on specificity, not order).
-    assert.match(media, /\.side-nav\{[^}]*transform:translateX\(-100%\)/);
-    assert.match(media, /\.side-nav\[data-open=true\]\{transform:translateX\(0\)/);
+    assert.match(
+      css,
+      /\.side-nav-offcanvas\{[^}]*transform:translateX\(-100%\)/,
+    );
+    assert.match(
+      css,
+      /\.side-nav-offcanvas\[data-open=true\]\{transform:translateX\(0\)/,
+    );
+  });
+});
+
+/**
+ * Strip comments so a mention in a doc comment is not treated as a call.
+ * @param src TypeScript / TSX source.
+ */
+function stripSourceComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+/**
+ * Collect .ts/.tsx files under a src-relative directory.
+ * @param rel Directory relative to apps/desktop/src.
+ */
+function listSrcFiles(rel: string): string[] {
+  const dir = join(SRC_ROOT, rel);
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const abs = join(dir, name);
+    if (name.endsWith(".ts") || name.endsWith(".tsx")) {
+      out.push(abs);
+    }
+  }
+  return out;
+}
+
+describe("Agents inspect never navigates the main canvas", () => {
+  it("agents panel and timeline never invoke selectSession", () => {
+    const files = [
+      ...listSrcFiles("widgets/agentsRail"),
+      ...listSrcFiles("widgets/timeline"),
+    ];
+    for (const file of files) {
+      const stripped = stripSourceComments(readFileSync(file, "utf8"));
+      assert.doesNotMatch(
+        stripped,
+        /\bselectSession\b/,
+        `${file} must not invoke selectSession`,
+      );
+    }
+  });
+
+  it("only one production timeline model implementation exists", () => {
+    const widgetHook = readSrc("widgets/timeline/useTimelineWidget.ts");
+    const model = readSrc("widgets/timeline/useTimelineModel.ts");
+    const canvas = readSrc("widgets/timeline/TimelineWidget.tsx");
+    assert.match(widgetHook, /useTimelineModel/);
+    assert.doesNotMatch(stripSourceComments(widgetHook), /buildTimelineRenderUnits/);
+    assert.match(model, /buildTimelineRenderUnits/);
+    assert.match(canvas, /useTimelineWidget/);
+    assert.doesNotMatch(stripSourceComments(canvas), /useTimelineModel/);
+    const widgetDir = join(SRC_ROOT, "widgets");
+    const callers: string[] = [];
+    const stack = [widgetDir];
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      if (!dir) {
+        continue;
+      }
+      for (const name of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, name.name);
+        if (name.isDirectory()) {
+          stack.push(abs);
+          continue;
+        }
+        if (!name.name.endsWith(".ts") && !name.name.endsWith(".tsx")) {
+          continue;
+        }
+        const stripped = stripSourceComments(readFileSync(abs, "utf8"));
+        if (/\bbuildTimelineRenderUnits\s*\(/.test(stripped)) {
+          callers.push(abs.slice(SRC_ROOT.length + 1));
+        }
+      }
+    }
+    assert.deepEqual(callers, ["widgets/timeline/useTimelineModel.ts"]);
   });
 });

@@ -7,9 +7,11 @@
  * not also fire (e.g. Settings dirty close).
  */
 
-import { useEffect, useLayoutEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type MouseEvent } from "react";
 import cs from "classnames";
+import { TriangleAlert } from "lucide-react";
 import { FadeContent } from "@/components/react-bits";
+import { formatConfirmSubject } from "@/lib/confirmAction";
 import {
   focusInitialIn,
   restoreFocus,
@@ -17,26 +19,41 @@ import {
 } from "@/lib/focusTrap";
 
 export type ConfirmDialogViewProps = {
+  /** When false the view returns null; focus restore still runs on the close edge. */
   open: boolean;
+  /** Short question shown next to the warning icon. */
   title: string;
+  /**
+   * Named target (session title, path). Rendered as a truncated chip so a
+   * long label cannot wrap the heading. Optional.
+   */
+  subject?: string;
+  /** Consequence copy; each string is one paragraph. */
   details: string[];
+  /** Confirm control label; defaults to "Confirm". */
   confirmLabel?: string;
+  /** Dismiss control label; defaults to "Cancel". */
   cancelLabel?: string;
   /** Destructive styling for delete/clear. */
   danger?: boolean;
+  /** Fired only from the confirm control — never on mount. */
   onConfirm: () => void;
+  /** Fired from Cancel, Escape, or backdrop click. */
   onCancel: () => void;
 };
 
 /**
  * Modal confirm surface; returns null when closed.
  * Hooks always run (open gated inside effects) so focus restore stays valid.
+ * Renders a short title, optional subject chip, and paragraph details —
+ * the long target name must not live in the heading.
  * @param props Title/details from buildConfirmPrompt; handlers must not auto-fire on mount.
  */
 export function ConfirmDialogView(props: ConfirmDialogViewProps) {
   const {
     open,
     title,
+    subject,
     details,
     confirmLabel,
     cancelLabel,
@@ -47,6 +64,19 @@ export function ConfirmDialogView(props: ConfirmDialogViewProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   /** Element that held focus before this confirm opened. */
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  /** Stable ids so stacked confirms (settings + shell) do not collide. */
+  const reactId = useId();
+  const titleId = `${reactId}-title`;
+  const subjectId = `${reactId}-subject`;
+  const descId = `${reactId}-desc`;
+  /** True unless the caller opts out — this surface is for irreversible ops. */
+  const isDanger = danger !== false;
+  /** Display-ready target; empty hides the chip. */
+  const subjectText = formatConfirmSubject(subject);
+  /** Space-joined ids for aria-describedby (subject chip + detail copy). */
+  const describedBy = [subjectText ? subjectId : "", details.length > 0 ? descId : ""]
+    .filter(Boolean)
+    .join(" ");
 
   // Enter: remember prior focus and land on Cancel (first action).
   // Exit: restore prior focus when the node is still connected.
@@ -111,19 +141,40 @@ export function ConfirmDialogView(props: ConfirmDialogViewProps) {
           className="modal-panel"
           role="alertdialog"
           aria-modal="true"
-          aria-labelledby="confirm-title"
+          aria-labelledby={titleId}
+          aria-describedby={describedBy || undefined}
           tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
         >
-          <h2 id="confirm-title" className="modal-title">
-            {title}
-          </h2>
-          <ul className="modal-details">
-            {details.map((d) => (
-              <li key={d}>{d}</li>
-            ))}
-          </ul>
-          <div className="modal-actions">
+          <div className="confirm-head">
+            <div
+              className={cs("confirm-icon", {
+                "confirm-icon-danger": isDanger,
+                "confirm-icon-default": !isDanger,
+              })}
+              aria-hidden="true"
+            >
+              <TriangleAlert className="confirm-icon-svg" strokeWidth={2} />
+            </div>
+            <h2 id={titleId} className="modal-title">
+              {title}
+            </h2>
+          </div>
+          {subjectText ? (
+            <p id={subjectId} className="confirm-subject" title={subjectText}>
+              {subjectText}
+            </p>
+          ) : null}
+          {details.length > 0 ? (
+            <div id={descId} className="confirm-details">
+              {details.map((d) => (
+                <p key={d} className="confirm-detail">
+                  {d}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          <div className="confirm-actions">
             <button
               type="button"
               className="btn-ghost"
@@ -133,8 +184,9 @@ export function ConfirmDialogView(props: ConfirmDialogViewProps) {
             </button>
             <button
               type="button"
-              className={cs("btn-primary", {
-                "btn-danger": danger !== false,
+              className={cs("btn", {
+                "btn-danger": isDanger,
+                "btn-primary": !isDanger,
               })}
               onClick={onConfirm}
             >

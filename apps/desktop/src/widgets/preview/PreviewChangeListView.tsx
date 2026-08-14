@@ -5,11 +5,16 @@
  * are reachable from the main Changes entry (not only the single-file drawer).
  * "Show full file" is sticky via preferFullFile and toggles back to change-only
  * fragments (collapsed gaps) when turned off — same as the single-file menu.
+ * The summary strip is measured so sticky file heads cannot overlap a wrapped
+ * chrome row or let "+N −M" paint through the path. Action labels collapse to
+ * icons before the strip wraps (see DiffChangeListChrome).
  */
 
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
 } from "react";
@@ -23,10 +28,8 @@ import {
 } from "@/lib/diffViewPrefs";
 import { toPathDisplay } from "@/lib/pathDisplay";
 import { useSessionStore } from "@/store/sessionStore";
-import {
-  DiffChangeListChrome,
-  DiffFileSectionView,
-} from "./DiffFileSectionView";
+import { DiffChangeListChrome } from "./DiffChangeListChrome";
+import { DiffFileSectionView } from "./DiffFileSectionView";
 import { PreviewDiffWidget } from "./PreviewDiffWidget";
 import {
   fullFileBannerText,
@@ -44,7 +47,16 @@ export type PreviewChangeListViewProps = {
 };
 
 /**
+ * First-paint fallback for --preview-summary-h until ResizeObserver reports
+ * the real strip. 2.5rem matches py-2 + a single btn-ghost row.
+ */
+const SUMMARY_H_FALLBACK_PX = 40;
+
+/**
  * Vertical list: sticky path header + structured diff per file.
+ * Summary height is measured (not hardcoded) so file heads cannot slide
+ * under a wrapped strip (icons-first; wrap is last resort) or crush
+ * "+N −M" into the path row.
  * @param props Change set + optional file open fallback.
  */
 export function PreviewChangeListView(props: PreviewChangeListViewProps) {
@@ -60,6 +72,9 @@ export function PreviewChangeListView(props: PreviewChangeListViewProps) {
   const [viewPrefs, setViewPrefs] = useState<DiffViewPrefs>(() =>
     loadDiffViewPrefs(),
   );
+  /** Measured sticky summary height in CSS pixels. */
+  const chromeRef = useRef<HTMLDivElement>(null);
+  const [summaryH, setSummaryH] = useState(SUMMARY_H_FALLBACK_PX);
 
   const allCollapsed =
     paths.length > 0 && paths.every((p) => collapsed.has(p));
@@ -92,6 +107,25 @@ export function PreviewChangeListView(props: PreviewChangeListViewProps) {
     });
   }, []);
 
+  // Keep --preview-summary-h in lockstep with the real strip (wrap / font).
+  useLayoutEffect(() => {
+    const el = chromeRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => {
+      const next = el.offsetHeight;
+      if (next <= 0) {
+        return;
+      }
+      setSummaryH((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [changeSet.fileCount]);
+
   if (changeSet.files.length === 0) {
     return <div className="preview-empty">No file changes in this scope.</div>;
   }
@@ -102,12 +136,12 @@ export function PreviewChangeListView(props: PreviewChangeListViewProps) {
       data-kind="preview-changeset"
       style={
         {
-          // Sticky file heads sit under the summary strip height.
-          ["--preview-summary-h" as string]: "2rem",
+          ["--preview-summary-h" as string]: `${summaryH}px`,
         } as CSSProperties
       }
     >
       <DiffChangeListChrome
+        chromeRef={chromeRef}
         summary={
           <>
             Edited {changeSet.fileCount} file

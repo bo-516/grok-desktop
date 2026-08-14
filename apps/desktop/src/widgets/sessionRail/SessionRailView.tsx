@@ -1,9 +1,12 @@
 /**
- * Pure session list chrome: brand, New chat + search, fixed PROJECTS label,
- * scrollable workspace groups (sticky folder names), footer.
+ * Pure session list chrome: brand + always-visible collapse, New chat +
+ * search, fixed PROJECTS label, scrollable workspace groups (sticky folder
+ * names), footer.
  * No store/prefs orchestration — those live in useSessionRailWidget.
  */
 
+import cs from "classnames";
+import { PanelLeftClose } from "lucide-react";
 import { GlareHover } from "@/components/react-bits";
 import type { SessionRecord } from "@/store/sessionCatalog";
 import { SessionRailFooterView } from "../SessionRailFooterView";
@@ -16,13 +19,19 @@ export type SessionRailViewProps = SessionRailWidgetModel;
 
 /**
  * Session list rail presentation.
+ * Docked: always visible 272px column. Off-canvas: slides in from the left
+ * when `railOpen` and sits above a dismiss backdrop.
+ * Header collapse sits at the right of "Grok" in both modes so hide/close
+ * is never only a hamburger behind the overlay.
  * @param props Model from useSessionRailWidget; missing handlers break row actions.
  * @returns Fixed left navigation chrome (no store subscriptions).
  */
 export function SessionRailView(props: SessionRailViewProps) {
   const {
     railOpen,
+    sidebarDocked,
     onClose,
+    onCollapse,
     query,
     setQuery,
     groups,
@@ -44,10 +53,18 @@ export function SessionRailView(props: SessionRailViewProps) {
     isGroupPreviewExpanded,
     onToggleCollapse,
     onExpandPreview,
+    onCollapsePreview,
+    renamingId,
+    beginRename,
+    commitRename,
+    cancelRename,
   } = props;
+  /** Docked hide vs overlay dismiss — same control, different verb. */
+  const collapseLabel = sidebarDocked ? "Collapse sessions" : "Close sessions";
 
   /**
-   * One session row with its full model (selection, live status, pin, drag).
+   * One session row with its full model (selection, live status, pin, drag,
+   * inline rename).
    * Shared by the project tree and the no-project section so both lists behave
    * identically; `workspace` scopes drag order to the owning section.
    * @param rec Catalog row to render.
@@ -72,13 +89,17 @@ export function SessionRailView(props: SessionRailViewProps) {
         onTogglePin={row.onTogglePin}
         onReorder={row.onReorder}
         onRemove={row.onRemove}
+        editing={renamingId === rec.id}
+        onBeginRename={() => beginRename(rec.id)}
+        onCommitRename={(title) => commitRename(rec.id, title)}
+        onCancelRename={cancelRename}
       />
     );
   };
 
   return (
     <>
-      {railOpen ? (
+      {!sidebarDocked && railOpen ? (
         <button
           type="button"
           className="side-nav-backdrop"
@@ -89,12 +110,28 @@ export function SessionRailView(props: SessionRailViewProps) {
       ) : null}
       <aside
         id="session-rail"
-        className="side-nav"
+        className={cs("side-nav", {
+          "side-nav-offcanvas": !sidebarDocked,
+        })}
         aria-label="Sessions"
         data-open={railOpen ? "true" : "false"}
       >
         <div className="side-nav-header">
           <p className="side-nav-title">Grok</p>
+          <button
+            type="button"
+            className="side-nav-collapse-btn"
+            title={collapseLabel}
+            aria-label={collapseLabel}
+            onClick={() => onCollapse?.()}
+          >
+            <PanelLeftClose
+              className="side-nav-collapse-icon"
+              size={16}
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+          </button>
         </div>
 
         <div className="side-nav-actions">
@@ -181,6 +218,7 @@ export function SessionRailView(props: SessionRailViewProps) {
                   previewExpanded={isGroupPreviewExpanded(group.workspace)}
                   onToggleCollapse={() => onToggleCollapse(group.workspace)}
                   onExpandPreview={() => onExpandPreview(group.workspace)}
+                  onCollapsePreview={() => onCollapsePreview(group.workspace)}
                   renderSession={(rec: SessionRecord) =>
                     renderRow(
                       rec,
@@ -202,6 +240,7 @@ export function SessionRailView(props: SessionRailViewProps) {
                 previewExpanded={isGroupPreviewExpanded(noProjectKey)}
                 onToggleCollapse={() => onToggleCollapse(noProjectKey)}
                 onExpandPreview={() => onExpandPreview(noProjectKey)}
+                onCollapsePreview={() => onCollapsePreview(noProjectKey)}
                 renderSession={(rec: SessionRecord) =>
                   renderRow(
                     rec,

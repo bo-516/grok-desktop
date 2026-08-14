@@ -45,6 +45,8 @@ function contextDrawerRail(
 
 /**
  * Root shell: rails, top bar, timeline, composer, drawers, palette.
+ * `data-sidebar` / `data-drawer` mirror the three-tier layout so tests
+ * and the inspector can see dock vs overlay without reading class soup.
  * @returns Full app chrome wired via useAppShellWidget + live session store.
  */
 export function App() {
@@ -57,16 +59,24 @@ export function App() {
     shell.confirm?.kind === "rewind" ? rewindConfirm(true) : null;
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      data-sidebar={shell.sidebarDocked ? "docked" : "overlay"}
+      data-drawer={shell.drawerEffectiveLayout}
+    >
       <SessionRailWidget
         open={shell.railOpen}
+        sidebarDocked={shell.sidebarDocked}
         onClose={() => shell.setRailOpen(false)}
+        onCollapse={shell.collapseSidebar}
         onRequestDelete={shell.requestDelete}
         liveCount={shell.liveCount}
       />
 
       <div
-        className="main-column"
+        className={cs("main-column", {
+          "main-column-flush": !shell.sidebarDocked,
+        })}
         style={
           shell.contextRailOpen
             ? ({
@@ -86,8 +96,9 @@ export function App() {
           onToggleContextRail={shell.toggleContext}
           onRequestRewind={shell.requestRewind}
           onRequestDelete={shell.requestDelete}
+          sidebarDocked={shell.sidebarDocked}
           railOpen={shell.railOpen}
-          onToggleRail={() => shell.setRailOpen((o) => !o)}
+          onToggleRail={shell.toggleRail}
         />
 
         <div
@@ -102,13 +113,6 @@ export function App() {
               authOk={shell.authOk}
               authMessage={shell.environment?.message}
               restartNotice={shell.restartNotice}
-              queueLength={
-                shell.promptQueue.filter(
-                  (item) =>
-                    item.sessionId === shell.session.id ||
-                    item.sessionId === shell.viewingSessionId,
-                ).length
-              }
               waitingPermission={
                 shell.session.status === "waiting_permission"
               }
@@ -161,6 +165,7 @@ export function App() {
         <ConfirmDialogView
           open
           title={deletePrompt.title}
+          subject={deletePrompt.subject}
           details={deletePrompt.details}
           confirmLabel={deletePrompt.confirmLabel}
           cancelLabel={deletePrompt.cancelLabel}

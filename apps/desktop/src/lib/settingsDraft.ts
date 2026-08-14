@@ -68,6 +68,7 @@ export function isSettingsDraftDirty(
 
 /**
  * Default SPAWN draft from compat toggle defaults.
+ * Effort defaults to Extra High (`xhigh`) — official Grok 4.6 catalog default.
  * @param compatDefaults Map of envKey → defaultEnabled.
  */
 export function createDefaultSettingsDraft(
@@ -79,7 +80,7 @@ export function createDefaultSettingsDraft(
     alwaysApprove: false,
     webFetch: false,
     noSubagents: false,
-    effort: "high",
+    effort: "xhigh",
     denyRule: "Bash(rm -rf *)",
     allowRule: "Bash(git *)",
     compat: { ...compatDefaults },

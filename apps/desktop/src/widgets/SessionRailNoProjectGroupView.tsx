@@ -4,16 +4,17 @@
  * uppercase section label (chevron + count) and rows sit flat — no folder
  * glyph, no tree guide — because there is no path to stand for.
  *
- * Collapse and "Show more" are controlled from the parent and share the rail
- * prefs machinery under the `(no project)` key, so the section behaves exactly
- * like a project group without pretending to be one.
+ * Collapse and "Show more" / "Show less" are controlled from the parent and
+ * share the rail prefs machinery under the `(no project)` key, so the section
+ * behaves exactly like a project group without pretending to be one.
  */
 
 import cs from "classnames";
-import { ChevronDown, MessagesSquare } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
+import { projectGroupListModel } from "@/lib/sessionRailPreview";
 import type { SessionRecord } from "@/store/sessionCatalog";
-import { PROJECT_SESSION_PREVIEW } from "./SessionRailProjectGroupView";
+import { SessionRailGroupMoreView } from "./SessionRailGroupMoreView";
 
 export type SessionRailNoProjectGroupViewProps = {
   /** Unfiled chats, already pin / drag / recency ordered by the parent. */
@@ -28,6 +29,8 @@ export type SessionRailNoProjectGroupViewProps = {
   onToggleCollapse: () => void;
   /** Persist "Show more" (full list past preview). */
   onExpandPreview: () => void;
+  /** Persist "Show less" — back to the preview cap. */
+  onCollapsePreview: () => void;
   /** Render one session row (selection / live / pin wiring stays in parent). */
   renderSession: (rec: SessionRecord) => ReactNode;
 };
@@ -36,6 +39,8 @@ export type SessionRailNoProjectGroupViewProps = {
  * "No project" block: sticky section label + flat session list.
  * Renders nothing when there are no unfiled chats, so the rail gains a second
  * section only once one exists.
+ * Expanded lists longer than the 8-row cap scroll inside the section;
+ * "Show less" restores the preview.
  * @param props Sessions, active/collapse/preview flags, and the row renderer.
  * @returns Section for the side-nav scroll area, below the project tree.
  */
@@ -49,20 +54,16 @@ export function SessionRailNoProjectGroupView(
     previewExpanded,
     onToggleCollapse,
     onExpandPreview,
+    onCollapsePreview,
     renderSession,
   } = props;
+  /** Unfiled chat count for the section badge (includes hidden preview rows). */
   const total = sessions.length;
   if (total === 0) {
     return null;
   }
-  const previewing =
-    !collapsed && !previewExpanded && total > PROJECT_SESSION_PREVIEW;
-  let visible = sessions;
-  if (collapsed) {
-    visible = [];
-  } else if (previewing) {
-    visible = sessions.slice(0, PROJECT_SESSION_PREVIEW);
-  }
+  /** Visible slice plus more/less / inner-scroll flags. */
+  const list = projectGroupListModel(sessions, collapsed, previewExpanded);
 
   return (
     <div
@@ -90,11 +91,6 @@ export function SessionRailNoProjectGroupView(
             strokeWidth={2}
             aria-hidden="true"
           />
-          <MessagesSquare
-            className="loose-group-icon"
-            strokeWidth={1.75}
-            aria-hidden="true"
-          />
           <span className="loose-group-name">No project</span>
         </button>
         <span className="project-group-count" aria-label={`${total} chats`}>
@@ -104,16 +100,20 @@ export function SessionRailNoProjectGroupView(
 
       {collapsed ? null : (
         <div className="loose-group-sessions">
-          {visible.map((rec) => renderSession(rec))}
-          {previewing ? (
-            <button
-              type="button"
-              className="project-group-more"
-              onClick={() => onExpandPreview()}
-            >
-              Show {total - PROJECT_SESSION_PREVIEW} more
-            </button>
-          ) : null}
+          <div
+            className={cs("project-group-session-list", {
+              "project-group-session-list-scroll": list.overflow,
+            })}
+          >
+            {list.visible.map((rec) => renderSession(rec))}
+          </div>
+          <SessionRailGroupMoreView
+            remaining={list.remaining}
+            showMore={list.showMore}
+            showLess={list.showLess}
+            onShowMore={onExpandPreview}
+            onShowLess={onCollapsePreview}
+          />
         </div>
       )}
     </div>

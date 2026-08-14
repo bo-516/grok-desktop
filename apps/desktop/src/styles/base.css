@@ -146,6 +146,46 @@ code {
 }
 
 /*
+ * Composer context pie enter (F-CTX-01). Two phases on the same host:
+ * 0–55% grow width (negative end-margin cancels composer-bar-right `gap-1.5`
+ * while the box is 0-wide so Weekly slides instead of jumping), then 55–100%
+ * fade the disk in from opacity 0. fill-mode both avoids a first-frame flash
+ * at the settled 30×30 size. Reduced-motion: the global 0.01ms duration rule
+ * above snaps to the last keyframe; `animation: none` keeps stylesheet w-7.5.
+ */
+@keyframes composer-usage-reveal {
+  0% {
+    width: 0;
+    margin-inline-end: -0.375rem;
+    opacity: 0;
+    pointer-events: none;
+  }
+  55% {
+    width: 1.875rem;
+    margin-inline-end: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  100% {
+    width: 1.875rem;
+    margin-inline-end: 0;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.composer-usage {
+  animation: composer-usage-reveal
+    calc(var(--duration-slow) + var(--duration-normal)) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-usage {
+    animation: none;
+  }
+}
+
+/*
  * Markdown hard breaks ("two spaces + newline", which Chinese agent answers use
  * constantly) arrive twice: remark emits a <br>, and the newline stays in the
  * following text node, which `md-p`'s white-space: pre-wrap renders as a break

@@ -3,35 +3,25 @@
  * Pin is per-session within its workspace folder only (not per folder, and
  * does not float the project group): hover reveals the pin control; a pinned
  * row keeps the pin visible and stays at the top of its project list via
- * prefs. Rows are HTML5-draggable so the user can reorder within a project;
- * drag order outranks last-message recency auto-sort.
+ * prefs. Rename sits next to pin (same reserved width, hover-reveal) and
+ * double-clicking the title swaps in a borderless input. Rows are
+ * HTML5-draggable so the user can reorder within a project; drag order
+ * outranks last-message recency auto-sort.
  */
 
 import cs from "classnames";
-import { Pin, X } from "lucide-react";
-import { useRef, type DragEvent } from "react";
+import { Check, Pencil, Pin, X } from "lucide-react";
+import { memo, useRef, type DragEvent } from "react";
 import { ShinyText } from "@/components/react-bits";
-import { isWeakSessionTitle } from "@grok-desktop/acp-core";
+import { railSessionTitle } from "@/lib/sessionTitleEdit";
 import {
   formatRelativeTime,
   type SessionRecord,
 } from "@/store/sessionCatalog";
+import { SessionRailSessionTitleView } from "./SessionRailSessionTitleView";
 
 /** dataTransfer type so drops only accept session-rail rows. */
 const SESSION_DRAG_MIME = "application/x-grok-session-id";
-
-/**
- * Display title for a catalog row: rewrite weak placeholders so the rail
- * never shows `(no summary)` or `Chat 019fe…` as the primary label.
- * Full raw title stays on the element `title` when it differs.
- * @param raw Catalog title from disk / agent / local upsert.
- */
-function displaySessionTitle(raw: string): string {
-  if (!raw || isWeakSessionTitle(raw)) {
-    return "Untitled chat";
-  }
-  return raw;
-}
 
 /**
  * Footer agent status: offline / N running (shine only while AI is outputting).
@@ -52,21 +42,8 @@ export function SessionRailFooterLiveStatus(props: {
   return <>0 running</>;
 }
 
-/**
- * One session row: title + trailing actions (pin + time / remove).
- * Nested under a project tree guide; selected state is a quiet elevated
- * fill + medium title (no border ring / left accent bar / status dot) so
- * it never competes with folder header chrome. Live / waiting still lift
- * title contrast via row classes.
- * Title and the pin/meta cluster are separate grid tracks so long titles
- * never overlap actions. Pin sits tight against the meta slot inside
- * `sess-actions`; time and remove cross-fade in one fixed-width slot so
- * they never stack. Drag-and-drop reorders within the parent project; a
- * short drag does not fire select.
- * @param props Session record, selection / live / pin flags, handlers.
- * @returns Interactive row for the side-nav session list.
- */
-export function SessionRailSessionRowView(props: {
+/** Props for one session rail row (memoized against catalog churn). */
+export type SessionRailSessionRowProps = {
   rec: SessionRecord;
   selected: boolean;
   isLiveActive: boolean;
@@ -86,7 +63,41 @@ export function SessionRailSessionRowView(props: {
    * @param toId Drop-target session id (fromId moves to this index).
    */
   onReorder?: (fromId: string, toId: string) => void;
-}) {
+  /** True while this row's title is an input. */
+  editing?: boolean;
+  /** Double-click title or the pencil control; missing leaves the title read-only. */
+  onBeginRename?: () => void;
+  /**
+   * Persist the typed title (Enter, blur, or the check control).
+   * @param nextTitle Current input value.
+   */
+  onCommitRename?: (nextTitle: string) => void;
+  /** Escape (or an empty commit at the store) leaves the previous title. */
+  onCancelRename?: () => void;
+};
+
+/**
+ * One session row: title + trailing actions (rename + pin + time / remove).
+ * Nested under a project tree guide; selected state is a quiet elevated
+ * fill + medium title (no border ring / left accent bar / status dot) so
+ * it never competes with folder header chrome. Live / waiting still lift
+ * title contrast via row classes.
+ * Title and the pin/meta cluster are separate grid tracks so long titles
+ * never overlap actions. Rename and pin sit tight against the meta slot
+ * inside `sess-actions` with reserved widths so hover-reveal does not
+ * shift the truncation point. Time and remove cross-fade in one
+ * fixed-width slot so they never stack. Drag-and-drop reorders within
+ * the parent project; a short drag does not fire select.
+ * Wrapped in React.memo so catalog identity churn without prop changes
+ * does not re-render every rail row.
+ * @param props Session record, selection / live / pin / rename flags, handlers.
+ * @returns Interactive row for the side-nav session list.
+ */
+/**
+ * Inner session row render function (memo-wrapped below).
+ * @param props Row selection / live / pin / rename / reorder handlers.
+ */
+function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
   const {
     rec,
     selected,
@@ -97,11 +108,17 @@ export function SessionRailSessionRowView(props: {
     onRemove,
     onTogglePin,
     onReorder,
+    editing = false,
+    onBeginRename,
+    onCommitRename,
+    onCancelRename,
   } = props;
   const isStreaming = liveStatus === "streaming" && isLiveActive;
   const isWaiting = liveStatus === "waiting_permission" && isLiveActive;
-  /** Friendly rail label; raw catalog title stays for tooltips when weak. */
-  const titleLabel = displaySessionTitle(rec.title);
+  /** Friendly rail label; locked custom names skip the weak-title rewrite. */
+  const titleLabel = railSessionTitle(rec);
+  /** Handle so the Save control can read the input before blur unmounts it. */
+  const titleInputRef = useRef<HTMLInputElement>(null);
   /** Relative time already fits the meta slot (`45s` / `12m` / `1d`). */
   const fullTime = formatRelativeTime(rec.updatedAt);
   const timeLabel = isStreaming ? "…" : fullTime;
@@ -113,6 +130,11 @@ export function SessionRailSessionRowView(props: {
    * reordering does not also switch the active chat.
    */
   const skipClickRef = useRef(false);
+  /**
+   * Save uses mousedown (to read the input before blur). The trailing click
+   * would see `editing === false` after commit and reopen the field — skip it.
+   */
+  const skipRenameClickRef = useRef(false);
 
   /**
    * Start an in-rail session drag. Payload is the session id only; drop
@@ -120,7 +142,7 @@ export function SessionRailSessionRowView(props: {
    * @param e Native dragstart from this row.
    */
   const handleDragStart = (e: DragEvent<HTMLDivElement>) => {
-    if (!onReorder) {
+    if (!onReorder || editing) {
       e.preventDefault();
       return;
     }
@@ -192,10 +214,11 @@ export function SessionRailSessionRowView(props: {
         "sess-row-process-live": isStreaming,
         "sess-row-waiting": isWaiting,
         "sess-row-pinned": pinned,
+        "sess-row-editing": editing,
       })}
       role="button"
       tabIndex={0}
-      draggable={Boolean(onReorder)}
+      draggable={Boolean(onReorder) && !editing}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -215,12 +238,63 @@ export function SessionRailSessionRowView(props: {
         }
       }}
     >
-      <span className="sess-title" title={rec.title || titleLabel}>
-        {titleLabel}
-      </span>
-      {/* Pin + time/remove share one trailing cluster so the pin sits tight
-          against the meta slot (not a full grid gap away from the time). */}
+      <SessionRailSessionTitleView
+        label={titleLabel}
+        rawTitle={rec.title}
+        editing={editing}
+        inputRef={titleInputRef}
+        onBeginRename={() => onBeginRename?.()}
+        onCommitRename={(nextTitle) => onCommitRename?.(nextTitle)}
+        onCancelRename={() => onCancelRename?.()}
+      />
+      {/* Rename + pin + time/remove share one trailing cluster so icons sit
+          tight against the meta slot (not a full grid gap away from the time). */}
       <span className="sess-actions">
+        <button
+          type="button"
+          className={cs("sess-rename", {
+            "sess-rename-save": editing,
+          })}
+          title={editing ? "Save name" : `Rename ${titleLabel}`}
+          aria-label={editing ? "Save name" : `Rename ${titleLabel}`}
+          onMouseDown={(e) => {
+            // Save: keep the input focused until we read it (blur would
+            // unmount the field first and the click would reopen edit).
+            if (editing) {
+              e.preventDefault();
+              e.stopPropagation();
+              skipRenameClickRef.current = true;
+              onCommitRename?.(titleInputRef.current?.value ?? "");
+            }
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (skipRenameClickRef.current) {
+              skipRenameClickRef.current = false;
+              return;
+            }
+            if (e.detail > 0) {
+              e.currentTarget.blur();
+            }
+            if (!editing) {
+              onBeginRename?.();
+            }
+          }}
+        >
+          {editing ? (
+            <Check
+              className="sess-rename-icon"
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+          ) : (
+            <Pencil
+              className="sess-rename-icon"
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+          )}
+        </button>
         <button
           type="button"
           className={cs("sess-pin", {
@@ -272,3 +346,7 @@ export function SessionRailSessionRowView(props: {
     </div>
   );
 }
+
+/** Memoized rail row — skips re-render when catalog identity churns elsewhere. */
+export const SessionRailSessionRowView = memo(SessionRailSessionRowViewInner);
+SessionRailSessionRowView.displayName = "SessionRailSessionRowView";

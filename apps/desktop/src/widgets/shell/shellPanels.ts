@@ -4,6 +4,8 @@
  * open two drawers at once without an explicit replace.
  */
 
+import { AGENTS_WIDTH_DEFAULT } from "@/lib/agentsPanelWidth";
+
 /**
  * Exclusive chrome panels opened from footer / ⌘K / events (workspace / app scope).
  * `environment` is a centered modal sheet; settings/overview remain side drawers.
@@ -28,21 +30,31 @@ export type EnvironmentPageId =
 /** Right context rail content: plan, agents, or code/diff preview. */
 export type ContextRailId = "plan" | "preview" | "agents";
 
-/** Plan rail default width in px (matches --rail-right-width). */
+/**
+ * Closed-rail CSS fallback in px (matches --rail-right-width).
+ * Plan and Agents share the persisted companion width instead of this token.
+ */
 export const PLAN_RAIL_WIDTH = 280;
 
 /**
  * Resolve the CSS pixel width for the active context rail.
+ * Plan and Agents are one drawer — they share `companionWidth` so tab
+ * switches do not resize the rail or the main-column push padding.
  * @param rail Current rail id or null when closed.
  * @param previewWidth Committed preview width from previewStore.
- * @returns Width in px; plan uses fixed 280, preview uses stored width.
+ * @param companionWidth Persisted Plan|Agents drawer width from agentsPanelStore.
+ * @returns Width in px; preview uses its own store; plan/agents share companionWidth.
  */
 export function contextRailWidthPx(
   rail: ContextRailId | null,
   previewWidth: number,
+  companionWidth: number = AGENTS_WIDTH_DEFAULT,
 ): number {
   if (rail === "preview") {
     return previewWidth;
+  }
+  if (rail === "plan" || rail === "agents") {
+    return companionWidth;
   }
   return PLAN_RAIL_WIDTH;
 }
@@ -130,28 +142,14 @@ export function contextRailAfterSessionChange(
 /**
  * Whether the open context rail should reserve main-column push space.
  *
- * Plan and Agents share one companion drawer: content on *either* surface
- * keeps push true for both tabs so switching Plan ↔ Agents does not jump
- * the transcript width. An empty Plan+Agents pair (or empty Preview) stays
- * overlay so a blank drawer does not squeeze the chat.
+ * Any open rail (Plan, Agents, or Preview) reserves space when push is
+ * preferred — including empty Plan/Agents — so opening the companion always
+ * squeezes the transcript instead of overlaying it. Closed rail (`null`)
+ * never reserves space.
  *
  * @param rail Active context rail id, or null when closed.
- * @param planCount Plan step count for the current session (0 = empty plan).
- * @param agentItemCount Subagent + background-task card count for Agents.
- * @param previewHasTarget True when preview has an open file/diff target.
  * @returns True when push layout may apply padding for this open rail.
  */
-export function contextRailHasContent(
-  rail: ContextRailId | null,
-  planCount: number,
-  agentItemCount: number,
-  previewHasTarget: boolean,
-): boolean {
-  if (rail === "preview") {
-    return previewHasTarget;
-  }
-  if (rail === "plan" || rail === "agents") {
-    return planCount > 0 || agentItemCount > 0;
-  }
-  return false;
+export function contextRailHasContent(rail: ContextRailId | null): boolean {
+  return rail !== null;
 }

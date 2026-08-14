@@ -28,4 +28,6 @@ export { PreviewChangeListView } from "./PreviewChangeListView";
 export { DiffGapBandView } from "./DiffGapBandView";
 export { DiffRowView } from "./DiffRowView";
 export { DiffFileSectionView } from "./DiffFileSectionView";
-export { usePreviewSource } from "./usePreviewSource";
+export { usePreviewSource, beginFilePreviewLoad } from "./usePreviewSource";
+export { PreviewFileStackView } from "./PreviewFileStackView";
+export type { PreviewFileStackViewProps } from "./PreviewFileStackView";

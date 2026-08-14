@@ -158,7 +158,9 @@ describe("revealAfterSourceChange / fullRevealByGap (reconstruct path)", () => {
         {
           kind: "hunk",
           oldStart: 41,
+          oldCount: 0,
           newStart: 41,
+          newCount: 1,
           rows: [{ type: "add", text: "x", newNo: 41 }],
         },
         gap(12, 42, 42),
@@ -243,7 +245,7 @@ describe("revealAfterSourceChange / fullRevealByGap (reconstruct path)", () => {
     );
     assert.deepEqual(
       revealAfterSourceChange(
-        { blocks: [gap(100, 1, 1)], added: 0, removed: 0 },
+        { blocks: [gap(100, 1, 1)] },
         { preferFullFile: true, fullFileBlocked: true },
       ),
       {},

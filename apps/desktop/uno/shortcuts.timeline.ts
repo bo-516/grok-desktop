@@ -10,25 +10,32 @@ export const timelineShortcuts: Record<string, string> = {
      * No scroll-smooth: session switch / stick-to-bottom must land instantly
      * (CSS scroll-behavior would turn scrollTo({ behavior: "auto" }) into a glide).
      * gap-7 (28px): spacing between top-level FadeContent children (user / turn / error).
-     * In-turn spacing is turn-block gap-3; rail steps use turn-rail gap-1. */
+     * In-turn spacing is turn-block gap-3; rail steps use turn-rail gap-1.
+     * min-w-0 + overflow-x-hidden: overflow-y:auto makes overflow-x compute
+     * to auto, so a wide fence used to paint a horizontal bar across the
+     * whole middle column. Fences wrap; this clip is the last resort.
+     * bg-timeline: the scroller owns the canvas fill (matches `.main`). */
     timeline:
-      "flex-1 min-h-0 overflow-y-auto px-container pt-5 pb-5 flex flex-col gap-7 w-full",
+      "flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-timeline px-container pt-5 pb-5 flex flex-col gap-7 w-full",
     empty:
       "m-auto text-center text-fg-muted px-6 py-12 flex flex-col items-center gap-2",
     "empty-title":
       "m-0 text-18px font-medium tracking-tight text-fg-secondary",
     "empty-sub": "m-0 text-13px leading-snug text-fg-muted max-w-md",
     "msg-user-wrap": "flex flex-col items-end w-full gap-1.5",
-    /* Sent image strip (above the text bubble); mirrors composer attach thumbs. */
+    /* Sent image strip (above the text bubble); mirrors composer attach thumbs.
+     * Tile is a locked 80×80 box (min=max=w/h) so a decoded screenshot's
+     * intrinsic size cannot grow the flex item and shove the whole timeline. */
     "msg-user-attachments":
       "flex flex-wrap justify-end items-start gap-2 m-0 p-0 list-none max-w-[min(80%,48rem)]",
     "msg-user-attachment":
-      "relative shrink-0 w-20 h-20 rounded-12px overflow-hidden border border-line-subtle bg-white-faint",
+      "relative shrink-0 w-20 h-20 min-w-20 min-h-20 max-w-20 max-h-20 rounded-12px overflow-hidden border border-line-subtle bg-white-faint",
     /* Full-tile hit target opens shared ImageLightboxView. */
     "msg-user-attachment-open":
-      "block w-full h-full p-0 m-0 border-0 bg-transparent cursor-zoom-in text-inherit",
+      "relative block w-full h-full min-w-0 min-h-0 p-0 m-0 border-0 bg-transparent cursor-zoom-in text-inherit overflow-hidden",
+    /* Out of flow: width/height attrs + inset fill; never contributes min-content. */
     "msg-user-attachment-thumb":
-      "block w-full h-full object-cover pointer-events-none",
+      "absolute inset-0 block w-full h-full max-w-full max-h-full object-cover pointer-events-none",
     "msg-user-attachment-fallback":
       "flex items-center justify-center w-full h-full px-1 text-10px text-fg-muted text-center leading-tight break-all",
     "item-user":
@@ -46,11 +53,13 @@ export const timelineShortcuts: Record<string, string> = {
      * button does not sit flush against the last answer line.
      * Only applied when the Copy row exists — process/tool rows stay tight. */
     "msg-agent-inner-actions": "pb-9",
-    "item-agent": "p-0 text-body-md tracking-tight text-fg break-words",
+    "item-agent":
+      "p-0 min-w-0 max-w-full text-body-md tracking-tight text-fg break-words",
     /* Absolute inside the agent pad (bottom-0). Opacity still hides the chrome
-     * when idle so the pad reads as quiet air under the answer only. */
+     * when idle so the pad reads as quiet air under the answer only. Snaps
+     * on hover / focus — no opacity transition. */
     "msg-actions":
-      "absolute left-0 bottom-0 z-1 flex items-center gap-0.5 px-0 py-0.5 opacity-0 pointer-events-none transition-opacity duration-normal ease-soft group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto)",
+      "absolute left-0 bottom-0 z-1 flex items-center gap-0.5 px-0 py-0.5 opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto)",
     "msg-action-btn":
       "border-none bg-transparent text-fg-muted text-12px px-2 py-1.25 rounded-7px transition-colors duration-fast ease-soft hover:(text-fg bg-white-faint)",
     /* Rail header only — shell-toggle is not used for nested thought/tool steps.
@@ -73,7 +82,9 @@ export const timelineShortcuts: Record<string, string> = {
     /* Quiet vertical guide instead of stacked filled pills.
      * Max height tracks the viewport (50vh) so long tool/thought stacks do not
      * push the final answer off-screen; floor at 280px so short viewports still
-     * get a usable pane; overflow scrolls inside the rail only. */
+     * get a usable pane; overflow scrolls inside the rail only.
+     * Agents inspect (`.agents-transcript`) lifts max-h + overflow so the
+     * 300px drawer has one scroller — the timeline — not a mid-pane bar. */
     "turn-rail":
       "flex flex-col gap-1 pl-3 pb-2 border-l border-l-rail-line w-full max-w-full min-h-0 max-h-[max(280px,min(50vh,560px))] overflow-y-auto overscroll-contain",
     "turn-step-row": "flex flex-col w-full max-w-full min-w-0",
@@ -105,23 +116,22 @@ export const timelineShortcuts: Record<string, string> = {
     /* Live thought row: one shimmering word (ShinyText owns the color sweep). */
     "thought-live-label": "font-medium tracking-tight",
 
-    /* ── Live-turn strip (last child of this scroller, mounted while streaming) ──
+    /* ── Live-turn strip (composer dock, mounted while streaming) ──
      *
-     * Content-width pill, not a full-width bar: it reads as a status line under
-     * the newest message instead of a second toolbar, and an empty right half
-     * never stretches across the canvas. max-w-full + a truncating detail keep
-     * long tool titles from widening the column.
+     * Lives above the input card, not as a sticky child of `.timeline`.
+     * A sticky pill inside that scroller sat on the last answer line, and
+     * `bg-inherit` computed to transparent so the answer painted through it.
      *
-     * sticky bottom-0 keeps it on screen while the user scrolls back through
-     * history. The fill must stay OPAQUE (bg-high, never a white-* overlay
-     * token): transcript rows scroll underneath a sticky element, and a
-     * translucent fill would show them bleeding through the pill.
+     * Content-width pill, not a full-width bar: it reads as a status line
+     * above the composer instead of a second toolbar. max-w-full + a
+     * truncating detail keep long tool titles from widening the column.
      *
-     * -mt-4 eats most of the timeline gap-7 (28px → 12px) so the pill trails
-     * the last message instead of floating a full unit gap below it.
+     * The fill must stay OPAQUE (bg-timeline, never inherit / white-*):
+     * ShinyText uses a transparent glyph fill, and isolate keeps that
+     * compositing against the pill. mb-2 separates it from the input card.
      */
     "turn-status":
-      "sticky bottom-0 -mt-4 ml-0.5 flex w-fit max-w-full items-center gap-2 rounded-pill bg-inherit px-3 py-1.5 shadow-float animate-turn-status-in",
+      "relative z-10 isolate mb-2 ml-0.5 flex w-fit max-w-full items-center gap-2 rounded-pill bg-timeline px-3 py-1.5 shadow-float animate-turn-status-in",
     /* Radar ping + solid core; fixed 8px box so the pill height never shifts. */
     "turn-status-orb":
       "relative flex h-2 w-2 shrink-0 items-center justify-center",
@@ -190,13 +200,19 @@ export const timelineShortcuts: Record<string, string> = {
       "flex flex-col gap-1 mb-2 min-w-0 max-w-full",
     "tool-loc-link":
       "flex w-full max-w-full min-w-0 items-center gap-2 overflow-hidden text-left font-mono text-11px leading-snug px-2.5 py-1.25 rounded-8px border-none bg-high text-fg-secondary transition-colors duration-fast ease-soft hover:(bg-highest text-fg)",
-    /* Path label: the directory is the only part allowed to lose characters. */
+    /* Path label: the directory is the only part allowed to lose characters
+     * on the default one-line chip. Preview head uses the *-wrap variants. */
     "path-label": "flex min-w-0 items-baseline",
     "path-label-dir":
       "min-w-0 shrink overflow-hidden text-ellipsis whitespace-nowrap text-fg-muted",
     /* Colour is inherited on purpose: the file name reads at the weight of
      * whatever hosts it (chip text, tool head, preview title heading). */
     "path-label-base": "shrink-0 whitespace-nowrap",
+    /* Preview-head wrap: both halves may break; flex-wrap drops the file
+     * name onto the next line before either half is clipped. */
+    "path-label-wrap": "flex-wrap w-full max-w-full",
+    "path-label-dir-wrap": "min-w-0 max-w-full break-all text-fg-muted",
+    "path-label-base-wrap": "min-w-0 max-w-full break-all",
     /* Transient double-click-to-copy confirmation, pushed to the row end. */
     "path-copied-flag": "ml-auto shrink-0 text-10px text-fg-muted",
     "tool-content-wrap": "mt-1 flex flex-col gap-1 min-w-0",
@@ -263,8 +279,10 @@ export const timelineShortcuts: Record<string, string> = {
      * inline chrome matches the panel's visual weight. */
     "md-inline-code":
       "font-mono text-[0.93em] px-[0.42em] py-[0.14em] rounded-1.5 bg-white-chip text-fg",
+    /* Wrap (do not scroll-x): a nowrap fence's min-content width used to
+     * drag the whole transcript sideways. Tokens inherit wrap via code-wrap. */
     "md-pre":
-      "m-0 px-3.5 py-3 overflow-x-auto rounded-shell bg-white-code font-mono text-12px leading-relaxed text-fg [&>code]:(font-inherit whitespace-pre)",
+      "m-0 max-w-full min-w-0 px-3.5 py-3 overflow-x-hidden rounded-shell bg-white-code font-mono text-12px leading-relaxed text-fg code-wrap [&>code]:font-inherit",
     "md-link":
       "text-fg underline underline-offset-2 decoration-line-strong transition-colors duration-fast ease-soft hover:decoration-fg",
     /* mx-0 kills the UA `margin-inline: 40px` that pushed quotes off the text column. */

@@ -36,12 +36,15 @@ export const codeShortcuts: Record<string, string> = {
   "code-tok-bold": "font-semibold",
   "code-tok-underline": "underline",
   /*
-   * Wrapping code cell (preview drawer, structured diff, hunk review).
+   * Wrapping code cell (preview drawer, structured diff, timeline fences).
    *
    * The descendant override is the load-bearing part: `white-space` is set on
    * every token span, so a cell that only sets pre-wrap on itself still gets
    * unwrappable runs and scrolls sideways — which leaves gutters and row
    * backgrounds behind, since both are sized to the viewport, not the content.
+   * overflow-wrap:anywhere breaks long identifiers / import paths that
+   * break-words will not split once the table has already grown.
    */
-  "code-wrap": "whitespace-pre-wrap break-words [&_.code-tok]:whitespace-pre-wrap",
+  "code-wrap":
+    "whitespace-pre-wrap break-words [overflow-wrap:anywhere] [&_.code-tok]:(whitespace-pre-wrap [overflow-wrap:anywhere])",
 };

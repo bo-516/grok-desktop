@@ -17,6 +17,8 @@ const colors = {
   elevated: "var(--color-bg-elevated)",
   timeline: "var(--color-bg-timeline)",
   composer: "var(--color-bg-composer)",
+  "composer-queue": "var(--color-bg-composer-queue)",
+  "composer-queue-index": "var(--color-bg-composer-queue-index)",
   "composer-suggestion": "var(--color-bg-composer-suggestion)",
   "composer-suggestion-hover": "var(--color-bg-composer-suggestion-hover)",
   sidebar: "var(--color-bg-sidebar)",
@@ -62,6 +64,7 @@ const colors = {
   "line-focus": "var(--color-border-focus)",
   "rail-line": "var(--color-rail-line)",
   "line-suggestion": "var(--color-border-composer-suggestion)",
+  "line-queue": "var(--color-border-composer-queue)",
   /* Composer field chrome (wrap sole owner — color only per state) */
   field: "var(--color-border-field)",
   "field-focus": "var(--color-border-field-focus)",
@@ -169,6 +172,8 @@ export default defineConfig({
       popover: "var(--shadow-popover)",
       composer: "var(--shadow-composer)",
       "composer-suggestions": "var(--shadow-composer-suggestions)",
+      /* Sticky turn-status lift — smaller than popover, no hairline ring. */
+      float: "var(--shadow-float)",
     },
     maxWidth: {
       chat: "var(--chat-max-width)",
@@ -262,7 +267,13 @@ export default defineConfig({
   },
   shortcuts: appShortcuts,
     rules: [
-    ["group", {}],
+    /*
+     * Variant marker. An empty `{}` is dropped by UnoCSS (unmatched warning);
+     * the dummy var keeps a leftover `group` token in a shortcut from
+     * warning. `group-hover:` still needs a literal `group` class on the
+     * host — shortcuts never emit a real `.group` selector.
+     */
+    ["group", { "--un-group": "1" }],
     ["caret-fg", { "caret-color": "var(--color-text-primary)" }],
     [/^text-(\d+)px$/, ([, d]) => ({ "font-size": `${d}px` })],
     [/^leading-(\d+)px$/, ([, d]) => ({ "line-height": `${d}px` })],
@@ -276,22 +287,31 @@ export default defineConfig({
         "-webkit-backdrop-filter": `blur(${d}px)`,
       }),
     ],
+    [/^blur-(\d+)px$/, ([, d]) => ({ filter: `blur(${d}px)` })],
     ["left-sidebar", { left: "var(--sidebar-width)" }],
     ["ml-sidebar", { "margin-left": "var(--sidebar-width)" }],
     ["pt-topnav", { "padding-top": "var(--topnav-height)" }],
+    /* theme.height feeds `h-topnav` only; min-h looks up theme.minHeight. */
+    ["min-h-topnav", { "min-height": "var(--topnav-height)" }],
     ["right-rail", { right: "var(--rail-right-width)" }],
     ["pr-rail", { "padding-right": "var(--rail-right-width)" }],
     ["translate-x-rail", { transform: "translateX(var(--rail-right-width))" }],
     /*
      * Own-width off-screen slide (not a rail token): `-full` docks a
      * right-edge drawer (preview/plan closed), `-full-left` docks the
-     * left-edge side-nav off-canvas at ≤900px.
+     * left-edge side-nav off-canvas when the shell undocks it.
      * `translate-x-full-left`, not `-translate-x-full` — see the leading-dash
      * note on `translate-x-center` below.
      */
     ["translate-x-full", { transform: "translateX(100%)" }],
     ["translate-x-full-left", { transform: "translateX(-100%)" }],
     ["translate-x-none", { transform: "translateX(0)" }],
+    /*
+     * Sit a fixed tip above its `top` (overflow popover). Named, not
+     * `-translate-y-full` — the dashed presetUno spelling emits a --un-*
+     * transform chain that this app's disabled preflight never defines.
+     */
+    ["translate-y-full-up", { transform: "translateY(-100%)" }],
     [
       "px-container",
       {
@@ -348,6 +368,36 @@ export default defineConfig({
       "transition-width",
       {
         "transition-property": "width",
+        "transition-timing-function": "var(--ease-out)",
+      },
+    ],
+    /*
+     * `transition-[padding-right]` does not match: presetMini's
+     * `h.properties()` whitelist has `padding` / `right` but not
+     * `padding-right`, so the arbitrary token is unmatched in shortcuts.
+     */
+    [
+      "transition-padding-right",
+      {
+        "transition-property": "padding-right",
+        "transition-timing-function": "var(--ease-out)",
+      },
+    ],
+    /*
+     * Top-nav eases both edges: `right` follows the pushing rail,
+     * `left` follows dock ↔ overlay of the session rail.
+     */
+    [
+      "transition-left-right",
+      {
+        "transition-property": "left, right",
+        "transition-timing-function": "var(--ease-out)",
+      },
+    ],
+    [
+      "transition-margin-left",
+      {
+        "transition-property": "margin-left",
         "transition-timing-function": "var(--ease-out)",
       },
     ],

@@ -11,7 +11,7 @@ export const chromeShortcuts: Record<string, string> = {
     "btn-primary":
       "bg-primary border-primary text-on-primary hover:enabled:(bg-accent-hover border-accent-hover)",
     "btn-danger":
-      "border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] text-danger bg-danger-muted",
+      "border-[color-mix(in_srgb,var(--color-danger)_40%,transparent)] text-danger bg-danger-muted hover:enabled:(bg-[color-mix(in_oklch,var(--color-danger)_22%,transparent)] border-[color-mix(in_srgb,var(--color-danger)_55%,transparent)] text-danger)",
     "btn-ghost":
       "rounded-control border border-transparent bg-transparent text-fg-secondary px-2.5 py-1.25 text-12px transition-colors duration-fast ease-soft hover:enabled:(bg-white-soft text-fg) disabled:(opacity-45 cursor-not-allowed)",
     "btn-new":
@@ -31,9 +31,9 @@ export const chromeShortcuts: Record<string, string> = {
     /* Overlay mode adds depth; push mode is flush with the pushed content. */
     "context-drawer-overlay": "shadow-modal",
     /*
-     * Head is a narrow rail chrome (280px) — do not use px-container (clamp up
-     * to 80px); that squeezed title + close into the middle. Match body/footer
-     * inset so Plan sits flush-left and the dismiss control flush-right.
+     * Head is a narrow rail chrome (300px default) — do not use px-container
+     * (clamp up to 80px); that squeezed title + close into the middle. Match
+     * body/footer inset so Plan sits flush-left and dismiss flush-right.
      */
     "context-drawer-head":
       "flex items-center justify-between gap-2 h-topnav px-3.5 shrink-0 border-b border-line-subtle bg-titlebar",
@@ -47,14 +47,18 @@ export const chromeShortcuts: Record<string, string> = {
     "context-drawer-count":
       "shrink-0 rounded-pill bg-white-soft text-fg-muted text-10px font-medium leading-none px-1.75 py-0.75 tabular-nums",
     "context-drawer-close":
-      "shrink-0 ml-auto inline-flex items-center justify-center w-7 h-7 -mr-1 rounded-control border-none bg-transparent text-fg-muted transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg)",
+      "shrink-0 ml-auto inline-flex items-center justify-center box-border w-24px h-24px p-0 -mr-1 rounded-control border-none bg-transparent text-fg-muted transition-colors duration-fast ease-soft hover:(bg-white-soft text-fg) [&_svg]:(block shrink-0)",
     "context-drawer-body":
       "flex-1 min-h-0 flex flex-col overflow-hidden",
     "context-drawer-footer":
       "shrink-0 border-t border-line-subtle px-3.5 py-3 bg-surface",
-    /* Session-scoped Agents rail (L2) */
+    /*
+     * Session-scoped Agents rail (L2). flex-1 lives on agents-rail-fill
+     * (roster-only); inspect uses agents-rail-compact (title-only picker)
+     * so the transcript owns leftover height. See uno/shortcuts.agents.ts.
+     */
     "agents-rail":
-      "flex flex-col flex-1 min-h-0 overflow-y-auto",
+      "flex flex-col min-h-0 overflow-y-auto",
     "agents-rail-section":
       "flex flex-col gap-2 px-3.5 py-3 border-b border-line-subtle last:border-b-0",
     "agents-rail-section-title":
@@ -126,12 +130,30 @@ export const chromeShortcuts: Record<string, string> = {
       "w-[min(420px,92vw)] bg-container border border-line-subtle rounded-modal shadow-modal p-5 animate-modal-in",
     /* Confirm dialog shell (ConfirmDialogView) — elevated surface, never white-out */
     "modal-panel":
-      "w-[min(420px,92vw)] bg-elevated text-fg border border-line-subtle rounded-modal shadow-modal p-5 animate-modal-in flex flex-col gap-3",
+      "w-[min(400px,92vw)] bg-elevated text-fg border border-line-subtle rounded-modal shadow-modal px-5 pt-5 pb-4 animate-modal-in flex flex-col gap-4",
     "modal-title":
-      "m-0 text-15px font-medium tracking-tight text-fg",
+      "m-0 min-w-0 flex-1 text-15px font-medium tracking-tight leading-snug text-fg",
     "modal-details":
       "m-0 pl-4.5 text-13px leading-snug text-fg-secondary list-disc",
-    "modal-actions": "flex flex-row justify-end gap-2",
+    "modal-actions": "flex flex-row justify-end items-center gap-2 pt-1",
+    /*
+     * Confirm footer. Descendant radius/size beat `btn` / `btn-ghost`
+     * `rounded-control` so Cancel (ghost) and Confirm (filled) share one
+     * pill — the filled 8px control otherwise reads as a sharp box.
+     */
+    "confirm-actions":
+      "flex flex-row justify-end items-center gap-2 pt-1 [&_button]:(rounded-pill min-h-8 px-3.5)",
+    "confirm-head": "flex items-center gap-3 min-w-0",
+    "confirm-icon":
+      "shrink-0 w-8 h-8 rounded-10px flex items-center justify-center",
+    "confirm-icon-danger": "bg-danger-muted text-danger",
+    "confirm-icon-default": "bg-white-soft text-fg-secondary",
+    "confirm-icon-svg": "block w-4 h-4",
+    "confirm-subject":
+      "m-0 w-fit max-w-full rounded-8px border border-line-subtle bg-white-faint px-2.75 py-1.75 text-12px leading-snug text-fg break-words [overflow-wrap:anywhere] line-clamp-2",
+    "confirm-details":
+      "m-0 p-0 flex flex-col gap-1.5 text-13px leading-relaxed text-fg-secondary",
+    "confirm-detail": "m-0",
 
     /*
      * Side drawers (Settings / Environment / Overview / Tasks).
@@ -156,6 +178,20 @@ export const chromeShortcuts: Record<string, string> = {
      */
     "side-panel-body":
       "flex-1 min-h-0 overflow-y-auto px-4 py-0 flex flex-col text-fg",
+    /*
+     * Pin between header and scroll body (e.g. Overview search). Outside
+     * overflow so it stays put; bottom hairline is the only rule against the
+     * list so the first body section can keep first:border-t-0.
+     */
+    "side-panel-toolbar":
+      "shrink-0 z-10 flex flex-col px-4 pt-3.5 pb-4 border-b border-line-subtle bg-elevated",
+    /*
+     * Pin between scroll body and footer (e.g. Account). Outside overflow so it
+     * stays visible; sections inside drop their top hairline so the pin border
+     * is the only rule against the body.
+     */
+    "side-panel-sticky":
+      "shrink-0 z-10 flex flex-col px-4 py-0 border-t border-line-subtle bg-elevated [&_.side-panel-section]:(border-t-0 py-3) [&_.side-panel-section:first-child]:pt-3",
     /* Sticky apply region pinned to drawer bottom (always visible while scrolling). */
     "side-panel-footer":
       "shrink-0 sticky bottom-0 z-10 flex items-center justify-between gap-3 px-4 py-2.75 border-t border-line-subtle bg-elevated",
@@ -221,6 +257,10 @@ export const chromeShortcuts: Record<string, string> = {
      * Radius stays ~3.5px: --radius-sm (6px) on a 15px box is nearly circular
      * and reads as radio / exclusive choice.
      *
+     * Vertical alignment: `ui-check-face` is one label line tall (`1lh`) and
+     * flex-centers the 15px box, so the control lines up with the title — not
+     * the midpoint of title+description. Do not put mt/pt on box/text for this.
+     *
      * Pair the label with a literal `group` class (see Checkbox.tsx) so
      * group-hover / group-focus-within variants resolve.
      */
@@ -228,14 +268,20 @@ export const chromeShortcuts: Record<string, string> = {
       "relative flex w-full items-start gap-2.5 text-12px leading-snug text-fg cursor-pointer select-none",
     "ui-check-disabled": "opacity-50 cursor-not-allowed pointer-events-none",
     /*
-     * Visually hidden but still focusable for keyboard. Not classic 1px
-     * sr-only: keep a real 15px hit box under the custom face so label clicks
-     * and space/enter land on the input without layout shift.
+     * One label-line tall shell. Centers the square on the first text line and
+     * hosts the invisible native input so hit/focus geometry matches the box
+     * even when the outer row adds padding (absolute-to-label was wrong).
+     */
+    "ui-check-face":
+      "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+    /*
+     * Visually hidden but still focusable for keyboard. Fills the face so
+     * space/enter and pointer land on the same square users see.
      */
     "ui-check-input":
-      "absolute left-0 top-0.5 m-0 h-[15px] w-[15px] opacity-0 cursor-pointer appearance-none",
+      "absolute inset-0 m-0 h-full w-full opacity-0 cursor-pointer appearance-none",
     "ui-check-box":
-      "mt-0.5 shrink-0 w-[15px] h-[15px] rounded-[3.5px] border border-line-muted bg-high flex items-center justify-center transition-colors duration-fast ease-soft group-hover:border-line-focus group-focus-within:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-surface)])",
+      "shrink-0 w-[15px] h-[15px] rounded-[3.5px] border border-line-muted bg-high flex items-center justify-center transition-colors duration-fast ease-soft group-hover:border-line-focus group-focus-within:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-surface)])",
     /* Checked face — toggled from Checkbox via className, not :checked. */
     "ui-check-box-on":
       "bg-primary border-primary group-hover:(bg-accent-hover border-accent-hover)",
@@ -246,8 +292,9 @@ export const chromeShortcuts: Record<string, string> = {
     "ui-check-mark":
       "block shrink-0 text-on-primary opacity-0 scale-75 transition-all duration-fast ease-soft",
     "ui-check-mark-on": "opacity-100 scale-100",
-    "ui-check-text": "min-w-0 flex-1 flex flex-col gap-0.5 pt-px",
-    "ui-check-label": "min-w-0 font-medium text-fg",
+    /* Text column: title + optional description, left edge under the gap. */
+    "ui-check-text": "min-w-0 flex-1 flex flex-col gap-0.5",
+    "ui-check-label": "min-w-0 font-medium leading-snug text-fg",
     "ui-check-desc": "m-0 text-11px leading-snug text-fg-muted",
     /* Native arrow is suppressed by appearance-none; ui-select-chevron redraws it. */
     "ui-select-wrap": "relative flex w-full items-center",
@@ -270,7 +317,15 @@ export const chromeShortcuts: Record<string, string> = {
     "row-gap": "flex flex-wrap items-center gap-2",
     "banner-info": "border-line-subtle bg-white-faint text-fg-secondary",
 
-    /* Command palette (⌘K) */
+    /*
+     * Command palette (⌘K) — three-column table, not a flex bag.
+     * Kind is sized for the longest token (COMMAND / SETTING) so titles
+     * and descriptions share one vertical start across rows. Both text
+     * columns are minmax(0,1fr): missing descriptions leave an empty
+     * third cell instead of letting the title eat the right half.
+     * Overflow tips portal above the modal (z-110) as GitHub-style pre
+     * text, hugging the truncated cell's bottom-right or top-right corner.
+     */
     "palette-panel":
       "w-palette max-w-[92vw] max-h-[min(70vh,560px)] flex flex-col overflow-hidden bg-elevated text-fg border border-line-subtle rounded-modal shadow-modal animate-modal-in",
     "palette-input":
@@ -278,14 +333,18 @@ export const chromeShortcuts: Record<string, string> = {
     "palette-list":
       "m-0 p-1.5 list-none overflow-y-auto flex-1 min-h-0",
     "palette-item":
-      "flex w-full items-center gap-2.5 border-none rounded-8px bg-transparent px-2.5 py-2 text-left text-12px text-fg transition-colors duration-fast ease-soft hover:bg-white-faint",
+      "grid w-full grid-cols-[5.5rem_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2.5 border-none rounded-8px bg-transparent px-2.5 py-2 text-left text-12px text-fg transition-colors duration-fast ease-soft hover:bg-white-faint",
     "palette-item-active": "bg-white-soft",
     "palette-kind":
-      "shrink-0 text-10px uppercase tracking-wide text-fg-muted px-1.5 py-0.5 rounded-pill bg-white-faint",
-    "palette-label": "min-w-0 flex-1 text-fg font-medium",
+      "justify-self-start w-max inline-flex items-center justify-center text-10px uppercase tracking-wide text-fg-muted px-1.5 py-0.5 rounded-pill bg-white-faint",
+    "palette-label": "min-w-0 truncate text-fg font-medium",
     "palette-desc":
-      "min-w-0 flex-1 text-fg-muted text-11px overflow-hidden text-ellipsis whitespace-nowrap",
+      "min-w-0 text-fg-muted text-11px overflow-hidden text-ellipsis whitespace-nowrap",
     "palette-empty": "px-3 py-6 text-center text-12px text-fg-muted",
+    "overflow-tip":
+      "fixed z-110 rounded-8px border border-line-subtle bg-elevated text-fg shadow-popover px-2.5 py-2 pointer-events-auto",
+    "overflow-tip-pre":
+      "m-0 max-h-48 overflow-auto font-mono text-11px leading-relaxed text-fg whitespace-pre-wrap break-words",
 
     /*
      * Environment sheet (Agent environment) — wide two-pane modal catalog.
@@ -328,8 +387,9 @@ export const chromeShortcuts: Record<string, string> = {
       "min-w-0 flex-1 font-medium text-12px text-fg overflow-hidden text-ellipsis whitespace-nowrap",
     "env-row-desc":
       "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+    /* Hover-reveal row controls; snap visible, no opacity transition. */
     "env-row-actions":
-      "shrink-0 flex items-center gap-1 opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 focus-within:opacity-100",
+      "shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100",
     "env-chip":
       "shrink-0 text-10px uppercase tracking-wide text-fg-muted px-1.5 py-0.5 rounded-pill bg-white-faint border border-line-subtle",
     "env-status-dot":
@@ -414,7 +474,8 @@ export const chromeShortcuts: Record<string, string> = {
     "prompt-badge":
       "shrink-0 text-10px px-1.5 py-0.5 rounded-pill border border-line-subtle bg-white-soft text-fg-muted",
     "prompt-badge-git": "text-fg-secondary",
-    "prompt-badge-overridden": "text-fg-muted line-through-none",
+    /* no-underline: this chip is not the disabled (struck) input. */
+    "prompt-badge-overridden": "text-fg-muted no-underline",
     "prompt-badge-overrides": "text-fg-secondary",
     "prompt-overlay-hint":
       "m-0 py-0.5 text-center text-10px text-fg-muted",

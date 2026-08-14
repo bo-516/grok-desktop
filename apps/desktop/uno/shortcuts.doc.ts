@@ -34,12 +34,16 @@ export const docShortcuts: Record<string, string> = {
   "doc-list-ordered": "list-decimal",
   "doc-inline-code":
     "font-mono text-[0.92em] px-[0.4em] py-[0.12em] rounded-1.5 bg-white-chip text-fg",
-  /* Block chrome on <pre>; inner <code> is highlighted by MarkdownCodeWidget. */
+  /* Block chrome on <pre>; inner <code> is highlighted by MarkdownCodeWidget.
+   * Same wrap contract as md-pre — a nowrap fence must not open a drawer
+   * horizontal scrollbar next to the already-squeezed transcript. */
   "doc-pre":
-    "m-0 px-3.5 py-3 overflow-x-auto rounded-shell bg-white-code font-mono text-doc-code text-fg [&>code]:(font-inherit whitespace-pre)",
-  "doc-pre-wrap": "relative group",
+    "m-0 max-w-full min-w-0 px-3.5 py-3 overflow-x-hidden rounded-shell bg-white-code font-mono text-doc-code text-fg code-wrap [&>code]:font-inherit",
+  /* Pair with literal `group` on the wrap — shortcuts never emit `.group`.
+   * Copy snaps on hover / focus — no opacity transition. */
+  "doc-pre-wrap": "relative",
   "doc-pre-copy":
-    "absolute right-1.5 top-1.5 btn-ghost h-6 px-1.5 text-11px opacity-0 transition-opacity duration-fast ease-soft group-hover:opacity-100 focus-visible:opacity-100",
+    "absolute right-1.5 top-1.5 btn-ghost h-6 px-1.5 text-11px opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
   "doc-link":
     "text-fg underline underline-offset-2 decoration-line-strong transition-colors duration-fast ease-soft hover:decoration-fg",
   /* Workspace-relative jumps: dotted underline vs solid external links. */

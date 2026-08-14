@@ -59,6 +59,7 @@ export function readAllUnoShortcuts(): string {
     "uno/shortcuts.timeline.ts",
     "uno/shortcuts.composer.ts",
     "uno/shortcuts.chrome.ts",
+    "uno/shortcuts.agents.ts",
     "uno/shortcuts.preview.ts",
     "uno/shortcuts.code.ts",
     "uno/shortcuts.doc.ts",

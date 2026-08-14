@@ -6,6 +6,7 @@
  *
  * Collapse / preview-expand survive remounts via an in-memory cache that is
  * always written on save; localStorage is the cross-reload source of truth.
+ * "Show more" / "Show less" mutators live in {@link ./sessionRailPreview}.
  */
 
 /** localStorage key for pin + collapse + drag order state. */
@@ -36,8 +37,8 @@ export type SessionRailPrefs = {
   collapsedWorkspaces: string[];
   /**
    * Workspaces where the user clicked "Show more" to reveal sessions past
-   * the preview cap. Cleared when that workspace is collapsed. Survives
-   * remount so long lists do not re-clamp to the preview every time.
+   * the preview cap. Cleared by "Show less" or when that workspace is
+   * collapsed. Survives remount so long lists do not re-clamp every time.
    */
   previewExpandedWorkspaces: string[];
   /**
@@ -221,7 +222,8 @@ export function isWorkspaceCollapsed(
 }
 
 /**
- * Whether the user expanded past the session preview cap for a workspace.
+ * Whether the user expanded past the session preview cap for a workspace
+ * ("Show more" and not yet "Show less" / folder collapse).
  * @param prefs Current prefs.
  * @param workspace Absolute path key (or "(no project)").
  */
@@ -294,32 +296,6 @@ export function toggleCollapsedWorkspace(
     previewExpandedWorkspaces: prefs.previewExpandedWorkspaces.filter(
       (w) => normalizeWorkspaceKey(w) !== key,
     ),
-  };
-}
-
-/**
- * Mark a workspace as showing the full session list (past preview cap).
- * No-op when already expanded. Does not open a collapsed folder.
- * @param prefs Current prefs (not mutated).
- * @param workspace Workspace path key.
- * @returns New prefs with preview-expand set updated.
- */
-export function expandWorkspacePreview(
-  prefs: SessionRailPrefs,
-  workspace: string,
-): SessionRailPrefs {
-  const key = normalizeWorkspaceKey(workspace);
-  if (isPreviewExpanded(prefs, key)) {
-    return prefs;
-  }
-  return {
-    ...prefs,
-    previewExpandedWorkspaces: [
-      ...prefs.previewExpandedWorkspaces.filter(
-        (w) => normalizeWorkspaceKey(w) !== key,
-      ),
-      key,
-    ],
   };
 }
 

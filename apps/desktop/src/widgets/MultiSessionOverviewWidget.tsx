@@ -1,14 +1,16 @@
 /**
  * Multi-session overview (F-MULTI-01/03/04/07) — group by status, peek send, permission.
+ * WORKING is live-pool streaming only; harness subagents stay off this list.
  */
 
 import cs from "classnames";
 import { useMemo, useState } from "react";
 import { useSessionStore } from "../store/sessionStore";
 import {
+  buildOverviewSessions,
   filterOverviewSessions,
   groupByOverviewStatus,
-  type OverviewSession,
+  limitOverviewSessions,
   type OverviewStatus,
 } from "../lib/multiSession";
 import { SidePanelShell } from "./SidePanelShell";
@@ -24,6 +26,10 @@ const BUCKETS: OverviewStatus[] = [
 
 /**
  * Stateful overview panel over catalog + pool.
+ * Rows hide harness subagents (same list as the session rail) and only
+ * paint WORKING when a live pool process is streaming — matches "N running".
+ * After search, only the newest 100 matches paint (display cap, not catalog).
+ * Search lives in the shell toolbar so it stays put while buckets scroll.
  * @param props open/onClose — parent toggles; shell handles dismiss
  */
 export function MultiSessionOverviewWidget(props: {
@@ -32,6 +38,7 @@ export function MultiSessionOverviewWidget(props: {
 }) {
   const catalog = useSessionStore((s) => s.catalog);
   const poolEntries = useSessionStore((s) => s.poolEntries);
+  const sessionRoles = useSessionStore((s) => s.sessionRoles);
   const selectSession = useSessionStore((s) => s.selectSession);
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
   const respondPermission = useSessionStore((s) => s.respondPermission);
@@ -40,29 +47,27 @@ export function MultiSessionOverviewWidget(props: {
   const [peekId, setPeekId] = useState<string | null>(null);
   const [peekText, setPeekText] = useState("");
 
-  const rows: OverviewSession[] = useMemo(() => {
-    const poolMap = new Map(poolEntries.map((e) => [e.sessionId, e]));
-    return catalog.map((c) => {
-      const pe = poolMap.get(c.id);
-      return {
-        id: c.id,
-        title: c.title,
-        workspace: c.workspace,
-        status: pe?.status ?? c.status,
-        live: pe?.live,
-        pendingPermission:
-          session.id === c.id && session.status === "waiting_permission",
-      };
-    });
-  }, [catalog, poolEntries, session.id, session.status]);
+  const rows = useMemo(
+    () =>
+      buildOverviewSessions(catalog, poolEntries, {
+        canvas: { id: session.id, status: session.status },
+        sessionRoles,
+      }),
+    [catalog, poolEntries, session.id, session.status, sessionRoles],
+  );
 
   const filtered = useMemo(
     () => filterOverviewSessions(rows, query),
     [rows, query],
   );
-  const groups = useMemo(
-    () => groupByOverviewStatus(filtered),
+  /** Display cap: newest 100 matches. Search still runs on the full set. */
+  const visible = useMemo(
+    () => limitOverviewSessions(filtered),
     [filtered],
+  );
+  const groups = useMemo(
+    () => groupByOverviewStatus(visible),
+    [visible],
   );
 
   return (
@@ -71,16 +76,16 @@ export function MultiSessionOverviewWidget(props: {
       label="Session overview"
       title="Overview"
       onClose={props.onClose}
-    >
-      {/* Sections own the drawer's vertical rhythm — side-panel-body adds no gap. */}
-      <section className="side-panel-section">
+      toolbar={
         <input
           className="text-input"
           placeholder="Search · s:working · a:name"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-      </section>
+      }
+    >
+      {/* Sections own the drawer's vertical rhythm — side-panel-body adds no gap. */}
       {BUCKETS.map((bucket) => {
         const list = groups[bucket];
         if (!list.length) {

@@ -13,7 +13,7 @@ import {
 
 /**
  * Mount point for the left session list.
- * @param props Optional delete confirm + mobile overlay open state.
+ * @param props Optional delete confirm, overlay open, and header collapse.
  * @returns Rail bound to the live session catalog.
  */
 export function SessionRailWidget(props: SessionRailWidgetProps = {}) {

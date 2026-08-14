@@ -1,18 +1,19 @@
 /**
  * Full-height non-modal session companion drawer (always mounted).
- * Chrome owns open/close, Plan | Agents tabs, layout preference footer, and Escape.
- * Body content is PlanPanelView or AgentsRailWidget by active tab.
+ * Chrome owns open/close, Plan | Agents tabs, one shared width (resize on
+ * either tab), layout preference footer, and Escape.
+ * Body content is PlanPanelView or AgentsPanelWidget by active tab.
  */
 
 import type { PlanEntry } from "@grok-desktop/acp-core";
 import cs from "classnames";
 import { X } from "lucide-react";
-import type { KeyboardEvent } from "react";
 import { Checkbox } from "@/components/ui/Checkbox";
 import type { DrawerLayout } from "@/lib/contextDrawerPrefs";
 import type { ContextRailId } from "@/widgets/shell/shellPanels";
-import { AgentsRailWidget } from "@/widgets/agentsRail";
+import { AgentsPanelWidget } from "@/widgets/agentsRail";
 import { PlanPanelView } from "../PlanPanelView";
+import { useContextDrawerChrome } from "./useContextDrawerChrome";
 
 export type ContextDrawerWidgetProps = {
   /** Whether the drawer is slid in (still mounted when false). */
@@ -57,6 +58,8 @@ export type ContextDrawerWidgetProps = {
 
 /**
  * Always-mounted right drawer with Plan|Agents tabs, body, and layout footer.
+ * Width is one persisted value for both tabs so switching Plan ↔ Agents
+ * does not resize the rail or the main-column push padding.
  * Closed state uses inert + off-screen translate so exit motion and aria-controls work.
  * @param props Open flag, rail tab, plan/agents data, layout prefs, handlers.
  * @returns Aside with id=context-rail for aria-controls from the top-nav toggle.
@@ -66,17 +69,11 @@ export function ContextDrawerWidget(props: ContextDrawerWidgetProps) {
   const isOverlay = props.effectiveLayout === "overlay";
   const activeTab: "plan" | "agents" =
     props.rail === "agents" ? "agents" : "plan";
-
-  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key !== "Escape") {
-      return;
-    }
-    if (!props.open) {
-      return;
-    }
-    e.stopPropagation();
-    props.onClose();
-  };
+  const chrome = useContextDrawerChrome({
+    open: props.open,
+    activeTab,
+    onClose: props.onClose,
+  });
 
   return (
     <aside
@@ -86,10 +83,26 @@ export function ContextDrawerWidget(props: ContextDrawerWidgetProps) {
         "context-drawer-closed": !props.open,
         "context-drawer-overlay": isOverlay,
       })}
+      style={{ width: `${chrome.drawerWidth}px`, maxWidth: "100%" }}
       aria-label="Context"
       inert={!props.open ? true : undefined}
-      onKeyDown={onKeyDown}
+      onKeyDown={chrome.onKeyDown}
+      data-drawer-width={chrome.drawerWidth}
     >
+      {/* Same handle on Plan and Agents — width is not tab-specific. */}
+      <div
+        className="agents-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize session rail"
+        aria-valuemin={chrome.agentsMin}
+        aria-valuemax={chrome.agentsMax}
+        aria-valuenow={chrome.drawerWidth}
+        onPointerDown={chrome.onResizePointerDown}
+        onPointerMove={chrome.onResizePointerMove}
+        onPointerUp={chrome.onResizePointerUp}
+        onPointerCancel={chrome.onResizePointerUp}
+      />
       <div className="context-drawer-head">
         <div className="context-drawer-tabs" role="tablist" aria-label="Session rail">
           <button
@@ -138,12 +151,17 @@ export function ContextDrawerWidget(props: ContextDrawerWidgetProps) {
           aria-label="Close session rail"
           title="Close"
         >
-          <X size={16} strokeWidth={1.75} aria-hidden="true" />
+          <X
+            className="block shrink-0"
+            size={16}
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
         </button>
       </div>
       <div className="context-drawer-body">
         {activeTab === "agents" ? (
-          <AgentsRailWidget />
+          <AgentsPanelWidget />
         ) : (
           <PlanPanelView entries={props.plan} />
         )}

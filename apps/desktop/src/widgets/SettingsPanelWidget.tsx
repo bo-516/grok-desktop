@@ -77,15 +77,18 @@ export function SettingsPanelWidget(props: {
   );
   const [theme, setTheme] = useState<ThemeId>(() => loadTheme());
   const [palette, setPalette] = useState<ColorPaletteId>(() => loadPalette());
-  /** Composer context ring visibility — instant UI pref, not SPAWN dirty. */
+  /** Composer context ring + weekly remaining — instant UI prefs, not SPAWN dirty. */
   const [showContextUsage, setShowContextUsage] = useState(
     () => loadContextUsagePrefs().showContextUsage,
+  );
+  const [showWeeklyUsage, setShowWeeklyUsage] = useState(
+    () => loadContextUsagePrefs().showWeeklyUsage,
   );
   const [discardOpen, setDiscardOpen] = useState(false);
   /*
    * Compatibility sources stay collapsed until asked for: ten toggles is the
-   * longest block in the drawer and the least often changed, so expanding it by
-   * default buried Account below a screen of scroll.
+   * longest block in the drawer and the least often changed. Account is pinned
+   * outside the scroll body, so expand state no longer buries it.
    */
   const [compatOpen, setCompatOpen] = useState(false);
 
@@ -130,6 +133,15 @@ export function SettingsPanelWidget(props: {
   const setContextUsageVisible = useCallback((show: boolean) => {
     setShowContextUsage(show);
     saveContextUsagePrefs({ showContextUsage: show });
+  }, []);
+
+  /**
+   * Toggle the weekly remaining chip; persists immediately (no restart).
+   * @param show Next visibility value from the Appearance checkbox
+   */
+  const setWeeklyUsageVisible = useCallback((show: boolean) => {
+    setShowWeeklyUsage(show);
+    saveContextUsagePrefs({ showWeeklyUsage: show });
   }, []);
 
   /**
@@ -190,6 +202,8 @@ export function SettingsPanelWidget(props: {
       }),
     [environment?.authSource],
   );
+  /** True when bridge probe reports a usable credential (drives Login/Logout exclusivity). */
+  const loggedIn = environment?.authed === true;
   const alwaysApproveLocked =
     typeof localStorage !== "undefined" &&
     localStorage.getItem("grok-desktop.requirements.always_approve_locked") ===
@@ -230,6 +244,12 @@ export function SettingsPanelWidget(props: {
         label="Session settings"
         title="Session settings"
         onClose={requestClose}
+        stickySection={
+          <SettingsAccountSectionView
+            loggedIn={loggedIn}
+            onRunCli={(command) => void runCli(command)}
+          />
+        }
         footer={footer}
         footerDirty={dirty}
       >
@@ -252,8 +272,10 @@ export function SettingsPanelWidget(props: {
           theme={theme}
           palette={palette}
           showContextUsage={showContextUsage}
+          showWeeklyUsage={showWeeklyUsage}
           onPickPalette={pickPalette}
           onShowContextUsageChange={setContextUsageVisible}
+          onShowWeeklyUsageChange={setWeeklyUsageVisible}
         />
 
         <SettingsSecuritySectionView
@@ -271,10 +293,6 @@ export function SettingsPanelWidget(props: {
           expanded={compatOpen}
           onToggleExpanded={() => setCompatOpen((prev) => !prev)}
           onPatchDraft={patchDraft}
-        />
-
-        <SettingsAccountSectionView
-          onRunCli={(command) => void runCli(command)}
         />
       </SidePanelShell>
 

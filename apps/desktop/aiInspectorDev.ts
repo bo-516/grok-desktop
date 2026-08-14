@@ -38,7 +38,8 @@ const VENDORED_PLUGIN_ENTRY = path.join(
  * Boundary: returns `[]` when the vendor file is absent so `npm run dev` still
  * works. When present, registers code-inspector + inspector bootstrap with Grok
  * Build as the default handoff agent and `projectRoot` = monorepo root (not
- * `apps/desktop`).
+ * `apps/desktop`). `codeInspector.importClient` is `"file"` so the locator
+ * runtime is not inlined into `main.tsx` (avoids Babel's 500KB deopt note).
  *
  * @returns Vite plugin list (0 or more); safe to spread into `plugins`.
  */
@@ -71,6 +72,15 @@ export async function loadAiInspectorDevPlugins(): Promise<PluginOption[]> {
     // Opt out of rrweb so host project need not install @rrweb/* for basic use.
     recording: false,
     outputDir: ".intent-inspector",
+    /*
+     * Forwarded to code-inspector-plugin. Default `importClient: "code"`
+     * inlines the locator client into the Vite entry (main.tsx) and Babel
+     * prints a 500KB deopt note on every serve. `file` keeps that runtime
+     * on its own module.
+     */
+    codeInspector: {
+      importClient: "file",
+    },
     // Source chips stay monorepo-relative via grokBuild.projectRoot; screenshots /
     // recording stills use absolute paths so Grok can open them regardless of cwd.
     // Override with artifactPathStyle: "relative" only if short chips are preferred.

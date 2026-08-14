@@ -1,23 +1,38 @@
 /**
  * Stateless preview drawer chrome: path, +N/−M summary, optional actions slot, close.
- * A path title renders as dir + file name (workspace-shortened by the caller);
- * the absolute path stays in the tooltip and on the copy gesture.
+ * A path title renders as dir + file name (workspace-shortened by the caller)
+ * and wraps in the head so a long file name is never clipped by the toolbar.
+ * The absolute path stays in the tooltip and on the copy gesture.
+ * Double-click confirmation is a cursor chip (CopiedMarkView), not inline text.
  */
 
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import type { PathDisplay } from "@/lib/pathDisplay";
 import { PathLabelView } from "@/widgets/shared";
+import {
+  CopiedCursorFlashView,
+  type CopyCursorPoint,
+} from "./CopiedCursorFlashView";
 
 export type PreviewHeadViewProps = {
   /** Primary title (path or "Changes"); also the fallback when display is absent. */
   title: string;
   /** Shortened parts when the title is a file path; absent for "Changes"/placeholders. */
   display?: PathDisplay;
-  /** True while the copied flash is showing. */
+  /** True while the path-copy flash is showing (after a successful write). */
   copied?: boolean;
-  /** Copy the absolute path (double-click on the title). */
-  onCopyPath?: () => void;
+  /**
+   * Viewport point of the double-click that requested the copy.
+   * Required to park the check + "Copied" chip under the pointer; ignored
+   * when `copied` is false.
+   */
+  copyAt?: CopyCursorPoint | null;
+  /**
+   * Copy the absolute path. Receives the double-click viewport point so the
+   * caller can hold it until the clipboard write resolves.
+   */
+  onCopyPath?: (point: CopyCursorPoint) => void;
   /** Optional secondary line (scope / status). */
   subtitle?: string;
   /** Aggregate +N when showing a diff. */
@@ -47,6 +62,7 @@ export function PreviewHeadView(props: PreviewHeadViewProps) {
           title={props.title}
           display={props.display}
           copied={props.copied}
+          copyAt={props.copyAt}
           onCopyPath={props.onCopyPath}
         />
         {props.subtitle ? (
@@ -68,7 +84,12 @@ export function PreviewHeadView(props: PreviewHeadViewProps) {
           aria-label="Close preview"
           title="Close"
         >
-          <X size={16} strokeWidth={1.75} aria-hidden="true" />
+          <X
+            className="block shrink-0"
+            size={16}
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
         </button>
       </div>
     </div>
@@ -76,18 +97,28 @@ export function PreviewHeadView(props: PreviewHeadViewProps) {
 }
 
 /**
- * Title line: split path label when the target is a file, plain text otherwise.
- * @param props Raw title plus optional path display and copy gesture.
- * @returns h2 heading; the accessible name is the shortened label, and the
- *   absolute path is reachable through the tooltip and the copy action.
+ * Title line: split wrapping path label when the target is a file, plain
+ * wrapping text otherwise. Double-click copies; confirmation is a cursor
+ * chip (same mark as the file-text copy button), not an inline "Copied"
+ * flag that a multi-line title would clip.
+ * @param props Raw title plus optional path display, flash point, and copy.
+ * @returns h2 heading plus the floating flash when a copy just succeeded.
  */
 function PreviewTitleView(props: {
   title: string;
   display?: PathDisplay;
   copied?: boolean;
-  onCopyPath?: () => void;
+  copyAt?: CopyCursorPoint | null;
+  onCopyPath?: (point: CopyCursorPoint) => void;
 }) {
-  const { title, display, copied, onCopyPath } = props;
+  const { title, display, copied, copyAt, onCopyPath } = props;
+  /**
+   * Forward the pointer so the flash can sit under the cursor, not in the title.
+   * @param event Heading double-click; only clientX/clientY are used.
+   */
+  const handleDoubleClick = (event: MouseEvent<HTMLHeadingElement>) => {
+    onCopyPath?.({ x: event.clientX, y: event.clientY });
+  };
   if (!display) {
     return (
       <h2 className="preview-title" title={title}>
@@ -95,15 +126,20 @@ function PreviewTitleView(props: {
       </h2>
     );
   }
+
   return (
-    <h2
-      className="preview-title preview-title-row"
-      title={`${display.full}\nDouble-click to copy path`}
-      data-path={display.full}
-      onDoubleClick={onCopyPath}
-    >
-      <PathLabelView display={display} />
-      {copied ? <span className="path-copied-flag">Copied</span> : null}
-    </h2>
+    <>
+      <h2
+        className="preview-title preview-title-row"
+        title={`${display.full}\nDouble-click to copy path`}
+        data-path={display.full}
+        onDoubleClick={handleDoubleClick}
+      >
+        <PathLabelView display={display} wrap />
+      </h2>
+      {copied && copyAt ? (
+        <CopiedCursorFlashView x={copyAt.x} y={copyAt.y} />
+      ) : null}
+    </>
   );
 }

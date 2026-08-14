@@ -1,6 +1,6 @@
 /**
  * Settings drawer — UI color palette + chrome toggles (instant, no restart).
- * Stateless presentation; parent owns palette/theme/context-usage state.
+ * Stateless presentation; parent owns palette/theme/usage-chrome state.
  */
 
 import cs from "classnames";
@@ -25,7 +25,7 @@ export type SettingsAppearanceSectionViewProps = {
   onPickPalette: (option: ColorPaletteOption) => void;
   /**
    * When true, the composer shows a context-usage ring left of the model name
-   * (tokens, window size, percent from the last completed turn).
+   * (live occupancy vs window; hover lists last-turn billed token usage).
    */
   showContextUsage: boolean;
   /**
@@ -33,6 +33,16 @@ export type SettingsAppearanceSectionViewProps = {
    * @param show Next visibility value
    */
   onShowContextUsageChange: (show: boolean) => void;
+  /**
+   * When true, the composer shows weekly (or monthly) remaining allowance
+   * immediately left of the context ring.
+   */
+  showWeeklyUsage: boolean;
+  /**
+   * Toggle the weekly remaining chip; applies instantly (no session restart).
+   * @param show Next visibility value
+   */
+  onShowWeeklyUsageChange: (show: boolean) => void;
 };
 
 /**
@@ -43,9 +53,9 @@ export type SettingsAppearanceSectionViewProps = {
  * is printed once below the row instead, and each button keeps its title +
  * aria-label so hover and screen readers still name every colour.
  *
- * Context usage is a pure UI chrome toggle (F-CTX-01): no SPAWN dirty state.
+ * Context + weekly remaining are pure UI chrome toggles (F-CTX-01): no SPAWN dirty state.
  *
- * @param props theme/palette/context-usage snapshot + handlers
+ * @param props theme/palette/usage-chrome snapshot + handlers
  */
 export function SettingsAppearanceSectionView(
   props: SettingsAppearanceSectionViewProps,
@@ -96,10 +106,17 @@ export function SettingsAppearanceSectionView(
       <div className="panel-group">
         <Checkbox
           className="panel-row"
+          checked={props.showWeeklyUsage}
+          onChange={(e) => props.onShowWeeklyUsageChange(e.target.checked)}
+          label="Show weekly remaining"
+          description="Allowance left this week (or month) immediately left of the context ring."
+        />
+        <Checkbox
+          className="panel-row"
           checked={props.showContextUsage}
           onChange={(e) => props.onShowContextUsageChange(e.target.checked)}
           label="Show context usage"
-          description="Ring left of the model name: last-turn tokens, context window, and fill percent."
+          description="Ring left of the model name: live context fill vs window. Hover shows occupancy and last-turn token usage separately."
         />
       </div>
     </section>

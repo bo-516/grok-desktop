@@ -1,5 +1,6 @@
 /**
- * Stateless main-column status banners (offline / auth / restart / queue / permission).
+ * Stateless main-column status banners (offline / auth / restart / permission).
+ * Queued follow-ups render above the composer (ComposerQueueView), not here.
  * Parent supplies flags and labels; this view only renders structure and buttons.
  */
 
@@ -14,8 +15,6 @@ export type ShellBannersViewProps = {
   authMessage?: string;
   /** SPAWN / restart notice text; null hides. */
   restartNotice: string | null;
-  /** Queued prompt count while turn is in flight. */
-  queueLength: number;
   /** Session waiting on a permission modal. */
   waitingPermission: boolean;
   /** Run auth login CLI. */
@@ -34,8 +33,8 @@ export function ShellBannersView(props: ShellBannersViewProps) {
     <>
       {!props.live ? (
         <div className="banner banner-danger history-banner">
-          Bridge not connected. Run <code>npm run bridge</code>, then click a
-          session on the left or reconnect from the footer.
+          Bridge not connected. Retrying every 3s. Run{" "}
+          <code>npm run bridge</code>.
         </div>
       ) : null}
       {props.live && props.envKnown && !props.authOk ? (
@@ -57,11 +56,6 @@ export function ShellBannersView(props: ShellBannersViewProps) {
           >
             Dismiss
           </button>
-        </div>
-      ) : null}
-      {props.queueLength > 0 ? (
-        <div className="banner banner-info history-banner">
-          {props.queueLength} prompt(s) queued — will send after this turn.
         </div>
       ) : null}
       {props.waitingPermission ? (

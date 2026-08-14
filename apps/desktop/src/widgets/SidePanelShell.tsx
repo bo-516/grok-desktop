@@ -2,9 +2,11 @@
  * Shared right-drawer shell for Settings / Environment / Overview / Tasks.
  *
  * Purpose: fixed elevated panel + dimmed backdrop so content is readable and
- * dismissible (Close, backdrop click, Escape). Optional sticky footer for Apply.
- * On open: moves focus into the dialog and traps Tab; on close: restores prior
- * focus. Parent owns open state.
+ * dismissible (Close, backdrop click, Escape). Optional toolbar pin (e.g.
+ * Overview search) sits between header and scroll body; optional stickySection
+ * pin (e.g. Account) sits between scroll body and footer; optional sticky
+ * footer for Apply. On open: moves focus into the dialog and traps Tab; on
+ * close: restores prior focus. Parent owns open state.
  *
  * Boundary: pure presentation — no store. Missing onClose leaves the drawer stuck.
  * Escape is skipped while a stacked alertdialog (e.g. dirty confirm) is open so
@@ -37,6 +39,18 @@ export type SidePanelShellProps = {
   /** Scrollable body content. */
   children: ReactNode;
   /**
+   * Optional pin below the header and above the scroll body (e.g. Overview search).
+   * Flex shrink-0 sibling of body — stays put while the list/sections scroll.
+   * Missing/undefined skips the toolbar (no empty chrome).
+   */
+  toolbar?: ReactNode;
+  /**
+   * Optional pin below the scroll body and above footer (e.g. Settings Account).
+   * Flex shrink-0 sibling of body — always visible while body scrolls.
+   * Missing/undefined skips the pin region (no empty chrome).
+   */
+  stickySection?: ReactNode;
+  /**
    * Optional sticky footer (e.g. Settings Apply). Always visible at the
    * bottom of the drawer regardless of body scroll.
    */
@@ -47,11 +61,23 @@ export type SidePanelShellProps = {
 
 /**
  * Renders backdrop + fixed right panel when open.
- * @param props open/label/title/onClose/children — onClose required for dismiss paths
+ * @param props open/label/title/onClose/children — onClose required for dismiss paths;
+ *   toolbar pins under the header; stickySection pins above footer; footer pins
+ *   to drawer bottom
  * @returns null when closed; otherwise overlay shell
  */
 export function SidePanelShell(props: SidePanelShellProps) {
-  const { open, label, title, onClose, children, footer, footerDirty } = props;
+  const {
+    open,
+    label,
+    title,
+    onClose,
+    children,
+    toolbar,
+    stickySection,
+    footer,
+    footerDirty,
+  } = props;
   const panelRef = useRef<HTMLElement>(null);
   /** Element that held focus before this drawer opened (restored on close). */
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -131,7 +157,11 @@ export function SidePanelShell(props: SidePanelShellProps) {
             Close
           </button>
         </header>
+        {toolbar ? <div className="side-panel-toolbar">{toolbar}</div> : null}
         <div className="side-panel-body">{children}</div>
+        {stickySection ? (
+          <div className="side-panel-sticky">{stickySection}</div>
+        ) : null}
         {footer ? (
           <div
             className={cs("side-panel-footer", {

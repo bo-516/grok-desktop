@@ -2,6 +2,7 @@
  * Stateful preview companion drawer (always mounted alongside plan rail chrome).
  * Owns width drag local state; commits to previewStore on pointer-up.
  * Body is driven by usePreviewSource from the active PreviewTarget.
+ * File click-to-refresh keeps the last paint and frosts it (PreviewFileStackView).
  */
 
 import cs from "classnames";
@@ -20,11 +21,14 @@ import {
   PREVIEW_WIDTH_MAX,
   PREVIEW_WIDTH_MIN,
   usePreviewStore,
+  type PreviewTarget,
 } from "@/store/previewStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { useCopyFeedback } from "@/widgets/shared";
+import type { CopyCursorPoint } from "./CopiedCursorFlashView";
 import { DiffReviewWidget } from "./DiffReviewWidget";
 import { PreviewChangeListView } from "./PreviewChangeListView";
+import { PreviewFileStackView } from "./PreviewFileStackView";
 import { PreviewFileWidget } from "./PreviewFileWidget";
 import { PreviewHeadView } from "./PreviewHeadView";
 import { usePreviewSource } from "./usePreviewSource";
@@ -63,6 +67,11 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
    * Cleared when the body unmounts or leaves the file status.
    */
   const [fileToolbar, setFileToolbar] = useState<ReactNode | null>(null);
+  /**
+   * Pointer of the last path double-click. Held even after the flash expires
+   * so a late clipboard resolve still has a place to park the chip.
+   */
+  const [pathCopyAt, setPathCopyAt] = useState<CopyCursorPoint | null>(null);
 
   const width = dragWidth ?? storedWidth;
   const isOverlay = props.effectiveLayout === "overlay";
@@ -116,11 +125,28 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
   // Push padding / top-nav rail width are driven by App via --rail-right-width
   // on main-column (shell.railWidthPx). This drawer only owns its own width style.
 
-  const head = headFromSource(source, target?.kind);
+  const head = headFromSource(source, target);
   // Only file/diff heads carry a path; "Changes" and placeholders stay plain text.
   const headDisplay = head.path
     ? toPathDisplay(head.path, workspace)
     : undefined;
+  const pathCopied = Boolean(headDisplay) && copiedKey === headDisplay?.full;
+
+  /**
+   * Record the double-click point then write the absolute path.
+   * The chip only mounts after `copiedKey` matches (write succeeded).
+   * @param point Viewport client coordinates from the heading double-click.
+   */
+  const handleCopyPath = useCallback(
+    (point: CopyCursorPoint) => {
+      if (!headDisplay) {
+        return;
+      }
+      setPathCopyAt(point);
+      copy(headDisplay.full, headDisplay.full);
+    },
+    [copy, headDisplay],
+  );
 
   return (
     <aside
@@ -151,12 +177,9 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
       <PreviewHeadView
         title={head.title}
         display={headDisplay}
-        copied={Boolean(headDisplay) && copiedKey === headDisplay?.full}
-        onCopyPath={() => {
-          if (headDisplay) {
-            copy(headDisplay.full, headDisplay.full);
-          }
-        }}
+        copied={pathCopied}
+        copyAt={pathCopied ? pathCopyAt : null}
+        onCopyPath={handleCopyPath}
         subtitle={head.subtitle}
         added={head.added}
         removed={head.removed}
@@ -199,16 +222,19 @@ function PreviewBody(props: {
     return <div className="preview-error">{source.message}</div>;
   }
   if (source.status === "file") {
-    // Doc vs code + mode/degrade live in the file orchestrator — not here.
+    // Keep PreviewFileWidget mounted across click-to-refresh; the stack
+    // frosts the last paint instead of swapping in the empty loading body.
     return (
-      <PreviewFileWidget
-        path={source.path}
-        content={source.content}
-        truncated={source.truncated}
-        focusLine={source.focusLine}
-        onOpenFile={onOpenFile}
-        onToolbarChange={onFileToolbarChange}
-      />
+      <PreviewFileStackView refreshing={Boolean(source.refreshing)}>
+        <PreviewFileWidget
+          path={source.path}
+          content={source.content}
+          truncated={source.truncated}
+          focusLine={source.focusLine}
+          onOpenFile={onOpenFile}
+          onToolbarChange={onFileToolbarChange}
+        />
+      </PreviewFileStackView>
     );
   }
   if (source.status === "diff") {
@@ -235,15 +261,17 @@ function PreviewBody(props: {
 
 /**
  * Derive head chrome labels from the current source.
+ * File targets use `target.path` even while the first read is still `loading`,
+ * so the title does not flash the generic "File" placeholder.
  * @param source Load state.
- * @param kind Target kind for fallback title.
+ * @param target Active preview target; drives the file-path title during load.
  * @returns Title text plus, for file/diff targets, the absolute `path` the head
  *   should render as a shortened dir + file-name label. Callers that ignore
  *   `path` still get a usable title, so the head never renders empty.
  */
 function headFromSource(
   source: ReturnType<typeof usePreviewSource>,
-  kind: string | undefined,
+  target: PreviewTarget | null,
 ): {
   title: string;
   path?: string;
@@ -251,6 +279,9 @@ function headFromSource(
   added?: number;
   removed?: number;
 } {
+  if (target?.kind === "file") {
+    return { title: target.path, path: target.path, subtitle: "File preview" };
+  }
   if (source.status === "file") {
     return { title: source.path, path: source.path, subtitle: "File preview" };
   }
@@ -271,13 +302,10 @@ function headFromSource(
       removed: source.changeSet.removed,
     };
   }
-  if (kind === "changeset") {
+  if (target?.kind === "changeset") {
     return { title: "Changes" };
   }
-  if (kind === "file") {
-    return { title: "File" };
-  }
-  if (kind === "diff") {
+  if (target?.kind === "diff") {
     return { title: "Diff" };
   }
   return { title: "Preview" };

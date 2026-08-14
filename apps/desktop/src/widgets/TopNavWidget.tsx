@@ -4,11 +4,17 @@
  */
 
 import cs from "classnames";
+import {
+  displaySessionTitle,
+  shortSessionId,
+  titleFromSessionState,
+} from "@grok-desktop/acp-core";
 import { useSessionStore } from "../store/sessionStore";
+import { useCopyFeedback } from "./shared";
 import { SessionMenuWidget } from "./SessionMenuWidget";
 
 export type TopNavWidgetProps = {
-  /** Session display title. */
+  /** Session display title (catalog). Live state may override Goal leftovers. */
   title: string;
   /** Compact connection chip label (Synced / Awaiting / Offline). */
   syncLabel: string;
@@ -35,17 +41,25 @@ export type TopNavWidgetProps = {
   /** Request delete confirm for a session. */
   onRequestDelete: (id: string, title: string) => void;
   /**
-   * Open/close session rail overlay on narrow viewports (≤900px).
-   * Missing handler hides the rail toggle (desktop dock always visible).
+   * Open/close the session-rail overlay when the rail is not docked.
+   * Missing handler hides the hamburger even in overlay mode.
    */
   onToggleRail?: () => void;
-  /** Whether the narrow rail overlay is open (aria-expanded). */
+  /** Whether the off-canvas session rail overlay is open (aria-expanded). */
   railOpen?: boolean;
+  /**
+   * True when the session rail occupies layout space.
+   * False shows the hamburger so the user can reopen the overlay list.
+   */
+  sidebarDocked: boolean;
 };
 
 /**
- * Stateful top chrome: title, sync, context drawer toggle, session menu.
+ * Stateful top chrome: title, short session id, sync, context drawer, menu.
+ * The sessions hamburger mounts only when the left rail is off-canvas.
  * When viewing a harness subagent, shows a breadcrumb back to the parent.
+ * The id chip stays visible when a long Goal path would otherwise eat the bar,
+ * so two chats that share a Goal file remain distinguishable.
  * @param props Shell state from useAppShellWidget.
  * @returns Fixed top-nav header.
  */
@@ -56,18 +70,28 @@ export function TopNavWidget(props: TopNavWidgetProps) {
     (s) => s.viewingParentSessionId,
   );
   const selectSession = useSessionStore((s) => s.selectSession);
+  const { copiedKey, copy } = useCopyFeedback();
   const running = props.runningSubagents ?? 0;
   const badgeTotal = props.planCount + running;
   const badge = badgeTotal > 0 ? String(badgeTotal) : null;
+  const liveTitle = titleFromSessionState(session);
+  const conversationTitle = displaySessionTitle(liveTitle || props.title);
+  const label = viewingSubagent
+    ? `Subagent · ${conversationTitle}`
+    : conversationTitle;
+  const sessionId = session.id.trim();
+  const idChip = shortSessionId(sessionId);
+  const idCopied = Boolean(sessionId) && copiedKey === sessionId;
 
   return (
     <header
       className={cs("top-nav", {
         "top-nav-railed": props.pushMode,
+        "top-nav-flush": !props.sidebarDocked,
       })}
     >
       <div className="top-nav-left">
-        {props.onToggleRail ? (
+        {!props.sidebarDocked && props.onToggleRail ? (
           <button
             type="button"
             className="top-nav-rail-btn"
@@ -91,15 +115,28 @@ export function TopNavWidget(props: TopNavWidgetProps) {
             ← Parent
           </button>
         ) : null}
-        <span
-          className="top-nav-session-title"
-          title={
-            viewingSubagent
-              ? `Subagent · ${props.title}`
-              : props.title
-          }
-        >
-          {viewingSubagent ? `Subagent · ${props.title}` : props.title}
+        <span className="top-nav-session">
+          <span
+            className="top-nav-session-title"
+            title={sessionId ? `${label} · ${sessionId}` : label}
+          >
+            {label}
+          </span>
+          {idChip ? (
+            <button
+              type="button"
+              className="top-nav-session-id"
+              title={
+                idCopied ? "Copied session id" : `Copy session id ${sessionId}`
+              }
+              aria-label={
+                idCopied ? "Session id copied" : `Copy session id ${sessionId}`
+              }
+              onClick={() => copy(sessionId, sessionId)}
+            >
+              {idCopied ? "copied" : idChip}
+            </button>
+          ) : null}
         </span>
         <span
           className={cs("top-nav-sync", {

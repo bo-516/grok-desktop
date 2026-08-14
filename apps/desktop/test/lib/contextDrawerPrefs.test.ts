@@ -6,8 +6,6 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
   CONTEXT_DRAWER_PREFS_KEY,
-  DRAWER_PUSH_MIN_WIDTH,
-  effectiveDrawerLayout,
   loadContextDrawerPrefs,
   normalizeContextDrawerPrefs,
   saveContextDrawerPrefs,
@@ -80,19 +78,6 @@ describe("contextDrawerPrefs", () => {
     });
   });
 
-  it("effectiveDrawerLayout clamps push below min width without changing pref", () => {
-    assert.equal(
-      effectiveDrawerLayout("push", DRAWER_PUSH_MIN_WIDTH),
-      "push",
-    );
-    assert.equal(
-      effectiveDrawerLayout("push", DRAWER_PUSH_MIN_WIDTH - 1),
-      "overlay",
-    );
-    assert.equal(effectiveDrawerLayout("overlay", 1600), "overlay");
-    assert.equal(effectiveDrawerLayout("overlay", 800), "overlay");
-  });
-
   it("loadContextDrawerPrefs reads storage and falls back on junk", () => {
     installLocalStorage(
       createMemoryStorage({
@@ -132,13 +117,11 @@ describe("contextDrawerPrefs", () => {
     saveContextDrawerPrefs({ layout: "push" });
   });
 
-  it("clamp does not rewrite storage when effective layout is overlay", () => {
+  it("narrow-window overlay does not rewrite a stored push preference", () => {
     const storage = createMemoryStorage();
     installLocalStorage(storage);
     saveContextDrawerPrefs({ layout: "push" });
-    // Simulate narrow viewport decision path: effective is overlay, pref stays push.
-    const effective = effectiveDrawerLayout("push", 900);
-    assert.equal(effective, "overlay");
+    // resolveShellLayout may return overlay; storage must stay push.
     assert.deepEqual(loadContextDrawerPrefs(), { layout: "push" });
   });
 });

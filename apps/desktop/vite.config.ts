@@ -7,8 +7,9 @@
  * Boundary: production `vite build` does not get inspector injection (plugin
  * `apply: 'serve'`). Missing vendor file only drops that plugin.
  * Sourcemaps are off for both serve and build — we debug via source paths /
- * inspector chips, not browser source maps (avoids multi-MB inline maps and
- * Babel deopt noise after inspector injects long data-insp-path attrs).
+ * inspector chips, not browser source maps (avoids multi-MB inline maps).
+ * plugin-react uses `babel.compact` so inspector injection cannot trip
+ * Babel's 500KB pretty-print deopt note on the entry.
  */
 
 import path from "node:path";
@@ -25,7 +26,14 @@ export default defineConfig(async () => {
       UnoCSS(),
       // code-inspector must run before the React transform (plugin order).
       ...aiInspectorPlugins,
-      react(),
+      react({
+        /*
+         * Inspector + data-insp-path can push the entry past Babel's 500KB
+         * pretty-print threshold (`importClient: "code"` inlines ~600KB).
+         * compact skips the deopt note; source maps stay off below.
+         */
+        babel: { compact: true },
+      }),
     ],
     resolve: {
       alias: {

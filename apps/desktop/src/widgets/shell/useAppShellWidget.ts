@@ -1,19 +1,25 @@
 /**
  * Shell chrome state: exclusive drawers, context rail, palette, rail overlay,
- * theme, confirm dialogs, and context-drawer layout prefs.
+ * theme, confirm dialogs, and the three-tier column layout (dock left,
+ * collapse left when the right rail would crush the main minimum, overlay
+ * the right rail when even that is too tight). The user can also hide the
+ * left rail via the header collapse control — that pref outranks viewport dock.
  * Lifecycle + keyboard live in sibling hooks.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  DRAWER_PUSH_MIN_WIDTH,
-  effectiveDrawerLayout,
   loadContextDrawerPrefs,
   saveContextDrawerPrefs,
   type DrawerLayout,
 } from "../../lib/contextDrawerPrefs";
-import { countRunningSubagents } from "../../lib/agentCards";
+import { resolveShellLayout } from "../../lib/shellLayout";
+import {
+  countRunningSubagents,
+  mergeSubagentsWithSpawnTools,
+} from "../../lib/agentCards";
 import { loadTheme, type ThemeId } from "../../lib/theme";
+import { useAgentsPanelStore } from "../../store/agentsPanelStore";
 import { usePreviewStore } from "../../store/previewStore";
 import { useSessionStore } from "../../store/sessionStore";
 import {
@@ -29,6 +35,7 @@ import {
 } from "./shellPanels";
 import { useShellChromeEvents } from "./useShellChromeEvents";
 import { useShellSessionLifecycle } from "./useShellSessionLifecycle";
+import { useSidebarVisibility } from "./useSidebarVisibility";
 
 /** Confirm dialog kinds hosted by the shell (single active confirm). */
 export type ShellConfirm =
@@ -74,10 +81,14 @@ export function useAppShellWidget() {
   const previewTarget = usePreviewStore((s) => s.target);
   const previewWidth = usePreviewStore((s) => s.width);
   const closePreview = usePreviewStore((s) => s.closePreview);
+  const agentsWidth = useAgentsPanelStore((s) => s.width);
+  const resetAgentsForSession = useAgentsPanelStore((s) => s.resetForSession);
 
   /** User closed context rail this session — blocks plan auto-open. */
   const userClosedRail = useRef(false);
   const lastSessionId = useRef<string | null>(null);
+  /** Previous right-rail id so we can detect an open edge (null → open). */
+  const previousContextRail = useRef<ContextRailId | null>(null);
 
   const [activePanel, setActivePanel] = useState<PanelId | null>(null);
   /** Deep-link page for the Environment sheet (reset on close not required). */
@@ -85,7 +96,6 @@ export function useAppShellWidget() {
     useState<EnvironmentPageId>("overview");
   const [contextRail, setContextRail] = useState<ContextRailId | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [railOpen, setRailOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeId>(() => loadTheme());
   const [confirm, setConfirm] = useState<ShellConfirm | null>(null);
   /** Stored layout preference (not the clamped effective layout). */
@@ -93,14 +103,15 @@ export function useAppShellWidget() {
     () => loadContextDrawerPrefs().layout,
   );
   /**
-   * True when viewport width is at or above the push min-width.
-   * Seeds from window when available; matchMedia keeps it live.
+   * Live window width. Seeds from `innerWidth` when available; a resize
+   * listener keeps the three-tier layout (dock / collapse left / overlay)
+   * in sync with the open rail's actual pixel width.
    */
-  const [viewportAllowsPush, setViewportAllowsPush] = useState(() => {
+  const [viewportWidth, setViewportWidth] = useState(() => {
     if (typeof window === "undefined") {
-      return true;
+      return 1440;
     }
-    return window.innerWidth >= DRAWER_PUSH_MIN_WIDTH;
+    return window.innerWidth;
   });
 
   const markUserClosedRail = useCallback(() => {
@@ -148,10 +159,11 @@ export function useAppShellWidget() {
   }, []);
 
   /**
-   * On session switch (new chat or catalog pick): close plan/agents by default
-   * and clear the "user dismissed rail" latch so a later plan arrival can
-   * auto-open again in the new session. Skips the initial mount (previous id
-   * is null) so we do not thrash state before first paint.
+   * On session switch (new chat or catalog pick): close plan/agents by default,
+   * reset Agents inspect focus to roster, and clear the "user dismissed rail"
+   * latch so a later plan arrival can auto-open again in the new session.
+   * Rail close skips the initial mount (previous id is null) so we do not
+   * thrash state before first paint.
    */
   useEffect(() => {
     if (session.id === lastSessionId.current) {
@@ -160,10 +172,11 @@ export function useAppShellWidget() {
     const previousId = lastSessionId.current;
     lastSessionId.current = session.id;
     userClosedRail.current = false;
+    resetAgentsForSession(session.id || null);
     if (previousId !== null) {
       setContextRail((rail) => contextRailAfterSessionChange(rail));
     }
-  }, [session.id]);
+  }, [session.id, resetAgentsForSession]);
 
   useEffect(() => {
     const planLength = session.plan?.length ?? 0;
@@ -182,14 +195,13 @@ export function useAppShellWidget() {
   }, [previewTarget]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    if (typeof window === "undefined") {
       return;
     }
-    const mq = window.matchMedia(`(min-width: ${DRAWER_PUSH_MIN_WIDTH}px)`);
-    const apply = () => setViewportAllowsPush(mq.matches);
+    const apply = () => setViewportWidth(window.innerWidth);
     apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
   }, []);
 
   const live = connectionMode === "live-bridge";
@@ -204,18 +216,10 @@ export function useAppShellWidget() {
    * Deliberately not poolEntries: that counts other chats' streams and was
    * the bug behind the old workspace Tasks badge.
    */
-  const runningSubagents = countRunningSubagents(session.subagents);
-  const subagentCount = Object.keys(session.subagents ?? {}).length;
-  const syncLabel = syncChipLabel({ live, status: session.status });
-  const viewportWidth = viewportAllowsPush
-    ? DRAWER_PUSH_MIN_WIDTH
-    : DRAWER_PUSH_MIN_WIDTH - 1;
-  const drawerEffectiveLayout = effectiveDrawerLayout(
-    drawerLayoutPref,
-    viewportWidth,
+  const runningSubagents = countRunningSubagents(
+    mergeSubagentsWithSpawnTools(session.subagents, session.toolCalls),
   );
-  const layoutClamped =
-    drawerLayoutPref === "push" && drawerEffectiveLayout === "overlay";
+  const syncLabel = syncChipLabel({ live, status: session.status });
   const contextRailOpen =
     contextRail === "plan" ||
     contextRail === "preview" ||
@@ -223,29 +227,40 @@ export function useAppShellWidget() {
   const planRailOpen = contextRail === "plan";
   const agentsRailOpen = contextRail === "agents";
   const previewRailOpen = contextRail === "preview";
-  /**
-   * Agent-surface card count (subagents + background tasks). Used only for
-   * push-vs-overlay: empty Agents must not steal space, but Plan content must
-   * keep push while the user is on the Agents tab (shared drawer).
-   */
-  const agentItemCount =
-    subagentCount + Object.keys(session.backgroundTasks ?? {}).length;
-  /**
-   * Push only when the open rail has real content. Plan|Agents share content
-   * across tabs (see contextRailHasContent); empty companion / preview uses
-   * overlay so the transcript is not squeezed by a blank drawer.
-   */
-  const railHasContent = contextRailHasContent(
+  const railWidthPx = contextRailWidthPx(
     contextRail,
-    planCount,
-    agentItemCount,
-    previewTarget != null,
+    previewWidth,
+    agentsWidth,
   );
+  /**
+   * Three-tier chrome: dock left, collapse left when the right rail would
+   * crush the main minimum, then overlay the right rail if still short.
+   * Empty Plan/Agents still count as open so the clamp sees the same width
+   * the push padding would reserve.
+   */
+  const shellLayout = resolveShellLayout({
+    viewportWidth,
+    rightRailOpen: contextRailHasContent(contextRail),
+    rightRailWidth: railWidthPx,
+    drawerPref: drawerLayoutPref,
+  });
+  const drawerEffectiveLayout = shellLayout.drawerLayout;
+  const {
+    railOpen,
+    setRailOpen,
+    sidebarDocked,
+    collapseSidebar,
+    toggleRail,
+  } = useSidebarVisibility({ layoutCanDock: shellLayout.sidebarDocked });
+  const layoutClamped =
+    drawerLayoutPref === "push" && drawerEffectiveLayout === "overlay";
+  /**
+   * Push whenever the companion is open and layout allows it — empty Plan /
+   * Agents still reserve main-column width so open always squeezes the
+   * transcript (contextRailHasContent is open-vs-closed only).
+   */
   const pushMode =
-    contextRailOpen &&
-    railHasContent &&
-    drawerEffectiveLayout === "push";
-  const railWidthPx = contextRailWidthPx(contextRail, previewWidth);
+    contextRailHasContent(contextRail) && drawerEffectiveLayout === "push";
 
   const togglePanel = useCallback((which: PanelId) => {
     setActivePanel((p) => toggleExclusivePanel(p, which));
@@ -287,6 +302,22 @@ export function useAppShellWidget() {
     saveContextDrawerPrefs({ layout });
   }, []);
 
+  /**
+   * Opening the right companion while the left cannot stay docked is the
+   * "squeeze the sidebar closed" gesture — dismiss an already-open hamburger
+   * overlay so the transcript is not covered by both rails at once.
+   * Only runs when the rail *opens* so the user can still hamburger-open
+   * sessions while a right rail is already showing.
+   */
+  useEffect(() => {
+    const openedRight =
+      previousContextRail.current === null && contextRail !== null;
+    previousContextRail.current = contextRail;
+    if (openedRight && !sidebarDocked) {
+      setRailOpen(false);
+    }
+  }, [contextRail, setRailOpen, sidebarDocked]);
+
   return {
     session,
     viewingSessionId,
@@ -317,6 +348,9 @@ export function useAppShellWidget() {
     setPaletteOpen,
     railOpen,
     setRailOpen,
+    sidebarDocked,
+    collapseSidebar,
+    toggleRail,
     theme,
     setTheme,
     confirm,

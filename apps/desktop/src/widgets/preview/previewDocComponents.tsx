@@ -282,6 +282,7 @@ export const docComponents: Components = {
     const { className, ...rest } = withoutNode(props as DocElementProps);
     return <hr {...rest} className={docClass("doc-hr", className)} />;
   },
+  /* Literal `group` so doc-pre-copy's group-hover can resolve. */
   pre: function DocPre(props) {
     const { copy, copiedKey } = useDocRender();
     const { className, children, ...rest } = withoutNode(
@@ -290,7 +291,7 @@ export const docComponents: Components = {
     const fenceText = textFromChildren(children).replace(/\n$/, "");
     const copyKey = `fence:${fenceText.slice(0, 48)}:${fenceText.length}`;
     return (
-      <div className="doc-pre-wrap">
+      <div className="doc-pre-wrap group">
         <pre {...rest} className={docClass("doc-pre", className)}>
           {children}
         </pre>

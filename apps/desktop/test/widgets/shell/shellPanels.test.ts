@@ -7,7 +7,9 @@ import { describe, it } from "node:test";
 import {
   contextRailAfterSessionChange,
   contextRailHasContent,
+  contextRailWidthPx,
   openExclusivePanel,
+  PLAN_RAIL_WIDTH,
   shouldAutoOpenPlanRail,
   toggleContextRail,
   toggleExclusivePanel,
@@ -50,31 +52,21 @@ describe("shellPanels", () => {
     assert.equal(shouldAutoOpenPlanRail(2, "agents", false), false);
   });
 
-  it("contextRailHasContent keeps push stable across Plan|Agents tabs", () => {
-    // Plan has steps, Agents empty — both tabs still count as content.
-    assert.equal(contextRailHasContent("plan", 3, 0, false), true);
-    assert.equal(contextRailHasContent("agents", 3, 0, false), true);
-    // Agents has cards, Plan empty — same shared drawer.
-    assert.equal(contextRailHasContent("plan", 0, 2, false), true);
-    assert.equal(contextRailHasContent("agents", 0, 2, false), true);
-    // Both surfaces have content.
-    assert.equal(contextRailHasContent("plan", 1, 1, false), true);
-    assert.equal(contextRailHasContent("agents", 1, 1, false), true);
-    // Fully empty companion → overlay (do not squeeze transcript).
-    assert.equal(contextRailHasContent("plan", 0, 0, false), false);
-    assert.equal(contextRailHasContent("agents", 0, 0, false), false);
-    // Background-task-only agent surface (agentItemCount includes tasks).
-    assert.equal(contextRailHasContent("agents", 0, 1, false), true);
-    assert.equal(contextRailHasContent("plan", 0, 1, false), true);
+  it("contextRailHasContent reserves push for any open rail (including empty)", () => {
+    // Open Plan/Agents always push — empty states still squeeze transcript.
+    assert.equal(contextRailHasContent("plan"), true);
+    assert.equal(contextRailHasContent("agents"), true);
+    assert.equal(contextRailHasContent("preview"), true);
+    // Closed rail never reserves main-column width.
+    assert.equal(contextRailHasContent(null), false);
   });
 
-  it("contextRailHasContent is independent for preview and closed rail", () => {
-    assert.equal(contextRailHasContent("preview", 3, 2, true), true);
-    assert.equal(contextRailHasContent("preview", 3, 2, false), false);
-    // Preview emptiness is only about its target, not plan/agents counts.
-    assert.equal(contextRailHasContent("preview", 0, 0, true), true);
-    assert.equal(contextRailHasContent(null, 5, 5, true), false);
-    assert.equal(contextRailHasContent(null, 0, 0, false), false);
+  it("contextRailWidthPx shares Plan|Agents width; preview stays independent", () => {
+    assert.equal(contextRailWidthPx("plan", 560, 512), 512);
+    assert.equal(contextRailWidthPx("agents", 560, 512), 512);
+    assert.equal(contextRailWidthPx("plan", 560, 252), 252);
+    assert.equal(contextRailWidthPx("preview", 560, 252), 560);
+    assert.equal(contextRailWidthPx(null, 560, 252), PLAN_RAIL_WIDTH);
   });
 
   it("contextRailAfterSessionChange closes plan/agents only", () => {
