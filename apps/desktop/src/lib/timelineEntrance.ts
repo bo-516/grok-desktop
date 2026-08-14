@@ -39,8 +39,9 @@ export const EMPTY_TIMELINE_ENTRANCE_BASELINE: TimelineEntranceBaseline = {
  * transcript seeded from the catalog), so restored history never animates. When
  * the session opens with nothing cached the store marks it as restoring; the
  * baseline then stays open until the transcript lands so that first body is
- * history too. A transcript delivered as several later batches — incremental
- * `session/load` replay — falls outside this rule and still animates per batch.
+ * history too. A wholesale id rewrite on the same session (fork `session/load`
+ * replacing parent-copied ids) is also treated as history. Incremental appends
+ * still animate.
  *
  * @param prev Baseline from the previous render; pass
  *   {@link EMPTY_TIMELINE_ENTRANCE_BASELINE} on first render.
@@ -75,5 +76,37 @@ export function advanceTimelineEntranceBaseline(
       awaitingBody: false,
     };
   }
+  // Fork (and some session/load hydrates) replace every item id in one paint.
+  // Those rows are already-read history, not live arrivals — FadeContent would
+  // otherwise slide the whole transcript (the page-shake after /fork).
+  if (timelineKeysReplaced(prev.seededUnitKeys, next.unitKeys)) {
+    return {
+      sessionId: next.sessionId,
+      seededUnitKeys: new Set(next.unitKeys),
+      awaitingBody: false,
+    };
+  }
   return prev;
+}
+
+/**
+ * True when `next` shares no keys with the previous baseline.
+ * Empty prev (first paint / new chat) or empty next is not a replace.
+ * @param prev Seeded keys from the last baseline.
+ * @param next Current unit keys in render order.
+ * @returns Whether the canvas just swapped its entire identity set.
+ */
+export function timelineKeysReplaced(
+  prev: ReadonlySet<string>,
+  next: string[],
+): boolean {
+  if (prev.size === 0 || next.length === 0) {
+    return false;
+  }
+  for (const key of next) {
+    if (prev.has(key)) {
+      return false;
+    }
+  }
+  return true;
 }

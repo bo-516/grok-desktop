@@ -168,6 +168,29 @@ describe("resolveTurnStatus", () => {
       { phase: "starting", verb: TURN_STATUS_DEFAULT_VERB, detail: "" },
     );
   });
+
+  it("says Waiting on N subagents when the tail is still the user prompt", () => {
+    assert.deepEqual(
+      resolveTurnStatus({
+        status: "streaming",
+        timeline: [{ kind: "user", id: "u1", blocks: [] }],
+        toolCalls: {},
+        workspace: "",
+        runningSubagents: 4,
+      }),
+      { phase: "starting", verb: "Waiting", detail: "4 subagents" },
+    );
+    assert.deepEqual(
+      resolveTurnStatus({
+        status: "streaming",
+        timeline: [],
+        toolCalls: {},
+        workspace: "",
+        runningSubagents: 1,
+      }),
+      { phase: "starting", verb: "Waiting", detail: "1 subagent" },
+    );
+  });
 });
 
 describe("turnStartedAtMs", () => {

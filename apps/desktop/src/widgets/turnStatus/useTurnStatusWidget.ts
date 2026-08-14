@@ -5,6 +5,10 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  countRunningSubagents,
+  mergeSubagentsWithSpawnTools,
+} from "@/lib/agentCards";
 import { formatWorkedDuration } from "@/lib/turnLabel";
 import { useSessionStore } from "@/store/sessionStore";
 import { resolveTurnStatus, turnStartedAtMs } from "./turnStatusModel";
@@ -23,14 +27,26 @@ export function useTurnStatusWidget() {
   const timeline = useSessionStore((s) => s.session.timeline);
   const toolCalls = useSessionStore((s) => s.session.toolCalls);
   const workspace = useSessionStore((s) => s.session.workspace);
+  const runningSubagents = useSessionStore((s) =>
+    countRunningSubagents(
+      mergeSubagentsWithSpawnTools(s.session.subagents, s.session.toolCalls),
+    ),
+  );
   const streaming = status === "streaming";
   /** Wall clock, advanced by the ticker; frozen while the turn is not live. */
   const [nowMs, setNowMs] = useState(() => Date.now());
   /** When this client first observed the live turn (reconnect-safe fallback). */
   const [seenAtMs, setSeenAtMs] = useState<number | null>(null);
   const line = useMemo(
-    () => resolveTurnStatus({ status, timeline, toolCalls, workspace }),
-    [status, timeline, toolCalls, workspace],
+    () =>
+      resolveTurnStatus({
+        status,
+        timeline,
+        toolCalls,
+        workspace,
+        runningSubagents,
+      }),
+    [status, timeline, toolCalls, workspace, runningSubagents],
   );
   const anchorMs = useMemo(() => turnStartedAtMs(timeline), [timeline]);
 

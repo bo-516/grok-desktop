@@ -46,6 +46,17 @@ describe("timelineContentKey", () => {
     );
   });
 
+  it("appends extraSig only when provided so wrap-up growth pins the canvas", () => {
+    assert.equal(
+      timelineContentKey([userItem], "idle", "", ""),
+      "1:user:u1:idle:0:",
+    );
+    assert.equal(
+      timelineContentKey([userItem], "idle", "", "", "wrap:12"),
+      "1:user:u1:idle:0::wrap:12",
+    );
+  });
+
   it("treats agent row with missing text as length 0", () => {
     const partial = {
       kind: "agent",

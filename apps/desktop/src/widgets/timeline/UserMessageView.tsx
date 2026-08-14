@@ -4,6 +4,10 @@
  * opens the shared in-app lightbox (same surface as composer attach preview).
  * Resource / resource_link blocks stay off the bubble (agent payload only).
  *
+ * History often paints `[Image #N]` stand-ins before binary chunks arrive.
+ * The strip always reserves the same 80×80 tile so swapping "image 1" for a
+ * decoded screenshot cannot grow the flex item and shove the timeline.
+ *
  * Local state only tracks which image is open in the lightbox and which
  * thumbs failed to decode — high-frequency chrome stays out of the store.
  */
@@ -30,6 +34,9 @@ export type UserMessageViewProps = {
   blocks: ContentBlock[];
 };
 
+/** Pixel box for a timeline thumb — must match shortcut `w-20 h-20` (5rem @ 16px). */
+const USER_THUMB_PX = 80;
+
 /**
  * Map a timeline image block onto the composer ImageAttachment shape so
  * preview / external-open helpers stay single-source.
@@ -46,7 +53,9 @@ function toAttachment(img: UserImageBlock, index: number): ImageAttachment {
 }
 
 /**
- * Right-aligned user turn: optional image strip above text bubble.
+ * Right-aligned user turn: reserved image strip above the text bubble.
+ * Stand-in chips and decoded thumbs share one locked tile so hydrate cannot
+ * reflow the canvas.
  * @param props Blocks; empty text+images → null.
  */
 export function UserMessageView(props: UserMessageViewProps) {
@@ -65,6 +74,8 @@ export function UserMessageView(props: UserMessageViewProps) {
   const missingImageCount = hasImages
     ? 0
     : placeholderCount;
+  /** Shared strip length: binary thumbs, or stand-in chips when history has none. */
+  const slotCount = hasImages ? images.length : missingImageCount;
   /** Index into `images` currently shown full-size; null when closed. */
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   /**
@@ -156,60 +167,65 @@ export function UserMessageView(props: UserMessageViewProps) {
 
   return (
     <div className="msg-user-wrap">
-      {hasImages ? (
-        <ul className="msg-user-attachments" aria-label="Attached images">
-          {images.map((img, index) => {
-            const att = toAttachment(img, index + 1);
-            const previewSrc = attachmentPreviewSrc(att);
-            const showThumb = canShowThumb(img, index);
-            const label = att.name ?? "image";
-            const openLabel = showThumb
-              ? `Preview ${label}`
-              : `Open ${label} with system viewer`;
-            const key = `${img.mimeType}:${img.data.slice(0, 32)}:${index}`;
+      {slotCount > 0 ? (
+        <ul
+          className="msg-user-attachments"
+          aria-label={hasImages ? "Attached images" : "Referenced images"}
+        >
+          {Array.from({ length: slotCount }, (_, index) => {
+            const img = images[index] ?? null;
+            const att = img ? toAttachment(img, index + 1) : null;
+            const previewSrc = att ? attachmentPreviewSrc(att) : "";
+            const showThumb = Boolean(
+              img && att && previewSrc && canShowThumb(img, index),
+            );
+            const label = att?.name ?? `image ${index + 1}`;
+            let openLabel = label;
+            if (showThumb) {
+              openLabel = `Preview ${label}`;
+            } else if (img) {
+              openLabel = `Open ${label} with system viewer`;
+            }
             return (
-              <li key={key} className="msg-user-attachment">
-                <button
-                  type="button"
-                  className="msg-user-attachment-open"
-                  aria-label={openLabel}
-                  title={
-                    showThumb
-                      ? `${label} — click to preview`
-                      : `${label} — click to open with system viewer`
-                  }
-                  onClick={() => handleOpenImage(img, index)}
-                >
-                  {showThumb && previewSrc ? (
-                    <img
-                      className="msg-user-attachment-thumb"
-                      src={previewSrc}
-                      alt={label}
-                      onError={() => handleThumbError(index)}
-                    />
-                  ) : (
-                    <span className="msg-user-attachment-fallback">
+              <li key={`user-img-${index}`} className="msg-user-attachment">
+                {img ? (
+                  <button
+                    type="button"
+                    className="msg-user-attachment-open"
+                    aria-label={openLabel}
+                    title={
+                      showThumb
+                        ? `${label} — click to preview`
+                        : `${label} — click to open with system viewer`
+                    }
+                    onClick={() => handleOpenImage(img, index)}
+                  >
+                    <span className="msg-user-attachment-fallback" aria-hidden="true">
                       {label}
                     </span>
-                  )}
-                </button>
+                    {showThumb ? (
+                      <img
+                        className="msg-user-attachment-thumb"
+                        src={previewSrc}
+                        alt={label}
+                        width={USER_THUMB_PX}
+                        height={USER_THUMB_PX}
+                        draggable={false}
+                        onError={() => handleThumbError(index)}
+                      />
+                    ) : null}
+                  </button>
+                ) : (
+                  <span
+                    className="msg-user-attachment-fallback"
+                    title="Image was not kept in history (agent echo placeholder)"
+                  >
+                    {label}
+                  </span>
+                )}
               </li>
             );
           })}
-        </ul>
-      ) : null}
-      {missingImageCount > 0 ? (
-        <ul className="msg-user-attachments" aria-label="Referenced images">
-          {Array.from({ length: missingImageCount }, (_, index) => (
-            <li key={`missing-img-${index}`} className="msg-user-attachment">
-              <span
-                className="msg-user-attachment-fallback"
-                title="Image was not kept in history (agent echo placeholder)"
-              >
-                {`image ${index + 1}`}
-              </span>
-            </li>
-          ))}
         </ul>
       ) : null}
       {hasText ? (

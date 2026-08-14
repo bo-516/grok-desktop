@@ -3,6 +3,8 @@
  * Expand/collapse of the rail itself lives in TurnBlockWidget.
  * Height is capped via `.turn-rail` (viewport-adaptive, min 280px) so long
  * activity lists scroll inside the rail instead of stretching the timeline.
+ * Agents inspect lifts that cap (`.agents-transcript .turn-rail`) so the
+ * 300px drawer does not grow a second scrollbar in the middle of the pane.
  */
 
 import type { SessionStatus, ToolCallCard } from "@grok-desktop/acp-core";

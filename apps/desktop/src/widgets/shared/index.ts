@@ -24,3 +24,10 @@ export { MarkdownCodeWidget } from "./MarkdownCodeWidget";
 export type { MarkdownCodeWidgetProps } from "./MarkdownCodeWidget";
 export { useCopyFeedback } from "./useCopyFeedback";
 export type { CopyFeedback } from "./useCopyFeedback";
+export { OverflowTextView } from "./OverflowTextView";
+export type { OverflowTextViewProps } from "./OverflowTextView";
+export {
+  peekSubagentStartedAt,
+  rememberSubagentStartedAt,
+  useElapsedTicker,
+} from "./useElapsedTicker";

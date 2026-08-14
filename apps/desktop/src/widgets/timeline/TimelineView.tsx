@@ -3,12 +3,11 @@
  * Residual work units (tool_group / thought_group / lone agent|thought|tool)
  * funnel through TurnStepView only — no parallel JSX tree.
  * Stateful orchestration lives in useTimelineWidget / TimelineWidget.
- *
- * The live-turn strip is the one child that is not a timeline unit: it is the
- * last item in this scroller so it trails the newest message, and sticks to the
- * bottom edge while the user scrolls back through history.
+ * The live-turn strip lives in the composer dock (not this scroller) so a
+ * sticky pill cannot paint through the streaming answer.
  */
 
+import cs from "classnames";
 import type { RefObject, UIEvent } from "react";
 import type {
   SessionStatus,
@@ -25,7 +24,6 @@ import {
   FadeContent,
   ShinyText,
 } from "@/components/react-bits";
-import { TurnStatusWidget } from "@/widgets/turnStatus";
 import { TurnBlockWidget } from "./TurnBlockWidget";
 import { TurnStepView } from "./TurnStepView";
 import { UserMessageView } from "./UserMessageView";
@@ -47,11 +45,25 @@ export type TimelineViewProps = {
   handleScroll: (event: UIEvent<HTMLDivElement>) => void;
   /** Bound isTurnLive from turnGrouping (injected for pure tests). */
   isTurnLive: typeof isTurnLiveFn;
+  /**
+   * Narrow Agents-inspector density: pass compact to turn blocks (activity
+   * rail stays; tool bodies CSS-collapse). The live-turn strip is not a
+   * child of this scroller.
+   */
+  compact?: boolean;
+  /**
+   * Index into `units` of the turn that should show Goal wrap-up text.
+   * -1 / omitted → no fallback answer.
+   */
+  wrapUpIndex?: number;
+  /** Trimmed `last_event_detail`; ignored when wrapUpIndex is unset. */
+  wrapUpText?: string;
 };
 
 /**
  * Renders the ordered ACP timeline as user / turn / error top-level units.
- * @param props Presentation model from useTimelineWidget; no store access.
+ * @param props Presentation model from useTimelineWidget; wrap-up fields
+ *   fill a Goal turn that has no trailing agent chunk. No store access.
  * @returns An empty-state guide when the session has no events, or the live chat canvas.
  */
 export function TimelineView(props: TimelineViewProps) {
@@ -66,6 +78,9 @@ export function TimelineView(props: TimelineViewProps) {
     scrollRef,
     handleScroll,
     isTurnLive,
+    compact = false,
+    wrapUpIndex = -1,
+    wrapUpText = "",
   } = props;
 
   // Uncached session mid-restore: replay is silent, so the New chat guide would
@@ -108,9 +123,10 @@ export function TimelineView(props: TimelineViewProps) {
 
   return (
     <div
-      className="timeline"
+      className={cs("timeline", { "agents-transcript": compact })}
       ref={scrollRef}
       data-status={status}
+      data-timeline-compact={compact ? "1" : undefined}
       onScroll={handleScroll}
     >
       {units.map((unit, unitIndex) => {
@@ -139,6 +155,10 @@ export function TimelineView(props: TimelineViewProps) {
                 sessionStatus={status}
                 toolCalls={toolCalls}
                 answerShowCursor={answerShowCursor}
+                compact={compact}
+                fallbackAnswer={
+                  unitIndex === wrapUpIndex ? wrapUpText : undefined
+                }
               />
             </FadeContent>
           );
@@ -198,12 +218,6 @@ export function TimelineView(props: TimelineViewProps) {
           </FadeContent>
         );
       })}
-      {/*
-        Live strip: renders null unless the turn is streaming, so history has
-        no trailing slot. Must stay the last child — it sticks to the bottom of
-        this scroller and would otherwise be overlapped by later siblings.
-      */}
-      <TurnStatusWidget />
     </div>
   );
 }

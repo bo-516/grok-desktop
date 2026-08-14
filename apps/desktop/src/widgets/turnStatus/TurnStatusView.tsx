@@ -1,11 +1,11 @@
 /**
  * Stateless live-turn strip: pulse orb + shimmering verb + step detail + clock.
  *
- * Rendered as the tail of the transcript and stuck to the bottom of the scroll
- * area, so the one signal that says "the agent is busy" trails the newest
- * message and stays visible while reading back — not parked in the top-right
- * corner. Chrome (sticky offset, opaque fill) lives in the `turn-status`
- * shortcut; this file only orders the parts.
+ * Rendered in the composer dock, above the input card and outside the
+ * transcript scroller, so the one signal that says "the agent is busy"
+ * stays visible without overlaying the streaming answer. Chrome (opaque
+ * canvas fill, stacking) lives in the `turn-status` shortcut; this file
+ * only orders the parts.
  */
 
 import { ShinyText } from "@/components/react-bits";

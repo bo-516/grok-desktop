@@ -76,6 +76,9 @@ const TOOL_VERBS: Record<string, string> = {
  *   costs the detail text, never the line itself.
  * @param input.workspace Workspace root used to shorten absolute paths in tool
  *   titles; empty leaves titles untouched.
+ * @param input.runningSubagents Running child count in this session. When the
+ *   tail is still the user prompt (no tool/thought yet), this is what stops
+ *   a 9-minute "Working" strip from looking hung — the parent is waiting.
  * @returns Line to render, or null when the strip must not be shown.
  */
 export function resolveTurnStatus(input: {
@@ -83,13 +86,22 @@ export function resolveTurnStatus(input: {
   timeline: TimelineItem[];
   toolCalls: Record<string, ToolCallCard | undefined>;
   workspace: string;
+  runningSubagents?: number;
 }): TurnStatusLine | null {
   const { status, timeline, toolCalls, workspace } = input;
+  const running = input.runningSubagents ?? 0;
   if (status !== "streaming") {
     return null;
   }
   const last = timeline[timeline.length - 1];
-  if (last === undefined) {
+  if (last === undefined || last.kind === "user") {
+    if (running > 0) {
+      return {
+        phase: "starting",
+        verb: "Waiting",
+        detail: running === 1 ? "1 subagent" : `${running} subagents`,
+      };
+    }
     return { phase: "starting", verb: TURN_STATUS_DEFAULT_VERB, detail: "" };
   }
   if (last.kind === "tool") {
@@ -113,7 +125,7 @@ export function resolveTurnStatus(input: {
     // The answer itself is rendered right above the strip — no detail echo.
     return { phase: "writing", verb: "Responding", detail: "" };
   }
-  // user (prompt just sent) and error rows carry no work description.
+  // Error (and any future) rows carry no work description.
   return { phase: "starting", verb: TURN_STATUS_DEFAULT_VERB, detail: "" };
 }
 

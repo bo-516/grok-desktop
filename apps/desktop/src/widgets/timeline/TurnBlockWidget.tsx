@@ -42,12 +42,22 @@ type TurnBlockWidgetProps = {
   answerShowCursor?: boolean;
   /** When true, done label uses Stopped-style wording. */
   cancelled?: boolean;
+  /**
+   * Agents-inspector density: keep the activity rail (tool/thought title
+   * rows) so a tools-only turn is not blank; tool bodies stay CSS-hidden.
+   */
+  compact?: boolean;
+  /**
+   * Goal worker wrap-up used only when this turn has no trailing agent
+   * text. Ignored when `unit.answer` already has visible body.
+   */
+  fallbackAnswer?: string;
 };
 
 /**
  * Turn block: rail header + steps + answer.
  * Pure-text turns omit the rail entirely and only render the answer.
- * @param props Turn unit, live flag, and tool map for nested cards.
+ * @param props Turn unit, live flag, tool map, and optional Goal wrap-up.
  * @returns One visual turn block (rail optional).
  */
 export function TurnBlockWidget(props: TurnBlockWidgetProps) {
@@ -58,6 +68,8 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
     toolCalls,
     answerShowCursor = false,
     cancelled = false,
+    compact = false,
+    fallbackAnswer,
   } = props;
   const openPreview = usePreviewStore((s) => s.openPreview);
   const changeSet = buildTurnChangeSet(unit, toolCalls);
@@ -132,6 +144,33 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
     }
   }, [live, unit.activity]);
 
+  /** Change list always opens the preview drawer (never expands in-panel). */
+  const changeSummary =
+    changeSet.fileCount > 0 ? (
+      <TurnChangeSummaryView
+        changeSet={changeSet}
+        onOpen={() =>
+          openPreview({
+            kind: "changeset",
+            scope: "turn",
+            turnId: unit.id,
+            // Capture ids at click time — drawer must not re-group turns.
+            toolCallIds: collectToolCallIdsFromTurn(unit),
+          })
+        }
+      />
+    ) : null;
+  /** Transcript trailing answer; empty when the turn ended on tools. */
+  const answerText = unit.answer?.item.text ?? "";
+  /** True when the transcript already has a visible final answer. */
+  const hasAnswer = answerText.trim().length > 0;
+  /** Trimmed Goal last_event_detail; unused when hasAnswer. */
+  const wrapText = (fallbackAnswer ?? "").trim();
+  /** Body painted under the rail: real answer, else wrap-up, else empty. */
+  const resolvedAnswer = hasAnswer ? answerText : wrapText;
+  /** True when the painted body is the Goal wrap-up, not an agent chunk. */
+  const wrapUp = !hasAnswer && wrapText.length > 0;
+
   return (
     <div
       className={className}
@@ -142,8 +181,12 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
       {hasRail ? (
         <>
           <CollapsibleStepView
-            open={isOpen}
+            open={compact || isOpen}
             onToggle={() => {
+              // Compact inspect stays expanded so title rows remain visible.
+              if (compact) {
+                return;
+              }
               userToggledRef.current = true;
               setIsOpen((open) => !open);
             }}
@@ -162,26 +205,14 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
             bareLabel
             className="flex flex-col gap-3"
           />
-          {changeSet.fileCount > 0 ? (
-            <TurnChangeSummaryView
-              changeSet={changeSet}
-              onOpen={() =>
-                openPreview({
-                  kind: "changeset",
-                  scope: "turn",
-                  turnId: unit.id,
-                  // Capture ids at click time — drawer must not re-group turns.
-                  toolCallIds: collectToolCallIdsFromTurn(unit),
-                })
-              }
-            />
-          ) : null}
+          {changeSummary}
         </>
       ) : null}
-      {unit.answer ? (
+      {resolvedAnswer || answerShowCursor ? (
         <TurnAnswerView
-          text={unit.answer.item.text}
-          showCursor={answerShowCursor}
+          text={resolvedAnswer}
+          showCursor={answerShowCursor && !wrapUp}
+          wrapUp={wrapUp}
         />
       ) : null}
     </div>

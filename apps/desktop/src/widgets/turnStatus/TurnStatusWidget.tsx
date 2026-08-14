@@ -1,7 +1,8 @@
 /**
  * Stateful wrapper for the live-turn status strip.
- * Mounted as the last child of the timeline scroller; renders nothing unless a
- * turn is streaming, so finished history has no trailing slot to explain.
+ * Mounted in the composer dock (above the input card), not inside the
+ * timeline scroller — a sticky child of that scroller painted through the
+ * streaming answer. Renders nothing unless a turn is streaming.
  */
 
 import { TurnStatusView } from "./TurnStatusView";

@@ -1,10 +1,9 @@
 /**
  * L1 inline subagent fan-out group (Stateful Widget).
  *
- * Subscribes to session.subagents / catalog / selectSession locally so the
- * 4-layer TurnStep → Rail → TurnBlock → Timeline path does not prop-drill.
- * This is the intentional leaf-store exception documented in the design:
- * depth would exceed 2 if parent threads canOpen + onOpen + subagents.
+ * Subscribes to session.subagents locally so the 4-layer TurnStep → Rail →
+ * TurnBlock → Timeline path does not prop-drill. Row click opens the Agents
+ * companion on that child — it does not navigate the main canvas.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -17,11 +16,17 @@ import {
   countRunningSubagents,
   formatLiveElapsed,
   formatSubagentDuration,
+  mergeSubagentsWithSpawnTools,
   normalizeSubagentStatus,
 } from "@/lib/agentCards";
+import { inspectSubagentInPanel } from "@/lib/inspectSubagent";
 import type { SubagentGroupUnit } from "@/lib/subagentGrouping";
 import { useSessionStore } from "@/store/sessionStore";
-import { CollapsibleStepView } from "@/widgets/shared";
+import {
+  CollapsibleStepView,
+  rememberSubagentStartedAt,
+  useElapsedTicker,
+} from "@/widgets/shared";
 import { SubagentStepView } from "./SubagentStepView";
 
 export type SubagentGroupWidgetProps = {
@@ -79,12 +84,16 @@ function resolveSubagentForToolCall(
  */
 export function SubagentGroupWidget(props: SubagentGroupWidgetProps) {
   const { unit, toolCalls, active } = props;
-  const subagents = useSessionStore((s) => s.session.subagents);
+  const subagentsRaw = useSessionStore((s) => s.session.subagents);
   const links = useSessionStore((s) => s.session.subagentLinks);
-  const catalog = useSessionStore((s) => s.catalog);
-  const selectSession = useSessionStore((s) => s.selectSession);
+  const subagents = useMemo(
+    () => mergeSubagentsWithSpawnTools(subagentsRaw, toolCalls),
+    [subagentsRaw, toolCalls],
+  );
+  const ownerSessionId = useSessionStore(
+    (s) => s.viewingSessionId ?? s.session.id,
+  );
   const [open, setOpen] = useState(Boolean(active));
-  const [nowMs, setNowMs] = useState(() => Date.now());
   /**
    * Local start clocks for running cards — not persisted; lost on refresh
    * (honest: better no clock than a fake one after replay).
@@ -115,7 +124,7 @@ export function SubagentGroupWidget(props: SubagentGroupWidgetProps) {
           row.card?.status ?? row.toolCard?.status,
         );
         if (status === "running" && next[id] === undefined) {
-          next[id] = Date.now();
+          next[id] = rememberSubagentStartedAt(id, Date.now());
           changed = true;
         }
       }
@@ -128,20 +137,7 @@ export function SubagentGroupWidget(props: SubagentGroupWidgetProps) {
       normalizeSubagentStatus(r.card?.status ?? r.toolCard?.status) ===
       "running",
   );
-
-  // Tick only while something is live so finished groups stay quiet.
-  useEffect(() => {
-    if (!anyRunning) {
-      return;
-    }
-    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [anyRunning]);
-
-  const catalogIds = useMemo(
-    () => new Set(catalog.map((c) => c.id)),
-    [catalog],
-  );
+  const nowMs = useElapsedTicker(anyRunning);
 
   const linkedCards: Record<string, SubagentCard> = {};
   for (const row of rows) {
@@ -198,19 +194,21 @@ export function SubagentGroupWidget(props: SubagentGroupWidgetProps) {
         <div className="subagent-group-body" role="list">
           {rows.map((row) => {
             const id = row.card?.subagentId ?? row.toolCallId;
-            const canOpen = Boolean(
-              row.card?.childSessionId &&
-                catalogIds.has(row.card.childSessionId),
-            );
+            const childId = row.card?.childSessionId?.trim();
             return (
               <SubagentStepView
                 key={row.toolCallId}
                 card={row.card}
                 toolCard={row.toolCard}
-                canOpen={canOpen}
+                canOpen={Boolean(childId)}
                 startedAtMs={startedAt[id]}
                 nowMs={nowMs}
-                onOpen={selectSession}
+                onOpen={(childSessionId) => {
+                  inspectSubagentInPanel(
+                    childSessionId,
+                    ownerSessionId || "",
+                  );
+                }}
               />
             );
           })}

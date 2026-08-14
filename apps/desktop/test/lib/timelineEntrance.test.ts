@@ -73,6 +73,24 @@ describe("advanceTimelineEntranceBaseline", () => {
     assert.equal(restored.awaitingBody, false);
   });
 
+  it("treats a wholesale id rewrite as restored history, not live arrivals", () => {
+    const opened = advanceTimelineEntranceBaseline(
+      EMPTY_TIMELINE_ENTRANCE_BASELINE,
+      {
+        sessionId: "s-1",
+        unitKeys: ["parent-a", "parent-b"],
+        restoringSessionId: null,
+      },
+    );
+    const rewritten = advanceTimelineEntranceBaseline(opened, {
+      sessionId: "s-1",
+      unitKeys: ["child-a", "child-b"],
+      restoringSessionId: null,
+    });
+    assert.deepEqual([...rewritten.seededUnitKeys], ["child-a", "child-b"]);
+    assert.equal(rewritten.awaitingBody, false);
+  });
+
   it("lets a new chat's first message animate (empty, but not restoring)", () => {
     const draft = advanceTimelineEntranceBaseline(
       EMPTY_TIMELINE_ENTRANCE_BASELINE,

@@ -1,8 +1,8 @@
 /**
  * One subagent row inside an L1 fan-out group (Stateless presentation).
  * Shows status, description, honest duration, and optional expandable output.
- * Click opens the child session when catalog membership is known; otherwise
- * the row is non-clickable with a sync tooltip (not a silent no-op).
+ * Click focuses the child in the Agents companion. Rows without a
+ * childSessionId stay non-clickable (spawn has not joined yet).
  */
 
 import cs from "classnames";
@@ -22,8 +22,8 @@ export type SubagentStepViewProps = {
   /** Spawn tool card for title fallback before orchestration arrives. */
   toolCard: ToolCallCard | undefined;
   /**
-   * True when `childSessionId` is present in the session catalog so drill-down
-   * can resolve. False/undefined → row is not a button.
+   * True when `childSessionId` is known so the Agents panel can focus it.
+   * False → not a button (spawn has not joined yet).
    */
   canOpen: boolean;
   /**
@@ -34,7 +34,7 @@ export type SubagentStepViewProps = {
   /** Tick for live elapsed re-render (parent owns the interval). */
   nowMs?: number;
   /**
-   * Open the child session for readonly drill-down.
+   * Focus this child in the Agents companion (does not navigate the canvas).
    * Only called when canOpen is true.
    */
   onOpen?: (childSessionId: string) => void;
@@ -43,7 +43,7 @@ export type SubagentStepViewProps = {
 /**
  * Single fan-out row: status dot + description + metrics + optional output.
  * @param props Card/tool fallback, openability, live clock, open handler.
- * @returns listitem row; non-clickable when catalog has not synced the child.
+ * @returns listitem row; non-clickable until a childSessionId exists.
  */
 export function SubagentStepView(props: SubagentStepViewProps) {
   const { card, toolCard, canOpen, startedAtMs, nowMs, onOpen } = props;
@@ -95,7 +95,7 @@ export function SubagentStepView(props: SubagentStepViewProps) {
           type="button"
           className="subagent-step-main btn-ghost"
           onClick={() => onOpen?.(childId)}
-          title={`Open subagent · ${description}`}
+          title={`Inspect subagent · ${description}`}
         >
           {body}
         </button>
@@ -103,9 +103,7 @@ export function SubagentStepView(props: SubagentStepViewProps) {
         <div
           className="subagent-step-main"
           title={
-            childId
-              ? "Not synced yet — refresh the session list to open"
-              : undefined
+            childId ? undefined : "Waiting for this subagent to start"
           }
         >
           {body}
