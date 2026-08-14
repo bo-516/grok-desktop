@@ -4,8 +4,10 @@
  */
 
 import { createSessionState, markDisconnected } from "@grok-desktop/acp-core";
-import { sessionHasConversationContent } from "@/lib/sessionContent";
+import { focusComposer } from "@/lib/composerFocus";
+import { withCachedSlashCatalog } from "@/lib/slashCatalog";
 import { isSubagentSessionKind } from "@/lib/sessionActions";
+import { sessionHasConversationContent } from "@/lib/sessionContent";
 import {
   loadWorkspacePrefs,
   rememberAndActivateWorkspace,
@@ -18,10 +20,16 @@ import {
   upsertFromLiveState,
 } from "./sessionCatalog";
 import {
+  cancelPendingSessionsSync,
   DEFAULT_ALWAYS_APPROVE,
+  flushPendingSessionsToCatalog,
   startLiveBridgeSession,
   stopPoolPoll,
 } from "./sessionStoreLive";
+import { flushChildSessionsToCatalog } from "./sessionRoles";
+import { stampProvenance } from "./sessionProvenance";
+import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
+import { promoteBufferedChildForSelect } from "./sessionStoreSelectPromote";
 import {
   flushCatalogPersist,
   INITIAL_SESSION,
@@ -35,14 +43,12 @@ import type {
   SessionStoreSet,
   SetWorkspaceResult,
 } from "./sessionStoreTypes";
+import { forgetAllTurnEdges, forgetTurnEdge } from "./sessionTurnEdge";
 
 /** Selection sequence while async resume is in flight (stale async guards). */
 let selectSeq = 0;
 
-/**
- * Bump select sequence (tests / external cancel of in-flight select).
- * @returns New sequence number.
- */
+/** Bump select sequence (tests / cancel in-flight select). @returns New seq. */
 export function bumpSelectSeq(): number {
   selectSeq += 1;
   return selectSeq;
@@ -52,6 +58,9 @@ export function bumpSelectSeq(): number {
  * Open a local New chat draft. Does **not** call session/new on the bridge;
  * the real session is created on the first successful sendPrompt (forceNew).
  * Optional cwd overrides workspace prefs for the draft and later create.
+ * After the canvas is blanked, asks the composer to take keyboard focus so
+ * every entry (rail, ⌘N, palette, session ⋯, workspace switch) lands in the
+ * input — the ⋯ menu and New chat button would otherwise keep focus.
  * @param set Zustand set.
  * @param get Zustand get.
  * @param cwd Absolute path, empty for no project, or omit for prefs/session.
@@ -83,6 +92,18 @@ export async function newSessionAction(
   selectSeq += 1;
   get().clearPendingMode();
   const prev = get().session;
+  /**
+   * Keep the last grok-build slash catalog on the draft. Handshake is deferred
+   * until first send; `/` must still list compact / skills immediately.
+   */
+  const draftSession = withCachedSlashCatalog({
+    ...createSessionState({
+      id: "",
+      workspace,
+      mode: prev.mode,
+    }),
+    availableCommands: prev.availableCommands,
+  });
   // Persist the previous live canvas into the rail before blanking the UI.
   // No bridge spawn here — avoids empty "Chat xxxx" ghosts until the user sends.
   if (prev.id) {
@@ -102,12 +123,9 @@ export async function newSessionAction(
       viewingSubagent: false,
       viewingParentSessionId: undefined,
       bridgeInfo: "New chat — send a message to start",
-      session: createSessionState({
-        id: "",
-        workspace,
-        mode: prev.mode,
-      }),
+      session: draftSession,
     });
+    focusComposer();
     return;
   }
   set({
@@ -119,12 +137,9 @@ export async function newSessionAction(
     viewingSubagent: false,
     viewingParentSessionId: undefined,
     bridgeInfo: "New chat — send a message to start",
-    session: createSessionState({
-      id: "",
-      workspace,
-      mode: prev.mode,
-    }),
+    session: draftSession,
   });
+  focusComposer();
 }
 
 /**
@@ -187,6 +202,9 @@ export function selectSessionAction(
   get: SessionStoreGet,
   id: string,
 ): void {
+  // L3 drill-down: promote buffered (or role-only stub) child → catalog first.
+  promoteBufferedChildForSelect(set, get, id);
+
   const rec = get().catalog.find((s) => s.id === id);
   if (!rec) {
     return;
@@ -197,29 +215,52 @@ export function selectSessionAction(
   const seeded = recordToSessionState(rec, poolEntry?.status);
   const inPool = Boolean(poolEntry);
   /**
-   * Nothing cached to paint: session/load replay is the only source of body,
-   * and it stays silent until it completes, so the canvas needs a restore hint
-   * instead of the New chat empty state.
+   * Nothing cached to paint: session/load replay is silent until it finishes,
+   * so the canvas needs a restore hint instead of the New chat empty state.
+   * Disk hydrate (chat_history.jsonl) usually clears this in tens of ms;
+   * in-pool sessions can still be empty (Go never holds timeline).
    */
-  const coldRestore = seeded.timeline.length === 0 && !inPool;
+  const coldRestore = seeded.timeline.length === 0;
 
   // Mode switch timers / pending belong to the previous canvas only.
   get().clearPendingMode();
   // Session switch: force any pending catalog write so the prior chat is durable.
   flushCatalogPersist();
 
+  // Role may land from live index before disk session_kind sync (I2).
+  const kind = rec.sessionKind ?? get().sessionRoles[id]?.sessionKind;
+  const parentId =
+    rec.parentSessionId ?? get().sessionRoles[id]?.parentSessionId;
+
+  // Local fact: this client requested the session — user-facing whitelist.
+  const sessionProvenance = stampProvenance(
+    get().sessionProvenance,
+    id,
+    isSubagentSessionKind(kind) ? "child" : "resumed",
+  );
+
   set({
     viewingSessionId: id,
-    session: seeded,
+    session: withCachedSlashCatalog(seeded),
     lastError: null,
     localDraft: false,
     creatingSession: false,
     restoringSessionId: coldRestore ? id : null,
     bridgeInfo: inPool ? `live · ${rec.title}` : `Opened · ${rec.title}`,
     // Store-derived readonly mode: one place, many consumers (composer / top-nav).
-    viewingSubagent: isSubagentSessionKind(rec.sessionKind),
-    viewingParentSessionId: rec.parentSessionId,
+    viewingSubagent: isSubagentSessionKind(kind),
+    viewingParentSessionId: parentId,
+    sessionProvenance,
   });
+
+  // Paint from ~/.grok/sessions while spawn / session/load runs in the background.
+  if (coldRestore) {
+    void hydrateViewingSessionFromDisk(set, get, {
+      sessionId: id,
+      cwd: rec.workspace || undefined,
+      guard: () => seq === selectSeq,
+    });
+  }
 
   // Already in pool or current live focus: only run start hit-path / push state.
   if (
@@ -266,6 +307,8 @@ export function selectSessionAction(
 
 /**
  * Remove a session from catalog and pool; may re-focus another row.
+ * Forgets busy→idle edge memory for this id so a later idle restore
+ * of the same id is not treated as a turn settle.
  * @param set Zustand set.
  * @param get Zustand get.
  * @param id Session id to drop.
@@ -277,6 +320,7 @@ export function removeSessionAction(
 ): void {
   // Reclaim child process (if in pool)
   get().live?.closeSession(id);
+  forgetTurnEdge(id);
   // Filter-only: still normalize so ghost prune / sort stay consistent.
   const catalog = get().catalog.filter((s) => s.id !== id);
   persistCatalog(catalog);
@@ -316,6 +360,7 @@ export function removeSessionAction(
 
 /**
  * Persist current session into catalog and tear down live bridge.
+ * Clears all busy→idle edge memory so the next idle restore is not a settle.
  * @param set Zustand set.
  * @param get Zustand get.
  */
@@ -323,17 +368,59 @@ export function disconnectAction(
   set: SessionStoreSet,
   get: SessionStoreGet,
 ): void {
+  forgetAllTurnEdges();
+  cancelPendingSessionsSync();
   const s = get().session;
+  // Always flush pending so unproven multi-client sessions are not lost.
+  let catalog = get().catalog;
+  let provenance = get().sessionProvenance;
+  const pendingFlush = flushPendingSessionsToCatalog(
+    catalog,
+    get().pendingSessions,
+    provenance,
+  );
+  catalog = pendingFlush.catalog;
+  provenance = pendingFlush.provenance;
+
   if (s.id) {
-    const catalog = normalizeCatalog(
-      upsertFromLiveState(get().catalog, {
+    // Promote buffered children so L3 drill-down still resolves offline.
+    const parentWs: Record<string, string> = {};
+    for (const rec of catalog) {
+      if (rec.workspace.trim()) {
+        parentWs[rec.id] = rec.workspace;
+      }
+    }
+    if (s.workspace.trim()) {
+      parentWs[s.id] = s.workspace;
+    }
+    const flushed = flushChildSessionsToCatalog(
+      upsertFromLiveState(catalog, {
         ...s,
         status: "disconnected",
       }),
+      get().childSessions,
+      get().sessionRoles,
+      parentWs,
     );
+    catalog = normalizeCatalog(flushed.catalog);
     persistNormalizedCatalog(catalog);
     flushCatalogPersist();
-    set({ catalog });
+    set({
+      catalog,
+      childSessions: flushed.remaining,
+      pendingSessions: {},
+      pendingSessionOrder: [],
+      sessionProvenance: provenance,
+    });
+  } else {
+    persistNormalizedCatalog(catalog);
+    flushCatalogPersist();
+    set({
+      catalog,
+      pendingSessions: {},
+      pendingSessionOrder: [],
+      sessionProvenance: provenance,
+    });
   }
   // stopPoolPoll is also called from onClose; clear here so a close that
   // never fires onClose (already-null live) still ends the interval.

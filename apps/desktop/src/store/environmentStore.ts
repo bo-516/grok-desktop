@@ -11,6 +11,7 @@ import {
   type InspectSnapshot,
   type McpHealth,
   type McpRow,
+  type SkillRow,
 } from "@/lib/inspectModel";
 
 /** Pages available in Phase 1 (nav still lists stubs for later phases). */
@@ -286,6 +287,17 @@ export function selectMcpRows(
   snapshot: InspectSnapshot | null,
 ): McpRow[] {
   return snapshot?.mcpServers ?? [];
+}
+
+/**
+ * Select skill rows from the store snapshot (stable empty array when unloaded).
+ * @param snapshot Store snapshot.
+ * @returns Skill rows.
+ */
+export function selectSkillRows(
+  snapshot: InspectSnapshot | null,
+): SkillRow[] {
+  return snapshot?.skills ?? [];
 }
 
 /**

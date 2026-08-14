@@ -6,6 +6,7 @@
 import type {
   AgentMode,
   ContentBlock,
+  SessionBillingSnapshot,
   SessionState,
 } from "@grok-desktop/acp-core";
 import type { EnvironmentInfo, PoolEntry } from "../bridge/liveBridge";
@@ -14,8 +15,11 @@ import type {
   ConnectionMode,
   LiveHandle,
 } from "./sessionStoreLive";
+import type { SessionRoleIndex } from "./sessionRoles";
+import type { SessionProvenanceIndex } from "./sessionProvenance";
 import type { StartOpts } from "./sessionStoreSupport";
 import type { PromptQueueItem } from "@/lib/promptQueue";
+import type { WeeklyUsageOutcome } from "@/lib/weeklyUsagePoll";
 
 export type { ConnectionMode, EnvironmentInfo, PoolEntry };
 export type { ContentBlock, SessionState, SessionRecord };
@@ -46,8 +50,40 @@ export type SessionStore = {
   viewingSubagent: boolean;
   /** Parent chat id for the breadcrumb; undefined when the link is unknown. */
   viewingParentSessionId?: string;
+  /**
+   * childSessionId → parent linkage from live subagent cards and disk rows.
+   * First-hand before sessions_list; used for rail filter and child routing.
+   */
+  sessionRoles: SessionRoleIndex;
+  /**
+   * In-memory buffers for known child sessions while streaming.
+   * Not persisted; promoted to catalog on terminal / drill-down / flush.
+   */
+  childSessions: Record<string, SessionState>;
+  /**
+   * sessionId → provenance. Wire is default (not stored). Only local /
+   * resumed / disk may enter the catalog and session rail.
+   */
+  sessionProvenance: SessionProvenanceIndex;
+  /**
+   * Unproven wire-only session buffers (memory only). Claimed by
+   * subagent_spawned, sessions_list, or disconnect/hide flush.
+   */
+  pendingSessions: Record<string, SessionState>;
+  /** Oldest-first keys of pendingSessions for bounded eviction. */
+  pendingSessionOrder: string[];
+  /**
+   * Bumped when catalog row identity changes in a way Agents openable-id
+   * sets must recompute; avoids depending on the catalog array reference.
+   */
+  catalogRevision: number;
   poolEntries: PoolEntry[];
   environment: EnvironmentInfo | null;
+  /**
+   * Last successful `_x.ai/billing` snapshot (account weekly / monthly remaining).
+   * Shared across sessions; kept as last-known-good when a later fetch fails.
+   */
+  weeklyUsage: SessionBillingSnapshot | null;
   /**
    * True after New chat until the first send (or the user selects another row).
    * Empty canvas + no viewing id alone is not enough — cold reconnect also
@@ -68,19 +104,19 @@ export type SessionStore = {
   pendingMode: AgentMode | null;
   /**
    * Session whose history is being restored with nothing cached to show yet.
-   * Set only when the seed timeline is empty (rows discovered by disk sync),
-   * because session/load replay is silent until it finishes — without this the
-   * canvas would show the New chat empty state and read as an empty session.
-   * Cleared by the first inbound snapshot that carries content.
+   * Set when the seed timeline is empty (disk-sync stubs). Cleared by the
+   * first inbound snapshot that carries content — usually disk hydrate
+   * (`session_history`), otherwise session/load replay.
    */
   restoringSessionId: string | null;
   startLiveBridge: (opts?: StartOpts) => Promise<void>;
   /**
    * Open a local New chat draft (empty canvas, no bridge session/new).
    * The real session is created only when the user actually sends a message.
-   * Optional `cwd` overrides the default project; when omitted, uses workspace
-   * prefs active path, then the current session workspace. Empty string means
-   * work without a project.
+   * Always focuses the composer so every entry (rail, ⌘N, palette, ⋯) lands
+   * in the input. Optional `cwd` overrides the default project; when omitted,
+   * uses workspace prefs active path, then the current session workspace.
+   * Empty string means work without a project.
    * @param cwd Absolute workspace path, empty string for no project, or omit.
    */
   newSession: (cwd?: string) => Promise<void>;
@@ -93,8 +129,21 @@ export type SessionStore = {
    */
   setWorkspace: (cwd: string | null) => Promise<SetWorkspaceResult>;
   reconnect: () => Promise<void>;
+  /**
+   * Auto-retry path: open the bridge WebSocket when down, resume the viewing
+   * session if one exists, otherwise connect only (no session/new).
+   * No-op while connecting or already live.
+   */
+  ensureConnected: () => Promise<void>;
   selectSession: (id: string) => void;
   removeSession: (id: string) => void;
+  /**
+   * Persist a user-chosen rail title and lock it against agent / timeline overwrite.
+   * Empty or whitespace-only titles are ignored (the rail cancels instead).
+   * @param id Catalog session id.
+   * @param title Proposed display title; the action trims and clips it.
+   */
+  renameSession: (id: string, title: string) => void;
   /**
    * Send prompt text and optional multi-block content (images / resource_link).
    * @param text User text (also used for queue key).
@@ -124,6 +173,18 @@ export type SessionStore = {
   enqueuePrompt: (text: string) => void;
   dequeuePrompt: () => string | null;
   clearPromptQueue: () => void;
+  /**
+   * Remove one follow-up by row id (Cancel, or Edit after the text is copied).
+   * @param id {@link PromptQueueItem.id}; unknown ids are ignored.
+   * @returns Removed text, or null when the row was already gone.
+   */
+  removeQueuedPrompt: (id: string) => string | null;
+  /**
+   * grok-build Send now: interrupt the live turn so this row drains next,
+   * or send immediately when the canvas is already idle.
+   * @param id {@link PromptQueueItem.id}; unknown ids are ignored.
+   */
+  sendQueuedPromptNow: (id: string) => void;
   /** Last SPAWN restart notice for UI banner (J-06). */
   restartNotice: string | null;
   clearRestartNotice: () => void;
@@ -142,8 +203,8 @@ export type SessionStore = {
     error?: string;
   }>;
   /**
-   * Fork the open session into a peer, show thinking while the RPC runs, then
-   * switch the canvas to the forked branch (`newSessionId`).
+   * Fork the open session into a peer. Paints the centered restore empty
+   * state for at least 1s, then switches the canvas to `newSessionId`.
    * @param opts Optional child workspace (worktree path); default = parent cwd.
    */
   forkSession: (opts?: {
@@ -154,6 +215,12 @@ export type SessionStore = {
   disconnect: () => void;
   hydrateCatalog: () => void;
   refreshEnvironment: () => void;
+  /**
+   * Pull weekly remaining from the live grok-build `x.ai/billing` extension.
+   * No-op when disconnected, in-flight, or the agent does not expose billing.
+   * Resolves with the pacing hint the composer poll uses to back off.
+   */
+  refreshWeeklyUsage: () => Promise<WeeklyUsageOutcome>;
 };
 
 /** Zustand set function used by action modules. */

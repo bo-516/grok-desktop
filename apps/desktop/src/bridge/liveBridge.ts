@@ -37,9 +37,9 @@ export type {
 
 export {
   createLiveBridgeDispatch,
-  makeAgentChunkUpdates,
   REPLAY_TIMEOUT_MS,
 } from "./liveBridgeDispatch";
+export { makeAgentChunkUpdates } from "./liveBridgeFixtures";
 
 type PendingCli = {
   resolve: (result: CliChannelResult) => void;
@@ -114,6 +114,18 @@ export function connectLiveBridge(
     sessionId?: string,
     opts?: { sourceCwd?: string; newCwd?: string },
   ) => Promise<CliChannelResult>;
+  /**
+   * Account weekly remaining (`_x.ai/billing` via bridge).
+   * @param sessionId Live session whose process carries the RPC; omit for focused.
+   * @returns cli_result envelope; `data` is the credits-config bag on success.
+   */
+  billing: (sessionId?: string) => Promise<CliChannelResult>;
+  /**
+   * Session context occupancy (`session/token_usage` via bridge).
+   * @param sessionId Live session whose process carries the RPC; omit for focused.
+   * @returns cli_result envelope; `data` is the usage bag on success.
+   */
+  tokenUsage: (sessionId?: string) => Promise<CliChannelResult>;
   restartSession: (
     sessionId: string,
     spawnConfig?: SessionSpawnConfig,
@@ -320,6 +332,49 @@ export function connectLiveBridge(
         spawnConfig,
         alwaysApprove,
       }),
+    /**
+     * Billing via bridge `billing` (reuses the CLI requestId correlation path).
+     * @param sessionId Live session that owns the grok-build process.
+     */
+    billing: (sessionId) => {
+      cliRequestState.sequence += 1;
+      const requestId = `billing-${cliRequestState.sequence}`;
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingCli.delete(requestId);
+          reject(new Error("billing timed out"));
+        }, 12_000);
+        pendingCli.set(requestId, { resolve, reject, timeout });
+        if (send({ type: "billing", requestId, sessionId })) {
+          return;
+        }
+        clearTimeout(timeout);
+        pendingCli.delete(requestId);
+        reject(new Error("Bridge WebSocket is not connected"));
+      });
+    },
+    /**
+     * Token usage via bridge `token_usage` (same cli_result correlation as billing).
+     * Used to backfill the composer ring after session/load drops occupancy.
+     * @param sessionId Live session that owns the grok-build process.
+     */
+    tokenUsage: (sessionId) => {
+      cliRequestState.sequence += 1;
+      const requestId = `token-usage-${cliRequestState.sequence}`;
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingCli.delete(requestId);
+          reject(new Error("token_usage timed out"));
+        }, 12_000);
+        pendingCli.set(requestId, { resolve, reject, timeout });
+        if (send({ type: "token_usage", requestId, sessionId })) {
+          return;
+        }
+        clearTimeout(timeout);
+        pendingCli.delete(requestId);
+        reject(new Error("Bridge WebSocket is not connected"));
+      });
+    },
     cli,
     close: () => {
       try {

@@ -2,6 +2,7 @@
  * Live bridge connect/start (multi-session): pool state, env probe, canvas follows viewing.
  * Real grok-build bridge only; no mock path.
  * Inbound paint/persist lives in sessionStoreLiveInbound.
+ * Pool poll / pending flush / sessions_list sync are sibling modules.
  */
 
 import { markDisconnected } from "@grok-desktop/acp-core";
@@ -11,23 +12,38 @@ import {
   type StartOpts as BridgeStartOpts,
 } from "../bridge/liveBridge";
 import {
-  mergeRemoteSessionsIntoCatalog,
-  normalizeSessionsList,
-} from "../lib/sessionActions";
-import {
   normalizeCatalog,
   upsertFromLiveState,
 } from "./sessionCatalog";
 import {
-  persistNormalizedCatalog,
-  resolveResumeTarget,
-  type StartOpts,
-} from "./sessionStoreSupport";
-import {
-  applyInboundSession,
+  admitForceNewSessionFromInfo,
   type GetState,
   type SetState,
 } from "./sessionStoreLiveInbound";
+import { applyLiveInboundSession } from "./sessionStoreLiveApply";
+import { forgetAllTurnEdges } from "./sessionTurnEdge";
+import {
+  applyPoolBusyToSession,
+  poolFingerprintUnchanged,
+  retargetPoolPoll,
+  startPoolPoll,
+  stopPoolPoll,
+} from "./sessionStorePoolPoll";
+import {
+  cancelPendingSessionsSync,
+  flushPendingSessionsToCatalog,
+  schedulePendingSessionsSync as schedulePendingSyncImpl,
+} from "./sessionStorePending";
+import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
+import { syncCatalogFromBridge } from "./sessionStoreSync";
+import { sessionHasConversationContent } from "@/lib/sessionContent";
+import { rememberSlashCatalog } from "@/lib/slashCatalog";
+import {
+  persistNormalizedCatalog,
+  resolveResumeCanvasStatus,
+  resolveResumeTarget,
+  type StartOpts,
+} from "./sessionStoreSupport";
 import type { LiveHandle } from "./sessionStoreLiveTypes";
 
 export {
@@ -41,8 +57,31 @@ export {
 export {
   applyInboundSession,
   healSessionTimeline,
+  type InboundOutcome,
   type LiveStoreSlice,
 } from "./sessionStoreLiveInbound";
+
+export { applyLiveInboundSession } from "./sessionStoreLiveApply";
+
+export {
+  POOL_POLL_ACTIVE_MS,
+  POOL_POLL_IDLE_MS,
+  POOL_POLL_MS,
+  applyPoolBusyToSession,
+  poolEntriesFingerprint,
+  poolHasStreaming,
+  retargetPoolPoll,
+  startPoolPoll,
+  stopPoolPoll,
+} from "./sessionStorePoolPoll";
+
+export {
+  PENDING_SYNC_QUIET_MS,
+  cancelPendingSessionsSync,
+  flushPendingSessionsToCatalog,
+} from "./sessionStorePending";
+
+export { syncCatalogFromBridge } from "./sessionStoreSync";
 
 export type { ConnectionMode, LiveHandle } from "./sessionStoreLiveTypes";
 
@@ -50,55 +89,45 @@ export type { ConnectionMode, LiveHandle } from "./sessionStoreLiveTypes";
 export const DEFAULT_ALWAYS_APPROVE = false;
 
 /**
- * Footer "N running" safety poll while live-bridge is up.
- * "Running" = pool entries with `status === "streaming"` (AI outputting),
- * not mere process residency. Primary updates are event-driven (`onPool` /
- * `broadcastPool`); this interval covers missed events / process death without
- * ACP notification. 1s matches the rail status freshness expectation.
+ * Schedule deferred sessions_list when pending buffers are non-empty.
+ * @param bridge Live handle.
+ * @param set Zustand set.
+ * @param get Zustand get.
  */
-export const POOL_POLL_MS = 1000;
-
-/** Active pool list_pool timer; null when disconnected. */
-let poolPollTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
- * Stop the 1s list_pool poll (disconnect / reconnect / close).
- * Safe when no timer is running.
- */
-export function stopPoolPoll(): void {
-  if (poolPollTimer !== null) {
-    clearInterval(poolPollTimer);
-    poolPollTimer = null;
-  }
-}
-
-/**
- * Start (or restart) the 1s list_pool poll so footer streaming counts stay fresh.
- * @param listPool Bridge client method; return value ignored (false = WS closed).
- */
-export function startPoolPoll(listPool: () => boolean): void {
-  stopPoolPoll();
-  poolPollTimer = setInterval(() => {
-    listPool();
-  }, POOL_POLL_MS);
+export function schedulePendingSessionsSync(
+  bridge: LiveHandle,
+  set: SetState,
+  get: GetState,
+): void {
+  // Casts keep pending module free of LiveStoreSlice import cycles.
+  schedulePendingSyncImpl(
+    bridge,
+    set as never,
+    get as never,
+    syncCatalogFromBridge as never,
+  );
 }
 
 /**
  * Connect to the real bridge and start/resume a session (pool acquire).
+ * `connectOnly` stops after the WebSocket + env/pool sync — no session/start.
  * @param set Zustand set.
  * @param get Zustand get.
- * @param opts Start options including optional post-await `guard` (T3).
+ * @param opts Start options including optional post-await `guard` (T3)
+ *   and `connectOnly` for automatic reconnect without session/new.
  */
 export async function startLiveBridgeSession(
   set: SetState,
   get: GetState,
   opts?: StartOpts,
 ): Promise<void> {
+  /** True when we only need the WebSocket (auto-retry / draft). */
+  const connectOnly = Boolean(opts?.connectOnly);
   const resolved = resolveResumeTarget(get(), opts);
-  const resumeId = resolved.resumeId;
-  const seed = resolved.seed ?? opts?.seed;
+  const resumeId = connectOnly ? undefined : resolved.resumeId;
+  const seed = connectOnly ? undefined : (resolved.seed ?? opts?.seed);
   const cwd = resolved.cwd ?? opts?.cwd;
-  const forceNew = Boolean(opts?.forceNew);
+  const forceNew = connectOnly ? false : Boolean(opts?.forceNew);
   const alwaysApprove = opts?.alwaysApprove ?? DEFAULT_ALWAYS_APPROVE;
   set({ lastError: null });
 
@@ -138,17 +167,44 @@ export async function startLiveBridgeSession(
          * `session_update` / `session_lifecycle` messages.
          * @param session SessionState already reduced / hydrated.
          */
-        onState: (session) => {
-          applyInboundSession(set, get, session);
+        onState: (session, meta) => {
+          rememberSlashCatalog(session.availableCommands);
+          applyLiveInboundSession(set, get, session, meta);
+          const b = get().live;
+          if (b && Object.keys(get().pendingSessions ?? {}).length > 0) {
+            schedulePendingSessionsSync(b, set, get);
+          }
         },
         onSessionUpdate: (session, meta) => {
           if (!meta.applied) {
             return;
           }
-          applyInboundSession(set, get, session);
+          rememberSlashCatalog(session.availableCommands);
+          applyLiveInboundSession(set, get, session);
+          const b = get().live;
+          if (b && Object.keys(get().pendingSessions ?? {}).length > 0) {
+            schedulePendingSessionsSync(b, set, get);
+          }
         },
         onPool: (entries) => {
-          set({ poolEntries: entries });
+          if (poolFingerprintUnchanged(entries)) {
+            return;
+          }
+          set((s) => ({
+            poolEntries: entries,
+            // Reconnect / select often seeds idle before list_pool lands.
+            // Promote Working when the viewed process is still busy.
+            session: applyPoolBusyToSession(
+              s.session,
+              s.viewingSessionId,
+              entries,
+              s.restoringSessionId,
+            ),
+          }));
+          const bridge = get().live;
+          if (bridge) {
+            retargetPoolPoll(() => bridge.listPool(), entries);
+          }
         },
         onEnvironment: (env) => {
           set({
@@ -156,8 +212,12 @@ export async function startLiveBridgeSession(
             bridgeInfo: env.ok ? env.message : get().bridgeInfo,
           });
         },
-        onInfo: (message) => {
+        onInfo: (message, sessionId) => {
           set({ bridgeInfo: message, lastError: null });
+          // forceNew: stamp local only for ready contract
+          // `session <id> ready` (+ optional models=…). Recovery/ops info with
+          // a sessionId must not become sticky local mid-forceNew.
+          admitForceNewSessionFromInfo(set, get, sessionId, message);
         },
         onError: (message) => {
           set({
@@ -184,22 +244,32 @@ export async function startLiveBridgeSession(
         },
         onClose: () => {
           stopPoolPoll();
+          cancelPendingSessionsSync();
+          forgetAllTurnEdges();
           set((s) => {
-            const catalog = s.session.id
-              ? normalizeCatalog(
-                  upsertFromLiveState(s.catalog, {
-                    ...s.session,
-                    status: "disconnected",
-                  }),
-                )
-              : s.catalog;
+            // Flush unproven pending first so multi-client sessions are not lost.
+            const pendingFlush = flushPendingSessionsToCatalog(
+              s.catalog,
+              s.pendingSessions ?? {},
+              s.sessionProvenance ?? {},
+            );
+            let catalog = pendingFlush.catalog;
             if (s.session.id) {
-              persistNormalizedCatalog(catalog);
+              catalog = normalizeCatalog(
+                upsertFromLiveState(catalog, {
+                  ...s.session,
+                  status: "disconnected",
+                }),
+              );
             }
+            persistNormalizedCatalog(catalog);
             return {
               live: null,
               connectionMode: "disconnected" as const,
               catalog,
+              sessionProvenance: pendingFlush.provenance,
+              pendingSessions: {},
+              pendingSessionOrder: [],
               poolEntries: [],
               session: markDisconnected(s.session),
               lastError: null,
@@ -219,11 +289,14 @@ export async function startLiveBridgeSession(
       live.listPool();
       // Capture non-null handle for the interval closure (TS + reconnect safety).
       const bridge = live;
-      // Event-driven onPool is primary; 1s poll keeps streaming "N running"
+      // Event-driven onPool is primary; adaptive poll keeps streaming "N running"
       // honest if a push is missed (stream end / exit without ACP, partial WS drop).
-      startPoolPoll(() => bridge.listPool());
+      startPoolPoll(() => bridge.listPool(), () => get().poolEntries);
       // Pull every workspace's sessions into the rail catalog (F-SESS-07).
-      void syncCatalogFromBridge(bridge, set, get);
+      void syncCatalogFromBridge(bridge, set, get).then(() => {
+        // After cold sync, reclassify any pending that arrived during connect.
+        schedulePendingSessionsSync(bridge, set, get);
+      });
     } catch (e) {
       stopPoolPoll();
       if (!stillCurrent()) {
@@ -244,23 +317,75 @@ export async function startLiveBridgeSession(
     return;
   }
 
-  if (seed && resumeId) {
+  // Auto-reconnect / draft: WebSocket is enough. session/start would
+  // resume catalog[0] or forceNew a ghost chat the user did not send.
+  if (connectOnly) {
+    set({
+      connectionMode: "live-bridge",
+      bridgeInfo: "live · connected",
+    });
+    return;
+  }
+
+  // Cold resume: paint disk history before spawning grok-build so Restoring
+  // is not gated on initialize / MCP / session/load replay.
+  if (resumeId && !forceNew) {
+    const viewing = get().session;
+    const needsHistory =
+      viewing.id === resumeId &&
+      !sessionHasConversationContent(viewing.timeline);
+    if (needsHistory) {
+      await hydrateViewingSessionFromDisk(set as never, get as never, {
+        sessionId: resumeId,
+        cwd: cwd || viewing.workspace || undefined,
+        guard: stillCurrent,
+        live,
+      });
+      if (!stillCurrent()) {
+        return;
+      }
+    }
+  }
+
+  const paintedAfterHydrate = get().session;
+  const keepDiskBody =
+    Boolean(resumeId) &&
+    paintedAfterHydrate.id === resumeId &&
+    sessionHasConversationContent(paintedAfterHydrate.timeline);
+  if (seed && resumeId && !keepDiskBody) {
+    const poolStatus = get().poolEntries.find(
+      (entry) => entry.sessionId === resumeId && entry.live,
+    )?.status;
+    const status = resolveResumeCanvasStatus(seed.status, poolStatus);
     set({
       session: {
         ...seed,
-        status: "idle",
-        pendingPermission: undefined,
+        status,
+        pendingPermission:
+          status === "waiting_permission"
+            ? seed.pendingPermission
+            : undefined,
       },
       viewingSessionId: resumeId,
       activeSessionId: resumeId,
     });
+  } else if (resumeId) {
+    set({ viewingSessionId: resumeId, activeSessionId: resumeId });
   }
 
+  const painted = get().session;
+  const seedForStart =
+    !forceNew &&
+    resumeId &&
+    painted.id === resumeId &&
+    sessionHasConversationContent(painted.timeline)
+      ? painted
+      : seed;
   const startOpts: BridgeStartOpts = {
     alwaysApprove,
     cwd,
     resumeId: forceNew ? undefined : resumeId,
-    seed: forceNew ? undefined : seed,
+    seed: forceNew ? undefined : seedForStart,
     forceNew,
   };
   const started = live.start(startOpts);
@@ -295,42 +420,3 @@ export async function startLiveBridgeSession(
       : resumeId ?? get().viewingSessionId,
   });
 }
-
-/**
- * Fetch upstream sessions (all workspaces) and merge into the local catalog.
- * Used on connect and by the Sync sessions menu. Empty remote does not clear
- * local rows. Failures are silent so a flaky CLI does not block the UI.
- * @param bridge Live bridge handle with `cli`.
- * @param set Zustand set for catalog write-back.
- * @param get Zustand get for the current catalog snapshot.
- */
-export async function syncCatalogFromBridge(
-  bridge: LiveHandle,
-  set: SetState,
-  get: GetState,
-): Promise<{ ok: boolean; count: number; error?: string }> {
-  try {
-    // Omit cwd so the bridge returns every workspace under ~/.grok/sessions.
-    const result = await bridge.cli("sessions_list", {});
-    if (!result.ok) {
-      return {
-        ok: false,
-        count: 0,
-        error: result.error ?? "sessions_list failed",
-      };
-    }
-    const rows = normalizeSessionsList(result.data);
-    // mergeRemoteSessionsIntoCatalog already ends with normalizeCatalog.
-    const catalog = mergeRemoteSessionsIntoCatalog(get().catalog, rows);
-    persistNormalizedCatalog(catalog);
-    set({ catalog });
-    return { ok: true, count: rows.length };
-  } catch (e) {
-    return {
-      ok: false,
-      count: 0,
-      error: e instanceof Error ? e.message : String(e),
-    };
-  }
-}
-

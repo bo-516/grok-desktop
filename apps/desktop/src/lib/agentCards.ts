@@ -6,7 +6,20 @@
  * Pure — no I/O, no store.
  */
 
-import type { BackgroundTaskCard, SubagentCard } from "@grok-desktop/acp-core";
+import {
+  isSpawnSubagentCard,
+  isWaitSubagentCard,
+  parseSpawnedSubagentId,
+  spawnCardDescription,
+  spawnCardType,
+  waitBarrierTaskIds,
+  type BackgroundTaskCard,
+  type SubagentCard,
+  type ToolCallCard,
+} from "@grok-desktop/acp-core";
+
+/** Prefix for roster stubs that only have a spawn toolCallId (no body id yet). */
+const SPAWN_STUB_PREFIX = "spawn:";
 
 /** One round of fan-out subagents sharing a parentPromptId. */
 export type SubagentRound = {
@@ -60,9 +73,168 @@ export function countRunningSubagents(
 }
 
 /**
+ * Task ids a completed wait barrier has joined.
+ * Used to promote spawn-stub cards from running → completed when
+ * `subagent_finished` never arrived (session/load often omits it).
+ * @param toolCalls Session tool-call map.
+ * @returns Set of child / subagent ids the parent already waited on.
+ */
+function completedWaitTaskIds(
+  toolCalls: Record<string, ToolCallCard | undefined>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const card of Object.values(toolCalls)) {
+    if (!card || !isWaitSubagentCard(card)) {
+      continue;
+    }
+    if (normalizeSubagentStatus(card.status) !== "completed") {
+      continue;
+    }
+    for (const id of waitBarrierTaskIds(card)) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Inferred stub status from the spawn tool + optional completed wait.
+ * Spawn `completed` means the child started, not that it finished.
+ * @param toolStatus Normalized spawn-tool status.
+ * @param parsedId Body `subagent_id` when the spawn card has finished writing.
+ * @param waitDone Ids a completed wait barrier joined.
+ */
+function inferredSpawnStatus(
+  toolStatus: string,
+  parsedId: string | undefined,
+  waitDone: Set<string>,
+): string {
+  if (toolStatus === "failed") {
+    return "failed";
+  }
+  if (parsedId && waitDone.has(parsedId)) {
+    return "completed";
+  }
+  if (toolStatus === "completed" || toolStatus === "running") {
+    return "running";
+  }
+  return "pending";
+}
+
+/**
+ * Find an existing orchestration / stub card for one spawn tool.
+ * Matches by parsed body id, childSessionId, or toolCallId.
+ * @param cards Roster map being built.
+ * @param parsedId Body id, or undefined before the spawn card completes.
+ * @param toolCallId Spawn tool id.
+ */
+function findRosterCard(
+  cards: Record<string, SubagentCard>,
+  parsedId: string | undefined,
+  toolCallId: string,
+): SubagentCard | undefined {
+  if (parsedId && cards[parsedId]) {
+    return cards[parsedId];
+  }
+  for (const card of Object.values(cards)) {
+    if (
+      parsedId &&
+      (card.subagentId === parsedId || card.childSessionId === parsedId)
+    ) {
+      return card;
+    }
+    if (card.toolCallId === toolCallId) {
+      return card;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Union orchestration cards with spawn-tool stubs so the Agents rail
+ * matches the L1 `Subagents ×N` group.
+ *
+ * The timeline groups `spawn_subagent` tools even when `session.subagents`
+ * is empty (`subagent_spawned` late, dropped, or omitted from load replay).
+ * The companion must not stay on "No subagents in this session yet" in
+ * that case. Orchestration cards always win on identity; stubs only fill
+ * gaps and may promote running → completed when a wait barrier finished.
+ *
+ * @param subagents SessionState.subagents map, or undefined when none yet.
+ * @param toolCalls SessionState.toolCalls map (spawn + wait cards).
+ * @returns Combined map, or undefined when both sides are empty.
+ */
+export function mergeSubagentsWithSpawnTools(
+  subagents: Record<string, SubagentCard> | undefined,
+  toolCalls: Record<string, ToolCallCard | undefined> | undefined,
+): Record<string, SubagentCard> | undefined {
+  const calls = toolCalls ?? {};
+  const waitDone = completedWaitTaskIds(calls);
+  const out: Record<string, SubagentCard> = { ...(subagents ?? {}) };
+
+  for (const card of Object.values(calls)) {
+    if (!card || !isSpawnSubagentCard(card)) {
+      continue;
+    }
+    const toolCallId = card.toolCallId;
+    if (!toolCallId) {
+      continue;
+    }
+    const parsedId = parseSpawnedSubagentId(card.content);
+    const existing = findRosterCard(out, parsedId, toolCallId);
+    const toolStatus = normalizeSubagentStatus(card.status);
+    const inferred = inferredSpawnStatus(toolStatus, parsedId, waitDone);
+    const description = spawnCardDescription(card);
+    const type = spawnCardType(card);
+    if (existing) {
+      const existingStatus = normalizeSubagentStatus(existing.status);
+      const terminal =
+        existingStatus === "completed" || existingStatus === "failed";
+      const next: SubagentCard = { ...existing };
+      if (!next.toolCallId) {
+        next.toolCallId = toolCallId;
+      }
+      if (!next.description && description) {
+        next.description = description;
+      }
+      if (!next.type && type) {
+        next.type = type;
+      }
+      if (!next.childSessionId && parsedId) {
+        next.childSessionId = parsedId;
+      }
+      if (!terminal && inferred === "completed") {
+        next.status = "completed";
+      }
+      if (!terminal && inferred === "failed") {
+        next.status = "failed";
+      }
+      out[existing.subagentId] = next;
+      continue;
+    }
+    const subagentId = parsedId || `${SPAWN_STUB_PREFIX}${toolCallId}`;
+    out[subagentId] = {
+      subagentId,
+      childSessionId: parsedId ?? "",
+      type,
+      description,
+      status: inferred,
+      toolCallId,
+    };
+  }
+
+  if (Object.keys(out).length === 0) {
+    return subagents;
+  }
+  return out;
+}
+
+/**
  * Group subagent cards by `parentPromptId` (fan-out round).
  * Cards without a prompt id land in an `"ungrouped"` bucket sorted last.
  * Within a round, insertion order from the map is preserved.
+ * Callers that want spawn-tool stubs must merge via
+ * {@link mergeSubagentsWithSpawnTools} first.
  * @param subagents SessionState.subagents map, or undefined.
  * @returns Ordered rounds (known prompt ids first, ungrouped last).
  */

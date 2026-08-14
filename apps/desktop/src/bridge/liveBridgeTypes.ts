@@ -180,8 +180,15 @@ export type BridgeServerMsg =
   | { type: "pong" };
 
 export type LiveBridgeHandlers = {
-  /** Full hydrate snapshot (start / reconnect / get_state). */
-  onState: (session: SessionState) => void;
+  /**
+   * Full hydrate snapshot (start / reconnect / get_state / replay_end).
+   * `recency: "passive"` means disk/load replay — catalog must not jump
+   * the row to now.
+   */
+  onState: (
+    session: SessionState,
+    meta?: { recency?: "live" | "passive" },
+  ) => void;
   /**
    * Raw ACP update after client-side reduce (relay path).
    * session is the post-reduce SessionState for that sessionId.

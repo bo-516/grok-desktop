@@ -14,6 +14,20 @@ import {
 } from "@grok-desktop/acp-core";
 import { preserveLocalUserMedia } from "./sessionStoreLiveFollow";
 import type { SessionRecord } from "./sessionCatalogTypes";
+import {
+  mergeCatalogGoal,
+  mergeCatalogMap,
+  mergeCatalogTokenUsage,
+  trimSubagentCardsForCatalog,
+} from "./sessionCatalogMerge";
+
+export {
+  CATALOG_SUBAGENT_OUTPUT_MAX,
+  mergeCatalogGoal,
+  mergeCatalogMap,
+  mergeCatalogTokenUsage,
+  trimSubagentCardsForCatalog,
+} from "./sessionCatalogMerge";
 
 /**
  * Stable fingerprint of non-text prompt blocks so embed/link/image changes
@@ -165,6 +179,8 @@ function isSmallLiveAppend(
  * @param agentUpdatedAt Optional ISO string from SessionState.updatedAt.
  * @param now Wall-clock ms (injectable for tests).
  * @param status Live session status; idle load hydrates stay passive.
+ * @param recency `passive` keeps an existing row's clock (disk hydrate /
+ *   session/load replay). Omit / `live` uses the activity rules below.
  * @returns Epoch ms for SessionRecord.updatedAt.
  */
 export function resolveCatalogUpdatedAt(
@@ -174,6 +190,7 @@ export function resolveCatalogUpdatedAt(
   agentUpdatedAt: string | undefined,
   now = Date.now(),
   status?: SessionStatus,
+  recency?: "live" | "passive",
 ): number {
   const agentMs = (() => {
     if (!agentUpdatedAt?.trim()) {
@@ -185,6 +202,10 @@ export function resolveCatalogUpdatedAt(
 
   if (!existing) {
     return agentMs ?? now;
+  }
+  // Select / disk hydrate / session/load must not reorder the rail.
+  if (recency === "passive") {
+    return existing.updatedAt;
   }
 
   const contentChanged =
@@ -230,12 +251,15 @@ export function resolveCatalogUpdatedAt(
  * @param catalog Current catalog array (not mutated).
  * @param state Live or seeded SessionState; empty id is a no-op.
  * @param now Wall-clock ms for createdAt / live content-change updatedAt.
+ * @param opts `recency: "passive"` for disk hydrate / session/load replay —
+ *   never jump an existing row to now (select must not reorder the rail).
  * @returns New catalog sorted by updatedAt desc.
  */
 export function upsertFromLiveState(
   catalog: SessionRecord[],
   state: SessionState,
   now = Date.now(),
+  opts?: { recency?: "live" | "passive" },
 ): SessionRecord[] {
   if (!state.id) {
     return catalog;
@@ -260,7 +284,7 @@ export function upsertFromLiveState(
     ).timeline;
   }
   // Heal pre-fix exact X+X user bodies whenever we persist a catalog row.
-  timeline = tagSeedUserMessages(timeline);
+  timeline = tagSeedUserMessages(timeline ?? []);
   /** Merge toolCalls: prefer full inbound, else non-empty inbound patch, else fall back to cached. */
   let toolCalls = state.toolCalls;
   if (!useIncomingTimeline) {
@@ -293,12 +317,32 @@ export function upsertFromLiveState(
     noProject = true;
   }
 
+  // Orchestration maps: union with inbound; empty live frames must not wipe
+  // catalog cards (same ownership rule as mergeBridgeSnapshot clientMergeMap).
+  const subagents = trimSubagentCardsForCatalog(
+    mergeCatalogMap(existing?.subagents, state.subagents),
+  );
+  const subagentLinks = mergeCatalogMap(
+    existing?.subagentLinks,
+    state.subagentLinks,
+  );
+  const backgroundTasks = mergeCatalogMap(
+    existing?.backgroundTasks,
+    state.backgroundTasks,
+  );
+  const goal = mergeCatalogGoal(existing?.goal, state.goal);
+  const tokenUsage = mergeCatalogTokenUsage(
+    existing?.tokenUsage,
+    state.tokenUsage,
+  );
+
   const next: SessionRecord = {
     id: state.id,
     workspace: state.workspace || existing?.workspace || "",
     title: pickSessionTitle({
       state: mergedState,
       existingTitle: existing?.title,
+      titleLocked: existing?.titleLocked,
     }),
     mode: state.mode || existing?.mode || "build",
     model: state.model || existing?.model || "",
@@ -311,16 +355,54 @@ export function upsertFromLiveState(
       state.updatedAt,
       now,
       state.status,
+      opts?.recency,
     ),
     timeline,
     toolCalls,
     plan,
     lastAgentText,
-    // Live ACP state never carries session_kind; keep disk-merge role fields.
+    // Live ACP state never carries session_kind; keep disk-merge role fields
+    // (retro-tag from sessionRoles may patch these before upsert returns).
     sessionKind: existing?.sessionKind,
     parentSessionId: existing?.parentSessionId,
+    // Preserve a user rename across live frames; new rows stay unlocked.
+    titleLocked: existing?.titleLocked,
     noProject,
+    subagents,
+    subagentLinks,
+    backgroundTasks,
+    goal,
+    tokenUsage,
   };
   const without = catalog.filter((s) => s.id !== state.id);
-  return [next, ...without].sort((a, b) => b.updatedAt - a.updatedAt);
+  // Id tie-break keeps sort stable when updatedAt collides (churn reduction).
+  return [next, ...without].sort(
+    (a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id),
+  );
+}
+
+/**
+ * Whether two catalogs are reference-equal at every index (same row objects).
+ * Used by inbound apply to reuse the prior array when upsert produced no
+ * content change, avoiding rail memo churn on every wire frame.
+ * @param a Prior catalog array.
+ * @param b Candidate catalog array.
+ * @returns True when length matches and every slot is the same reference.
+ */
+export function catalogRefsEqual(
+  a: SessionRecord[],
+  b: SessionRecord[],
+): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
 }

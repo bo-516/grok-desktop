@@ -14,16 +14,26 @@ export type {
 export {
   NO_PROJECT_KEY,
   SESSION_STORAGE_KEY,
+  cleanHarnessGoalTitle,
+  displaySessionTitle,
   extractTitleFromTimeline,
   fallbackSessionLabel,
+  isHarnessGoalTitle,
   isWeakSessionTitle,
   pickSessionTitle,
+  shortSessionId,
   titleFromSessionState,
 } from "./sessionCatalogTypes";
 export {
+  catalogRefsEqual,
   resolveCatalogUpdatedAt,
   upsertFromLiveState,
 } from "./sessionCatalogUpsert";
+export {
+  CATALOG_SCHEMA_VERSION,
+  migrateCatalogToCurrent,
+  migrateCatalogV1toV2,
+} from "./sessionCatalogMigration";
 export {
   compareByFirstCharAscii,
   formatRelativeTime,
@@ -37,6 +47,7 @@ export {
 export {
   loadCatalogFromStorage,
   normalizeCatalog,
+  normalizeCatalogRow,
   pruneEmptyWeakSessions,
   recordToSessionState,
   rehydrateCatalogTitles,

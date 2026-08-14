@@ -18,6 +18,7 @@ import {
   pickSessionTitle,
   projectNameFromWorkspace,
   pruneEmptyWeakSessions,
+  recordToSessionState,
   rehydrateCatalogTitles,
   resolveCatalogUpdatedAt,
   splitNoProjectSessions,
@@ -45,10 +46,48 @@ describe("sessionCatalog", () => {
     assert.equal(isWeakSessionTitle("untitled"), true);
     assert.equal(isWeakSessionTitle("Untitled session"), true);
     assert.equal(
+      isWeakSessionTitle("Goal: @refactor-subagent-session-provenance-2026-08-12.md"),
+      true,
+    );
+    assert.equal(isWeakSessionTitle("Working"), true);
+    assert.equal(
       isWeakSessionTitle("UI UX Design Agent Style Codex Claude"),
       false,
     );
     assert.equal(isWeakSessionTitle("Fix the average function"), false);
+  });
+
+  it("pickSessionTitle skips a Goal file and uses the later user prompt", () => {
+    const state = createSessionState({
+      id: "019fd68e-1f9f-76c3-91d4-ed487503dc51",
+      workspace: "/proj/demo",
+    });
+    state.title = "Working";
+    state.timeline = [
+      {
+        kind: "user",
+        id: "u0",
+        blocks: [
+          {
+            type: "text",
+            text: "Goal: @refactor-subagent-session-provenance-2026-08-12.md",
+          },
+        ],
+      },
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "创建4个subagent 冒充2组情侣" }],
+      },
+    ];
+    assert.equal(
+      pickSessionTitle({
+        state,
+        existingTitle:
+          "Goal: @refactor-subagent-session-provenance-2026-08-12.md",
+      }),
+      "创建4个subagent 冒充2组情侣",
+    );
   });
 
   it("pickSessionTitle prefers user message over id", () => {
@@ -355,6 +394,39 @@ describe("sessionCatalog", () => {
     assert.equal(cat[0]?.updatedAt, listedAt);
   });
 
+  it("passive recency keeps the clock when load replay looks like a tip append", () => {
+    const seed = createSessionState({
+      id: "s-passive",
+      workspace: "/proj/demo",
+    });
+    seed.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "prompt" }],
+      },
+      { kind: "agent", id: "a1", text: "disk body" },
+    ];
+    seed.lastAgentText = "disk body";
+    seed.status = "idle";
+    let cat = upsertFromLiveState([], seed, 1000);
+    assert.equal(cat[0]?.updatedAt, 1000);
+
+    const replayed = createSessionState({
+      id: "s-passive",
+      workspace: "/proj/demo",
+    });
+    replayed.timeline = [
+      ...seed.timeline,
+      { kind: "agent", id: "a2", text: "extra from load" },
+    ];
+    replayed.lastAgentText = "extra from load";
+    replayed.status = "idle";
+    cat = upsertFromLiveState(cat, replayed, 99_000, { recency: "passive" });
+    assert.equal(cat[0]?.updatedAt, 1000);
+    assert.equal(cat[0]?.timeline.length, 3);
+  });
+
   it("resolveCatalogUpdatedAt prefers newer agent session_info time without content change", () => {
     const existing = {
       id: "s1",
@@ -486,6 +558,68 @@ describe("sessionCatalog", () => {
     ]);
 
     assert.equal(fixed[0]?.title, "Implement Composer Mentions");
+  });
+
+  it("rehydrateCatalogTitles keeps a user-locked title even when it looks weak", () => {
+    const fixed = rehydrateCatalogTitles([
+      {
+        id: "s-locked",
+        workspace: "/p",
+        title: "Untitled chat",
+        titleLocked: true,
+        mode: "build",
+        model: "m",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 1,
+        timeline: [
+          {
+            kind: "user",
+            id: "u",
+            blocks: [{ type: "text", text: "make the input better" }],
+          },
+        ],
+        toolCalls: {},
+        lastAgentText: "",
+      },
+    ]);
+    assert.equal(fixed[0]?.title, "Untitled chat");
+    assert.equal(fixed[0]?.titleLocked, true);
+  });
+
+  it("rehydrateCatalogTitles replaces a Goal file with the later user prompt", () => {
+    const fixed = rehydrateCatalogTitles([
+      {
+        id: "s-goal",
+        workspace: "/p",
+        title: "Goal: @refactor-subagent-session-provenance-2026-08-12.md",
+        mode: "build",
+        model: "m",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 1,
+        timeline: [
+          {
+            kind: "user",
+            id: "u0",
+            blocks: [
+              {
+                type: "text",
+                text: "Goal: @refactor-subagent-session-provenance-2026-08-12.md",
+              },
+            ],
+          },
+          {
+            kind: "user",
+            id: "u1",
+            blocks: [{ type: "text", text: "创建4个subagent 冒充2组情侣" }],
+          },
+        ],
+        toolCalls: {},
+        lastAgentText: "",
+      },
+    ]);
+    assert.equal(fixed[0]?.title, "创建4个subagent 冒充2组情侣");
   });
 
   it("pruneEmptyWeakSessions drops reconnect ghosts", () => {
@@ -650,6 +784,75 @@ describe("sessionCatalog", () => {
     );
   });
 
+  it("recordToSessionState prefers a live pool streaming status", () => {
+    const rec: SessionRecord = {
+      id: "s-live",
+      workspace: "/proj",
+      title: "In progress",
+      mode: "build",
+      model: "",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 2,
+      timeline: [
+        {
+          kind: "user",
+          id: "u1",
+          blocks: [{ type: "text", text: "go" }],
+        },
+      ],
+      toolCalls: {},
+      lastAgentText: "",
+    };
+    const restored = recordToSessionState(rec, "streaming");
+    assert.equal(restored.status, "streaming");
+  });
+
+  it("recordToSessionState drops stale catalog streaming without a live pool", () => {
+    const rec: SessionRecord = {
+      id: "s-stale",
+      workspace: "/proj",
+      title: "Done",
+      mode: "build",
+      model: "",
+      status: "streaming",
+      createdAt: 1,
+      updatedAt: 2,
+      timeline: [],
+      toolCalls: {},
+      lastAgentText: "",
+    };
+    const restored = recordToSessionState(rec);
+    assert.equal(restored.status, "idle");
+  });
+
+  it("upsert + recordToSessionState round-trip keeps tokenUsage occupancy", () => {
+    const live = createSessionState({ id: "s-ctx", workspace: "/proj" });
+    live.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "hi" }],
+      },
+    ];
+    live.tokenUsage = {
+      inputTokens: 4_772_614,
+      outputTokens: 30_882,
+      totalTokens: 4_803_496,
+      contextTokensUsed: 137_217,
+    };
+    let cat = upsertFromLiveState([], live, 1000);
+    assert.equal(cat[0]?.tokenUsage?.contextTokensUsed, 137_217);
+
+    const empty = createSessionState({ id: "s-ctx", workspace: "/proj" });
+    cat = upsertFromLiveState(cat, empty, 2000);
+    assert.equal(cat[0]?.tokenUsage?.contextTokensUsed, 137_217);
+
+    const restored = recordToSessionState(cat[0]!);
+    assert.equal(restored.tokenUsage?.contextTokensUsed, 137_217);
+    assert.equal(restored.tokenUsage?.inputTokens, 4_772_614);
+  });
+
   it("upsertFromLiveState marks new no-workspace rows and keeps the mark", () => {
     const loose = createSessionState({ id: "loose", workspace: "" });
     let cat = upsertFromLiveState([], loose, 1000);
@@ -675,6 +878,38 @@ describe("sessionCatalog", () => {
     );
     assert.equal(filedCat[0]?.noProject, undefined);
     assert.equal(filedCat[0]?.workspace, "/proj/demo");
+  });
+
+  it("upsertFromLiveState keeps a user-locked title over agent/timeline picks", () => {
+    const first = createSessionState({
+      id: "s-rename",
+      workspace: "/proj",
+    });
+    first.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "original prompt title" }],
+      },
+    ];
+    let cat = upsertFromLiveState([], first, 1000);
+    assert.equal(cat[0]?.title, "original prompt title");
+    cat = [
+      {
+        ...cat[0]!,
+        title: "My custom name",
+        titleLocked: true,
+      },
+    ];
+    const later = createSessionState({
+      id: "s-rename",
+      workspace: "/proj",
+    });
+    later.title = "Agent generated a better title";
+    later.timeline = first.timeline;
+    cat = upsertFromLiveState(cat, later, 2000);
+    assert.equal(cat[0]?.title, "My custom name");
+    assert.equal(cat[0]?.titleLocked, true);
   });
 
   it("groupSessionsByTime buckets Today / Yesterday / Earlier", () => {

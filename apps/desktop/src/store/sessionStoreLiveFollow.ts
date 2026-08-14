@@ -9,21 +9,23 @@
  * would vanish mid-turn (and catalog would persist text-only).
  */
 
-import type {
-  ContentBlock,
-  SessionState,
-  TimelineItem,
-} from "@grok-desktop/acp-core";
 import {
   countImagePlaceholders,
   echoRepeatsBody,
+  mergeBridgeSnapshot,
   normalizeEchoBody,
   stripImagePlaceholders,
   userImagesFromBlocks,
   userTextFromBlocks,
+  type ContentBlock,
+  type SessionState,
+  type TimelineItem,
 } from "@grok-desktop/acp-core";
-import { mergeAvailableModelsPreferContext } from "@/lib/contextUsageDisplay";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
+import {
+  applyLockedCatalogTitle,
+  type LockedTitleRow,
+} from "@/lib/sessionTitleEdit";
 
 /** User timeline row (narrowed for media merge). */
 type UserTimelineItem = Extract<TimelineItem, { kind: "user" }>;
@@ -275,18 +277,24 @@ export function mergeOptimisticLocalUsers(
  * refresh look like "content flashes then vanishes".
  *
  * Only empty (no user/agent) same-id inbound is preserved over local body.
- * Partial live reduces must still paint so new turns are not dropped; callers
- * seed the reduce bucket from catalog so live updates append to history.
+ * An empty inbound that is streaming must not promote an idle local
+ * transcript — that is how a finished overnight chat painted Responding
+ * after session/load metadata. Partial live reduces must still paint so
+ * new turns are not dropped; callers seed the reduce bucket from catalog
+ * so live updates append to history.
  *
  * Content-rich inbound still runs {@link preserveLocalUserMedia} so image
  * thumbs from optimistic paint survive text-only agent echoes.
  * @param inbound Fresh session from bridge reduce / hydrate.
  * @param local Currently painted canvas (often catalog-seeded on select).
+ * @param catalog Optional catalog so a user-locked rail title wins over
+ *   inbound `session_info_update` / timeline picks. Omitted in tests.
  * @returns Canvas SessionState safe to write into the store.
  */
 export function mergeCanvasInbound(
   inbound: SessionState,
   local: SessionState,
+  catalog?: readonly LockedTitleRow[],
 ): SessionState {
   // Restore image/embed blocks before any empty-vs-rich branch so both
   // paths (keep local body / take inbound) keep message-list thumbs.
@@ -297,34 +305,30 @@ export function mergeCanvasInbound(
   const localHasBody = sessionHasConversationContent(local.timeline);
   const inboundHasBody = sessionHasConversationContent(withMedia.timeline);
 
-  // Empty same-id hydrate (Go pool / post-handshake): keep painted transcript.
+  // Empty same-id hydrate (Go pool / post-handshake): field ownership keeps
+  // painted transcript + client-reduced orchestration (subagents, goal, …).
+  // Must run before optimistic-user merge so a full local history is not
+  // reduced to only unconfirmed bubbles.
+  // @see mergeBridgeSnapshot / SESSION_FIELD_OWNER in acp-core
+  let next: SessionState;
   if (sameSession && localHasBody && !inboundHasBody) {
-    const inboundTools = withMedia.toolCalls ?? {};
-    const localTools = local.toolCalls ?? {};
-    return {
-      ...withMedia,
-      timeline: local.timeline,
-      toolCalls:
-        Object.keys(inboundTools).length > 0
-          ? { ...localTools, ...inboundTools }
-          : localTools,
-      lastAgentText: withMedia.lastAgentText || local.lastAgentText || "",
-      plan:
-        withMedia.plan && withMedia.plan.length > 0 ? withMedia.plan : local.plan,
-      title: withMedia.title || local.title,
-      // F-CTX-01: Go SessionState has no tokenUsage; empty hydrate must not wipe
-      // a client-reduced last-turn rollup used by the composer context ring.
-      tokenUsage: withMedia.tokenUsage ?? local.tokenUsage,
-      // Prefer catalog rows that still carry totalContextTokens when inbound
-      // models were stripped to {id,name} by a thin bridge snapshot.
-      availableModels: mergeAvailableModelsPreferContext(
-        withMedia.availableModels,
-        local.availableModels,
-      ),
-    };
+    const merged = mergeBridgeSnapshot(local, withMedia);
+    // Go never holds timeline. A post-load available_commands / mode frame
+    // used to arrive as empty+streaming and steal status (bridge-owned),
+    // lighting Responding on yesterday's last agent bubble. An idle canvas
+    // that already has the transcript has not started a local turn — keep
+    // idle. A real live turn restores via thought/tool/answer chunks or
+    // applyPoolBusyToSession when the pool row is actually busy.
+    next =
+      local.status === "idle" && withMedia.status === "streaming"
+        ? { ...merged, status: "idle" }
+        : merged;
+  } else {
+    // forceNew empty handshake: keep unconfirmed local user bubbles only.
+    // Content-rich withMedia already carries restored image blocks; still run
+    // ownership merge so Node non-empty snapshots cannot wipe orchestration.
+    const withOptimistic = mergeOptimisticLocalUsers(withMedia, local);
+    next = mergeBridgeSnapshot(local, withOptimistic);
   }
-
-  // forceNew empty handshake: keep unconfirmed local user bubbles only.
-  // Content-rich withMedia already carries restored image blocks.
-  return mergeOptimisticLocalUsers(withMedia, local);
+  return applyLockedCatalogTitle(next, catalog);
 }

@@ -10,6 +10,7 @@ import {
   tagSeedUserMessages,
   type SessionState,
 } from "@grok-desktop/acp-core";
+import { migrateCatalogToCurrent } from "./sessionCatalogMigration";
 import {
   NO_PROJECT_KEY,
   SESSION_STORAGE_KEY,
@@ -18,8 +19,8 @@ import {
 
 /**
  * Fix weak titles after refresh while keeping strong titles written by the agent via session_info_update.
- * When `title` is not a weak placeholder it is treated as an agent- or user-confirmed display name
- * and must not be overwritten by the first prompt.
+ * When `title` is not a weak placeholder — or `titleLocked` is set — it is treated
+ * as an agent- or user-confirmed display name and must not be overwritten by the first prompt.
  * @param catalog Records restored from local storage; broken fields get a displayable title from later fallbacks.
  * @returns A new array with repaired titles; does not mutate the input catalog or its records.
  */
@@ -27,7 +28,9 @@ export function rehydrateCatalogTitles(
   catalog: SessionRecord[],
 ): SessionRecord[] {
   return catalog.map((rec) => {
-    if (!isWeakSessionTitle(rec.title)) {
+    // User-locked names stay as typed, including strings the auto-namer
+    // would call weak (`Working`, `Untitled chat`).
+    if (rec.titleLocked || !isWeakSessionTitle(rec.title)) {
       return rec;
     }
     const fromTl = extractTitleFromTimeline(rec.timeline ?? []);
@@ -70,6 +73,26 @@ export function pruneEmptyWeakSessions(
 }
 
 /**
+ * Heal titles + seed-tag for a single catalog row (hot path after upsert).
+ * Does not prune empty ghosts — that remains a full-catalog concern on
+ * hydrate / disk sync. Avoids O(n) walks on every live frame.
+ * @param rec Catalog row after upsert / promote.
+ * @returns Row with seed-tagged timeline and non-weak title when possible.
+ */
+export function normalizeCatalogRow(rec: SessionRecord): SessionRecord {
+  const timeline = tagSeedUserMessages(rec.timeline ?? []);
+  let title = rec.title;
+  if (!rec.titleLocked && isWeakSessionTitle(title)) {
+    const fromTl = extractTitleFromTimeline(timeline);
+    title = fromTl || fallbackSessionLabel(rec.id);
+  }
+  if (timeline === rec.timeline && title === rec.title) {
+    return rec;
+  }
+  return { ...rec, timeline, title };
+}
+
+/**
  * Full hydrate pipeline: seed-tag timelines, titles, then prune ghosts.
  * @param catalog Raw or partially cleaned records.
  * @returns Catalog safe to show in the rail.
@@ -84,6 +107,8 @@ export function normalizeCatalog(catalog: SessionRecord[]): SessionRecord[] {
 
 /**
  * Load catalog from localStorage (browser). SSR/Node → empty.
+ * Runs v1→v2 provenance migration before title prune so untagged child
+ * ghosts are hidden from the rail without deleting drill-down history.
  * @returns Normalized catalog; also rewrites storage when ghosts are pruned.
  */
 export function loadCatalogFromStorage(): SessionRecord[] {
@@ -99,7 +124,8 @@ export function loadCatalogFromStorage(): SessionRecord[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    const normalized = normalizeCatalog(parsed);
+    const migrated = migrateCatalogToCurrent(parsed).catalog;
+    const normalized = normalizeCatalog(migrated);
     // Persist cleaned catalog so ghost sessions disappear after refresh.
     try {
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(normalized));
@@ -138,6 +164,24 @@ export function saveCatalogToStorage(catalog: SessionRecord[]): void {
 }
 
 /**
+ * Canvas `title` restored from a catalog row.
+ * Locked user names win even when they look like placeholders; otherwise a
+ * non-weak stored title is treated as the agent session_info name.
+ * @param rec Catalog row being projected onto the canvas.
+ * @returns Title to stamp on SessionState, or undefined when none is usable.
+ */
+function canvasTitleFromCatalog(rec: SessionRecord): string | undefined {
+  const trimmed = rec.title.trim();
+  if (rec.titleLocked && trimmed) {
+    return trimmed;
+  }
+  if (trimmed && !isWeakSessionTitle(trimmed)) {
+    return rec.title;
+  }
+  return undefined;
+}
+
+/**
  * Convert a catalog record back into SessionState for the main pane.
  * Runs seed-user tagging so exact X+X bodies from the pre-fix resume bug
  * are collapsed before the timeline paints (handshake will re-apply the same).
@@ -171,9 +215,15 @@ export function recordToSessionState(
     toolCalls: rec.toolCalls ?? {},
     plan: rec.plan,
     // Keep catalog title as agent-style title when reconnecting (session_info_update path).
-    title:
-      rec.title && !isWeakSessionTitle(rec.title) ? rec.title : undefined,
+    // Locked user names are always restored, even when they look like placeholders.
+    title: canvasTitleFromCatalog(rec),
     lastAgentText: rec.lastAgentText ?? "",
     pendingPermission: undefined,
+    // Orchestration snapshot so Agents rail survives switch/refresh.
+    subagents: rec.subagents,
+    subagentLinks: rec.subagentLinks,
+    backgroundTasks: rec.backgroundTasks,
+    goal: rec.goal,
+    tokenUsage: rec.tokenUsage,
   };
 }

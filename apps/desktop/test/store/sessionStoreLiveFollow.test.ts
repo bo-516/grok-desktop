@@ -173,6 +173,54 @@ describe("mergeCanvasInbound", () => {
     assert.equal(merged.status, "idle");
   });
 
+  it("does not promote an idle transcript when Go sends empty+streaming", () => {
+    const local = createSessionState({ id: "s1", workspace: "/w" });
+    local.status = "idle";
+    local.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "yesterday" }],
+      },
+      { kind: "agent", id: "a1", text: "already done" },
+    ];
+    const inbound = createSessionState({ id: "s1", workspace: "/w" });
+    inbound.status = "streaming";
+    inbound.timeline = [];
+    inbound.model = "grok-4.6";
+    const merged = mergeCanvasInbound(inbound, local);
+    assert.equal(merged.status, "idle");
+    assert.equal(merged.timeline.length, 2);
+    assert.equal(merged.model, "grok-4.6");
+  });
+
+  it("keeps a client slash catalog when Go hydrate omits availableCommands", () => {
+    const local = createSessionState({
+      id: "s-cmd",
+      workspace: "/w",
+    });
+    local.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "cached" }],
+      },
+    ];
+    local.availableCommands = [
+      { name: "compact", description: "Compress conversation history" },
+      { name: "workflow", description: "Launch a saved workflow" },
+    ];
+    const inbound = createSessionState({
+      id: "s-cmd",
+      workspace: "/w",
+    });
+    inbound.timeline = [];
+    inbound.availableCommands = [];
+    const merged = mergeCanvasInbound(inbound, local);
+    assert.equal(merged.availableCommands?.length, 2);
+    assert.equal(merged.availableCommands?.[0]?.name, "compact");
+  });
+
   it("does not block a live partial that already has conversation content", () => {
     // Reduce-bucket seeding handles history; merge must not drop new turns.
     const local = createSessionState({ id: "s1", workspace: "/w" });
@@ -283,6 +331,25 @@ describe("mergeCanvasInbound", () => {
       assert.equal(text.text, "hi, see this image?");
       assert.doesNotMatch(text.text, /\[Image/i);
     }
+  });
+
+  it("keeps a user-locked catalog title over inbound session_info", () => {
+    const local = createSessionState({ id: "s1", workspace: "/w" });
+    local.title = "My name";
+    local.timeline = [
+      {
+        kind: "user",
+        id: "u1",
+        blocks: [{ type: "text", text: "hello" }],
+      },
+    ];
+    const inbound = createSessionState({ id: "s1", workspace: "/w" });
+    inbound.title = "Agent generated title";
+    inbound.timeline = local.timeline;
+    const merged = mergeCanvasInbound(inbound, local, [
+      { id: "s1", title: "My name", titleLocked: true },
+    ]);
+    assert.equal(merged.title, "My name");
   });
 });
 

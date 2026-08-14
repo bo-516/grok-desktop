@@ -4,11 +4,14 @@
 
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { createSessionState } from "@grok-desktop/acp-core";
 import {
   POOL_POLL_MS,
+  applyPoolBusyToSession,
   startPoolPoll,
   stopPoolPoll,
 } from "../../src/store/sessionStoreLive";
+import { resolveResumeCanvasStatus } from "../../src/store/sessionStoreSupport";
 
 describe("sessionStoreLive pool poll", () => {
   afterEach(() => {
@@ -47,5 +50,88 @@ describe("sessionStoreLive pool poll", () => {
     await new Promise((r) => setTimeout(r, POOL_POLL_MS + 80));
     // One interval only: roughly 1 tick in ~1.08s window (allow 1–2).
     assert.ok(calls >= 1 && calls <= 2, `expected 1–2 calls, got ${calls}`);
+  });
+});
+
+describe("applyPoolBusyToSession", () => {
+  it("promotes idle canvas to streaming when the viewed pool row is busy", () => {
+    const session = createSessionState({ id: "s1", workspace: "/w" });
+    const next = applyPoolBusyToSession(session, "s1", [
+      {
+        sessionId: "s1",
+        cwd: "/w",
+        status: "streaming",
+        lastUsed: 1,
+        live: true,
+      },
+    ]);
+    assert.equal(next.status, "streaming");
+    assert.notEqual(next, session);
+  });
+
+  it("does not demote a streaming canvas when the pool row is idle", () => {
+    const session = {
+      ...createSessionState({ id: "s1", workspace: "/w" }),
+      status: "streaming" as const,
+    };
+    const next = applyPoolBusyToSession(session, "s1", [
+      {
+        sessionId: "s1",
+        cwd: "/w",
+        status: "idle",
+        lastUsed: 1,
+        live: true,
+      },
+    ]);
+    assert.equal(next, session);
+    assert.equal(next.status, "streaming");
+  });
+
+  it("ignores pool rows for a different session", () => {
+    const session = createSessionState({ id: "s1", workspace: "/w" });
+    const next = applyPoolBusyToSession(session, "s1", [
+      {
+        sessionId: "other",
+        cwd: "/w",
+        status: "streaming",
+        lastUsed: 1,
+        live: true,
+      },
+    ]);
+    assert.equal(next, session);
+  });
+
+  it("does not promote Working while the viewed session is restoring", () => {
+    const session = createSessionState({ id: "s1", workspace: "/w" });
+    const next = applyPoolBusyToSession(
+      session,
+      "s1",
+      [
+        {
+          sessionId: "s1",
+          cwd: "/w",
+          status: "streaming",
+          lastUsed: 1,
+          live: true,
+        },
+      ],
+      "s1",
+    );
+    assert.equal(next, session);
+    assert.equal(next.status, "idle");
+  });
+});
+
+describe("resolveResumeCanvasStatus", () => {
+  it("keeps pool streaming over an idle seed", () => {
+    assert.equal(resolveResumeCanvasStatus("idle", "streaming"), "streaming");
+  });
+
+  it("drops stale seed streaming once the pool is listed idle", () => {
+    assert.equal(resolveResumeCanvasStatus("streaming", "idle"), "idle");
+  });
+
+  it("keeps seed streaming when the pool snapshot is not in yet", () => {
+    assert.equal(resolveResumeCanvasStatus("streaming", undefined), "streaming");
   });
 });

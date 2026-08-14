@@ -3,12 +3,14 @@ import { describe, it } from "node:test";
 import {
   buildForkCommand,
   buildRewindCommand,
+  canOpenChildSession,
   canSelectCatalogSession,
   filterCatalogForSessionRail,
   isSubagentSessionKind,
   mergeRemoteSessionsIntoCatalog,
   normalizeOneSession,
   normalizeSessionsList,
+  openableChildSessionIds,
   rewindConfirm,
   shareConfirm,
 } from "@/lib/sessionActions";
@@ -36,6 +38,7 @@ function localRec(
     sessionKind: partial.sessionKind,
     parentSessionId: partial.parentSessionId,
     noProject: partial.noProject,
+    titleLocked: partial.titleLocked,
   };
 }
 
@@ -135,6 +138,28 @@ describe("sessionActions", () => {
     assert.equal(merged[0]?.noProject, true);
   });
 
+  it("mergeRemoteSessionsIntoCatalog keeps a user-locked title", () => {
+    const local = [
+      localRec({
+        id: "locked",
+        title: "My custom name",
+        titleLocked: true,
+        workspace: "/demo",
+        updatedAt: 10,
+      }),
+    ];
+    const merged = mergeRemoteSessionsIntoCatalog(local, [
+      {
+        id: "locked",
+        title: "Disk generated title",
+        workspace: "/demo",
+        updatedAt: "2026-08-09T12:00:00.000Z",
+      },
+    ]);
+    assert.equal(merged[0]?.title, "My custom name");
+    assert.equal(merged[0]?.titleLocked, true);
+  });
+
   it("mergeRemoteSessionsIntoCatalog leaves catalog alone on empty remote", () => {
     const local = [localRec({ id: "only", title: "Keep me", updatedAt: 9 })];
     const merged = mergeRemoteSessionsIntoCatalog(local, []);
@@ -223,6 +248,44 @@ describe("sessionActions", () => {
     // Drill-down: child id remains in full catalog.
     assert.equal(canSelectCatalogSession(catalog, "child-1"), true);
     assert.equal(canSelectCatalogSession(catalog, "missing"), false);
+  });
+
+  it("openableChildSessionIds unions catalog, buffer, and sessionRoles", () => {
+    // Mid-run: child is only in buffer + roles (not catalog) after routing.
+    const catalog = [localRec({ id: "parent", title: "Parent" })];
+    const childSessions = {
+      "child-buf": { id: "child-buf" },
+    };
+    const sessionRoles = {
+      "child-role": {
+        parentSessionId: "parent",
+        sessionKind: "subagent",
+      },
+      "child-buf": {
+        parentSessionId: "parent",
+        sessionKind: "subagent",
+      },
+    };
+    const openable = openableChildSessionIds(
+      catalog,
+      childSessions,
+      sessionRoles,
+    );
+    assert.equal(openable.has("parent"), true);
+    assert.equal(openable.has("child-buf"), true);
+    assert.equal(openable.has("child-role"), true);
+    assert.equal(openable.has("missing"), false);
+    // Catalog-only gate would wrongly disable mid-run Open.
+    assert.equal(
+      canOpenChildSession("child-buf", catalog, childSessions, sessionRoles),
+      true,
+    );
+    assert.equal(canOpenChildSession("child-buf", catalog, {}, {}), false);
+    assert.equal(
+      canOpenChildSession("child-role", catalog, {}, sessionRoles),
+      true,
+    );
+    assert.equal(canOpenChildSession(undefined, catalog, childSessions, sessionRoles), false);
   });
 
   it("filterCatalogForSessionRail hides empty untitled drafts", () => {

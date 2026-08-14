@@ -12,12 +12,12 @@
  */
 
 import type { SessionState, SessionUpdate } from "@grok-desktop/acp-core";
-import { mergeAvailableModelsPreferContext } from "../lib/contextUsageDisplay";
 import {
   applySessionLifecycle,
   createSessionReduceBucket,
   hydrateSessionBucket,
   reduceSessionUpdate,
+  replayEndCanvasStatus,
   type SessionReduceBucket,
 } from "../lib/sessionReduce";
 import type { BridgeServerMsg, LiveBridgeHandlers } from "./liveBridgeTypes";
@@ -132,8 +132,13 @@ export function createLiveBridgeDispatch(
     if (seedLen < liveLen) {
       return;
     }
-    // Keep eventId ring empty so a subsequent session/load can re-apply.
-    hydrateSessionBucket(bucket, { ...session, id: session.id }, true);
+    // Ownership merge: catalog seed must not wipe richer live orchestration.
+    // Clear eventId ring so a subsequent session/load can re-apply.
+    hydrateSessionBucket(
+      bucket,
+      { ...session, id: session.id },
+      { clearDedupe: true },
+    );
   }
 
   /**
@@ -167,7 +172,7 @@ export function createLiveBridgeDispatch(
     if (sessionId && !bucket.state.id) {
       bucket.state = { ...bucket.state, id: sessionId };
     }
-    handlers.onState(bucket.state);
+    handlers.onState(bucket.state, { recency: "passive" });
   }
 
   /**
@@ -181,8 +186,14 @@ export function createLiveBridgeDispatch(
   }
 
   /**
+   * Sessions that recently finished a load-replay batch. Go bridge still emits
+   * a post-handshake `state` with an empty timeline (it never holds one); that
+   * must not wipe the client-reduced history from replay_end.
+   */
+  const recentlyReplayed = new Set<string>();
+
+  /**
    * Apply authoritative lifecycle fields from replay_end (T7).
-   * Batch reduce leaves status=streaming; finished sessions must land idle.
    * @param bucket Target reduce bucket.
    * @param msg replay_end payload.
    */
@@ -191,7 +202,7 @@ export function createLiveBridgeDispatch(
     msg: Extract<BridgeServerMsg, { type: "replay_end" }>,
   ): SessionState {
     return applySessionLifecycle(bucket, {
-      status: msg.status,
+      status: replayEndCanvasStatus(msg.status),
       model: msg.model,
       mode: msg.mode,
     });
@@ -201,13 +212,6 @@ export function createLiveBridgeDispatch(
    * Handle one server message. Returns true when consumed by this dispatcher.
    * @param msg Decoded bridge message.
    */
-  /**
-   * Sessions that recently finished a load-replay batch. Go bridge still emits
-   * a post-handshake `state` with an empty timeline (it never holds one); that
-   * must not wipe the client-reduced history from replay_end.
-   */
-  const recentlyReplayed = new Set<string>();
-
   function handleServerMsg(msg: BridgeServerMsg): boolean {
     if (msg.type === "state") {
       // Authoritative hydrate: replace client reduce bucket then notify store.
@@ -224,9 +228,9 @@ export function createLiveBridgeDispatch(
         return true;
       }
       /**
-       * Go path: bridge SessionState.timeline is always empty. After
-       * replay_end (or any prior reduce for this id) the bucket already holds
-       * the real body — merge lifecycle fields only and keep history.
+       * Full-state frames ownership-merge via hydrateSessionBucket so empty
+       * Go hydrates and thin Node snapshots never wipe client orchestration.
+       * @see mergeBridgeSnapshot / SESSION_FIELD_OWNER in acp-core
        */
       const keepHistory =
         Boolean(incoming.id) &&
@@ -235,26 +239,11 @@ export function createLiveBridgeDispatch(
         (bucket.state.id === incoming.id ||
           recentlyReplayed.has(incoming.id) ||
           !bucket.state.id);
-      const nextSession = keepHistory
-        ? {
-            ...incoming,
-            timeline: bucket.state.timeline,
-            toolCalls: bucket.state.toolCalls,
-            lastAgentText:
-              bucket.state.lastAgentText || incoming.lastAgentText || "",
-            plan: incoming.plan ?? bucket.state.plan,
-            title: incoming.title ?? bucket.state.title,
-            // F-CTX-01: client-reduced usage + context limits must survive Go
-            // empty full-state hydrates (bridge SessionState has no tokenUsage).
-            tokenUsage: bucket.state.tokenUsage ?? incoming.tokenUsage,
-            availableModels: mergeAvailableModelsPreferContext(
-              incoming.availableModels,
-              bucket.state.availableModels,
-            ),
-          }
-        : incoming;
+      // Single full-snapshot entry: ownership merge lives inside hydrate.
       // Keep eventId ring when preserving history so live updates still dedupe.
-      hydrateSessionBucket(bucket, nextSession, !keepHistory);
+      const nextSession = hydrateSessionBucket(bucket, incoming, {
+        clearDedupe: !keepHistory,
+      });
       // If we had provisional empty-id bucket, re-key under real id.
       if (msg.session.id && reduceBuckets.has("__pending__")) {
         reduceBuckets.delete("__pending__");
@@ -266,7 +255,10 @@ export function createLiveBridgeDispatch(
         clock.clearTimeout(win.timer);
         replayingSessions.delete(msg.session.id);
       }
-      handlers.onState(nextSession);
+      handlers.onState(
+        nextSession,
+        win ? { recency: "passive" } : undefined,
+      );
       return true;
     }
 
@@ -278,6 +270,9 @@ export function createLiveBridgeDispatch(
       if (msg.sessionId) {
         const bucket = bucketFor(msg.sessionId);
         if ((bucket.state.timeline?.length ?? 0) > 0) {
+          // Intentional client body reset before re-applying load replay —
+          // not a bridge full-state snapshot; replace skips ownership merge
+          // so empty timeline actually clears (merge would keep the old body).
           hydrateSessionBucket(
             bucket,
             {
@@ -288,7 +283,7 @@ export function createLiveBridgeDispatch(
               lastAgentText: "",
               plan: undefined,
             },
-            true,
+            { clearDedupe: true, replace: true },
           );
         } else if (!bucket.state.id) {
           bucket.state = { ...bucket.state, id: msg.sessionId };
@@ -333,9 +328,11 @@ export function createLiveBridgeDispatch(
         clock.clearTimeout(win.timer);
         replayingSessions.delete(msg.sessionId);
       }
-      // Node path: already-reduced snapshot. Go path: ordered raw updates.
+      // Node path: already-reduced snapshot — ownership-merge so missing
+      // orchestration maps (subagents/goal) do not wipe live cards.
+      // Go path: ordered raw updates.
       if (msg.session) {
-        hydrateSessionBucket(bucket, msg.session, true);
+        hydrateSessionBucket(bucket, msg.session, { clearDedupe: true });
       } else {
         for (const item of msg.updates ?? []) {
           // Tolerate both {update,eventId} wire items and bare SessionUpdate.
@@ -364,7 +361,7 @@ export function createLiveBridgeDispatch(
           recentlyReplayed.delete(msg.sessionId);
         }, 5_000);
       }
-      handlers.onState(finalState);
+      handlers.onState(finalState, { recency: "passive" });
       return true;
     }
 
@@ -439,26 +436,4 @@ export function createLiveBridgeDispatch(
     replayingSessionIds: () => [...replayingSessions.keys()],
     bucketFor,
   };
-}
-
-/**
- * Build a minimal SessionUpdate list for tests / fixtures (agent chunks).
- * @param n Number of agent_message_chunk updates.
- * @param sessionId Prefix for eventIds.
- */
-export function makeAgentChunkUpdates(
-  n: number,
-  sessionId = "s1",
-): { update: SessionUpdate; eventId: string }[] {
-  const out: { update: SessionUpdate; eventId: string }[] = [];
-  for (let i = 0; i < n; i++) {
-    out.push({
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: `w${i} ` },
-      },
-      eventId: `${sessionId}-${i + 1}`,
-    });
-  }
-  return out;
 }

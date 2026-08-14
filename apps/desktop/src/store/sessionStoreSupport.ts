@@ -6,6 +6,7 @@
 
 import {
   createSessionState,
+  tagSeedUserMessages,
   type SessionState,
 } from "@grok-desktop/acp-core";
 import {
@@ -27,6 +28,11 @@ export type StartOpts = {
   seed?: SessionState;
   forceNew?: boolean;
   /**
+   * Open the WebSocket and run env/pool sync without session/start.
+   * Automatic reconnect uses this so a New chat draft never forceNew-spawns.
+   */
+  connectOnly?: boolean;
+  /**
    * Post-await guard for async start. When provided, startLiveBridgeSession
    * skips every canvas `set` after an await when this returns false (stale
    * select while a later selection is already in flight).
@@ -40,7 +46,43 @@ type ResumeSource = {
   activeSessionId: string | null;
   session: SessionState;
   catalog: SessionRecord[];
+  /**
+   * Live pool rows when known. Used so a resume seed keeps Working chrome
+   * when the process is still streaming (catalog status is often stale idle).
+   */
+  poolEntries?: Array<{
+    sessionId: string;
+    status: SessionState["status"];
+    live?: boolean;
+  }>;
 };
+
+/**
+ * Canvas status when seeding a resume / reconnect.
+ * A live pool process that is still busy wins. Otherwise keep a busy seed
+ * only when the pool snapshot is not yet known (connect race). Never invent
+ * streaming — a stale catalog `streaming` without a live process stays idle
+ * so send is allowed.
+ * @param seedStatus Status on the catalog / select seed.
+ * @param poolStatus Live pool status for this session id, if any.
+ * @returns Status safe to paint on the resume canvas.
+ */
+export function resolveResumeCanvasStatus(
+  seedStatus: SessionState["status"],
+  poolStatus?: SessionState["status"],
+): SessionState["status"] {
+  if (poolStatus === "streaming" || poolStatus === "waiting_permission") {
+    return poolStatus;
+  }
+  if (seedStatus === "streaming" || seedStatus === "waiting_permission") {
+    // Pool listed and not busy — catalog streaming is stale.
+    if (poolStatus !== undefined) {
+      return "idle";
+    }
+    return seedStatus;
+  }
+  return seedStatus === "disconnected" ? "idle" : seedStatus;
+}
 
 /** Empty session shown on first paint; without an id, send creates a session via the real bridge. */
 export const INITIAL_SESSION = createSessionState({
@@ -57,6 +99,21 @@ export const INITIAL_SESSION = createSessionState({
  */
 export function persistNormalizedCatalog(catalog: SessionRecord[]): void {
   enqueueCatalogPersist(catalog);
+}
+
+/**
+ * Heal seed-user timeline + coerce lastAgentText for wire omit-empty.
+ * @param session Raw ACP session from bridge / pool.
+ * @returns Healed session ready for routing.
+ */
+export function healSessionTimeline(session: SessionState): SessionState {
+  return {
+    ...session,
+    // Wire / partial fixtures may omit timeline; never pass undefined into tagger.
+    timeline: tagSeedUserMessages(session.timeline ?? []),
+    // Empty string is omitted over JSON from bridge-go; keep canvas typed.
+    lastAgentText: session.lastAgentText ?? "",
+  };
 }
 
 /**
@@ -80,6 +137,7 @@ export function flushCatalogPersist(): void {
 
 /**
  * Pick the real ACP session to resume so ordinary reconnect never accidentally calls session/new.
+ * Catalog seed prefers live pool status when the process is still busy.
  * @param source Stable session view from the current store.
  * @param opts Overrides from the user action; forceNew=true returns only cwd.
  * @returns resumeId, cached seed, and workspace ready to pass to bridge start.
@@ -104,8 +162,11 @@ export function resolveResumeTarget(
 
   /** Resume seed: prefer catalog record; otherwise reuse current session when ids match. */
   let seed: ReturnType<typeof recordToSessionState> | undefined;
+  const poolStatus = source.poolEntries?.find(
+    (entry) => entry.sessionId === selectedId && entry.live !== false,
+  )?.status;
   if (record) {
-    seed = recordToSessionState(record);
+    seed = recordToSessionState(record, poolStatus);
   } else if (source.session.id === selectedId) {
     seed = source.session;
   }

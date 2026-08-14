@@ -59,13 +59,13 @@ export function sessionHasRailContent(rec: SessionRecord): boolean {
 }
 
 /**
- * Filter catalog rows for the session rail: hide harness subagent kinds and
- * empty (no-message) drafts, then optionally apply the search query.
- * Subagent rows remain in the full catalog so selectSession(childSessionId)
- * still resolves.
+ * Filter catalog rows for the session rail and Overview: hide harness
+ * subagent kinds and empty (no-message) drafts, then optionally apply
+ * the search query. Subagent rows remain in the full catalog so
+ * selectSession(childSessionId) still resolves.
  * @param catalog Full session catalog (including subagent rows).
  * @param query Free-text search over title and workspace; empty = all listed chats.
- * @returns Rows safe to group/render in the rail.
+ * @returns Rows safe to group/render in the rail / Overview.
  */
 export function filterCatalogForSessionRail(
   catalog: SessionRecord[],
@@ -98,6 +98,63 @@ export function canSelectCatalogSession(
   id: string,
 ): boolean {
   return catalog.some((s) => s.id === id);
+}
+
+/**
+ * Session ids that L3 drill-down may open via selectSession.
+ * Union of catalog rows, in-memory child buffers (streaming), and the live
+ * sessionRoles index. After child routing, mid-run children live only in the
+ * buffer / roles until terminal promote — UI open gates must use this set,
+ * not catalog alone, or Agents / timeline Open stay disabled during fan-out.
+ *
+ * @param catalog Full session catalog (includes promoted subagent rows).
+ * @param childSessions In-memory streaming buffers keyed by childSessionId.
+ * @param sessionRoles Live + disk role index keyed by childSessionId.
+ * @returns Set of ids for which selectSession will not no-op for membership.
+ */
+export function openableChildSessionIds(
+  catalog: SessionRecord[],
+  childSessions: Record<string, unknown> = {},
+  sessionRoles: Record<string, unknown> = {},
+): Set<string> {
+  const ids = new Set<string>();
+  for (const rec of catalog) {
+    if (rec.id) {
+      ids.add(rec.id);
+    }
+  }
+  for (const id of Object.keys(childSessions)) {
+    if (id) {
+      ids.add(id);
+    }
+  }
+  for (const id of Object.keys(sessionRoles)) {
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Whether a childSessionId is openable for L3 (catalog, buffer, or roles).
+ * @param childSessionId Target from a SubagentCard; empty is never openable.
+ * @param catalog Full catalog.
+ * @param childSessions Streaming child buffers.
+ * @param sessionRoles Role index.
+ * @returns True when the UI may offer Open and selectSession can resolve it.
+ */
+export function canOpenChildSession(
+  childSessionId: string | undefined,
+  catalog: SessionRecord[],
+  childSessions: Record<string, unknown> = {},
+  sessionRoles: Record<string, unknown> = {},
+): boolean {
+  const id = childSessionId?.trim();
+  if (!id) {
+    return false;
+  }
+  return openableChildSessionIds(catalog, childSessions, sessionRoles).has(id);
 }
 
 /**
@@ -168,7 +225,8 @@ export function normalizeSessionsList(data: unknown): RemoteSessionRow[] {
 /**
  * Merge upstream session rows into the local catalog.
  * - Empty remote list leaves the catalog untouched (QA-SESS-38).
- * - Existing rich rows keep timeline / toolCalls; title only fills when weak.
+ * - Existing rich rows keep timeline / toolCalls; title only fills when weak
+ *   and the row is not user-locked.
  * - Workspace is filled when the local row is missing one, except for rows
  *   marked `noProject` (they must stay unfiled).
  * - `updatedAt` takes the max of local and remote so rail order stays honest.
@@ -192,7 +250,7 @@ export function mergeRemoteSessionsIntoCatalog(
     const remoteCreated = parseTimeMs(row.createdAt);
     if (existing) {
       let strongTitle = existing.title;
-      if (isWeakSessionTitle(existing.title)) {
+      if (!existing.titleLocked && isWeakSessionTitle(existing.title)) {
         const remoteTitle = row.title?.trim();
         if (remoteTitle && !isWeakSessionTitle(remoteTitle)) {
           strongTitle = remoteTitle;

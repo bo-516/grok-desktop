@@ -13,23 +13,25 @@ import {
 } from "@grok-desktop/acp-core";
 import {
   createLiveBridgeDispatch,
-  makeAgentChunkUpdates,
   REPLAY_TIMEOUT_MS,
   type ReplayDispatchClock,
 } from "@/bridge/liveBridgeDispatch";
+import { makeAgentChunkUpdates } from "@/bridge/liveBridgeFixtures";
 import {
   createSessionReduceBucket,
   reduceSessionUpdate,
 } from "@/lib/sessionReduce";
 
 /** Build ≥50 ordered agent chunks for sequential vs batch parity. */
-function fixtureUpdates(n = 55): { update: SessionUpdate; eventId: string }[] {
+function fixtureUpdates(
+  n = 55,
+): Array<{ update: SessionUpdate; eventId: string }> {
   return makeAgentChunkUpdates(n, "s1");
 }
 
 /** Sequential reduce of the same fixture (live path baseline). */
 function reduceSequential(
-  updates: { update: SessionUpdate; eventId: string }[],
+  updates: Array<{ update: SessionUpdate; eventId: string }>,
 ): SessionState {
   resetTimelineIdCounter();
   const bucket = createSessionReduceBucket(
@@ -252,7 +254,7 @@ describe("replay batch (createLiveBridgeDispatch)", () => {
       session: createSessionState({ id: "s1", workspace: "/w" }),
     });
     states.length = 0;
-    const updates: { update: SessionUpdate; eventId: string }[] = [
+    const updates: Array<{ update: SessionUpdate; eventId: string }> = [
       {
         update: {
           sessionUpdate: "agent_message_chunk",
@@ -318,8 +320,30 @@ describe("replay batch (createLiveBridgeDispatch)", () => {
     assert.deepEqual(dispatch.replayingSessionIds(), []);
   });
 
+  it("replay_end paints with passive recency so select does not reorder the rail", () => {
+    const recency: Array<string | undefined> = [];
+    const dispatch = createLiveBridgeDispatch({
+      handlers: {
+        onState: (_session, meta) => {
+          recency.push(meta?.recency);
+        },
+      },
+    });
+    dispatch.handleServerMsg({ type: "replay_begin", sessionId: "s1" });
+    dispatch.handleServerMsg({
+      type: "replay_end",
+      sessionId: "s1",
+      updates: [],
+      status: "idle",
+      count: 0,
+      bytes: 0,
+      elapsedMs: 1,
+    });
+    assert.deepEqual(recency, ["passive"]);
+  });
+
   it("超时强制 flush(I4)", () => {
-    const timers: { fn: () => void; ms: number }[] = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
     const clock: ReplayDispatchClock = {
       setTimeout: (fn, ms) => {
         timers.push({ fn, ms });
@@ -422,6 +446,62 @@ describe("replay batch (createLiveBridgeDispatch)", () => {
     assert.equal(states[0]?.status, "idle");
     assert.equal(states[0]?.model, "fixture-model");
     assert.equal(states[0]?.lastAgentText, "done");
+  });
+
+  it("replay_end streaming residue lands idle so history is not Responding", () => {
+    resetTimelineIdCounter();
+    const states: SessionState[] = [];
+    const dispatch = createLiveBridgeDispatch({
+      handlers: { onState: (s) => states.push(s) },
+    });
+    dispatch.handleServerMsg({
+      type: "state",
+      session: createSessionState({ id: "s1", workspace: "/w" }),
+    });
+    states.length = 0;
+    dispatch.handleServerMsg({ type: "replay_begin", sessionId: "s1" });
+    dispatch.handleServerMsg({
+      type: "replay_end",
+      sessionId: "s1",
+      updates: [
+        {
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "last night's answer" },
+          },
+          eventId: "e1",
+        },
+      ],
+      status: "streaming",
+      count: 1,
+      bytes: 20,
+      elapsedMs: 10,
+    });
+    assert.equal(states.length, 1);
+    assert.equal(states[0]?.status, "idle");
+    assert.equal(states[0]?.lastAgentText, "last night's answer");
+  });
+
+  it("replay_end keeps waiting_permission from load", () => {
+    const states: SessionState[] = [];
+    const dispatch = createLiveBridgeDispatch({
+      handlers: { onState: (s) => states.push(s) },
+    });
+    dispatch.handleServerMsg({
+      type: "state",
+      session: createSessionState({ id: "s1", workspace: "/w" }),
+    });
+    states.length = 0;
+    dispatch.handleServerMsg({ type: "replay_begin", sessionId: "s1" });
+    dispatch.handleServerMsg({
+      type: "replay_end",
+      sessionId: "s1",
+      status: "waiting_permission",
+      count: 0,
+      bytes: 0,
+      elapsedMs: 1,
+    });
+    assert.equal(states[0]?.status, "waiting_permission");
   });
 
   it("Go empty state after replay_end does not wipe history", () => {

@@ -5,8 +5,12 @@
 
 import type {
   AgentMode,
+  BackgroundTaskCard,
+  GoalSnapshot,
   PlanEntry,
   SessionStatus,
+  SubagentCard,
+  SessionTokenUsage,
   TimelineItem,
   ToolCallCard,
 } from "@grok-desktop/acp-core";
@@ -16,8 +20,18 @@ export type SessionRecord = {
   id: string;
   /** Absolute workspace path used as project key. */
   workspace: string;
-  /** Display title (first user prompt or fallback). */
+  /**
+   * Display title (first user prompt, agent session_info, or user rename).
+   * When {@link titleLocked} is true this is the user-chosen name and must
+   * not be replaced by timeline / session_info upserts.
+   */
   title: string;
+  /**
+   * User renamed this chat from the rail. Live upserts, remote session
+   * merge, and title rehydrate must keep `title` as typed. Absent / false
+   * leaves the auto-namer in charge.
+   */
+  titleLocked?: boolean;
   mode: AgentMode;
   model: string;
   status: SessionStatus;
@@ -51,6 +65,32 @@ export type SessionRecord = {
    * standalone {@link NO_PROJECT_KEY} section instead of a project folder.
    */
   noProject?: boolean;
+  /**
+   * Session-scoped orchestration snapshot for Agents rail after switch/refresh.
+   * Card identity/status only — large `output` text is trimmed on persist.
+   */
+  subagents?: Record<string, SubagentCard>;
+  /** subagentId → spawn toolCallId join keys (timeline ↔ Agents cards). */
+  subagentLinks?: Record<string, string>;
+  /** Background shell tasks for the Agents rail. */
+  backgroundTasks?: Record<string, BackgroundTaskCard>;
+  /**
+   * Goal-mode snapshot when the parent was running an orchestrated goal.
+   * Includes `lastEventDetail` when the worker published a wrap-up.
+   */
+  goal?: GoalSnapshot;
+  /**
+   * Last live occupancy + billed turn rollup for the composer context ring.
+   * session/load replay often omits envelope `_meta.totalTokens` and
+   * `turn_completed`; without this field a reopen paints 0% / 0 of N tokens.
+   */
+  tokenUsage?: SessionTokenUsage;
+  /**
+   * Catalog row schema version after provenance whitelist migration.
+   * Missing / 1 = pre-whitelist (may contain untagged child ghosts).
+   * 2 = current (roles/migration applied).
+   */
+  schemaVersion?: number;
 };
 
 /** Sessions grouped under one workspace folder. */
@@ -85,9 +125,13 @@ export const SESSION_STORAGE_KEY = "grok-desktop.session-catalog.v1";
 export const NO_PROJECT_KEY = "(no project)";
 
 export {
+  cleanHarnessGoalTitle,
+  displaySessionTitle,
   extractTitleFromTimeline,
   fallbackSessionLabel,
+  isHarnessGoalTitle,
   isWeakSessionTitle,
   pickSessionTitle,
+  shortSessionId,
   titleFromSessionState,
 } from "@grok-desktop/acp-core";
