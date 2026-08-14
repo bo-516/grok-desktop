@@ -189,6 +189,9 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 	case "token_usage":
 		return h.handleTokenUsage(ws, msg)
 
+	case "billing":
+		return h.handleBilling(ws, msg)
+
 	case "fork_session":
 		return h.handleForkSession(ws, msg)
 

@@ -130,6 +130,26 @@ func TestSessionsListEmptyHomeReturnsNoRows(t *testing.T) {
 	}
 }
 
+// session_history is a disk read (no grok spawn). Missing folders must
+// still succeed with an empty payload so the desktop can fall through
+// to session/load instead of treating the CLI channel as dead.
+func TestSessionHistoryMissingReturnsEmpty(t *testing.T) {
+	t.Setenv("GROK_HOME", t.TempDir())
+	data, err := dispatchCliCommand("session_history", map[string]any{
+		"sessionId": "nope",
+	}, "/tmp/proj-a", nil)
+	if err != nil {
+		t.Fatalf("session_history: %v", err)
+	}
+	hist, ok := data.(session.DiskSessionHistory)
+	if !ok {
+		t.Fatalf("want DiskSessionHistory, got %T", data)
+	}
+	if hist.Count != 0 || hist.SessionID != "nope" {
+		t.Fatalf("want empty payload for missing session, got %+v", hist)
+	}
+}
+
 // Unknown command ids must name themselves so the UI can surface a clear error
 // rather than treating the whole CLI channel as dead.
 func TestDispatchCliCommandUnknown(t *testing.T) {

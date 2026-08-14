@@ -7,7 +7,12 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 )
 
-func mockRuntime(id string, status acp.SessionStatus, lastUsed int64) *PooledRuntime {
+// mockRuntime builds a pool entry whose status can mutate via the returned pointer.
+// @param id Session id.
+// @param status Initial status.
+// @param lastUsed LRU timestamp ms.
+// @returns Runtime and a pointer that tests may flip to idle for wait-on-full cases.
+func mockRuntime(id string, status acp.SessionStatus, lastUsed int64) (*PooledRuntime, *acp.SessionStatus) {
 	st := status
 	return &PooledRuntime{
 		SessionID: id,
@@ -21,7 +26,7 @@ func mockRuntime(id string, status acp.SessionStatus, lastUsed int64) *PooledRun
 		Cancel:            func() {},
 		RespondPermission: func(string) error { return nil },
 		Dispose:           func() {},
-	}
+	}, &st
 }
 
 func TestPickLruIdleVictim(t *testing.T) {
@@ -42,13 +47,16 @@ func TestPickLruIdleVictim(t *testing.T) {
 
 func TestPoolInsertReclaimIdle(t *testing.T) {
 	p := NewRuntimePool(2)
-	_ = p.Insert(mockRuntime("a", acp.StatusIdle, time.Now().UnixMilli()-1000))
-	_ = p.Insert(mockRuntime("b", acp.StatusIdle, time.Now().UnixMilli()-500))
+	a, _ := mockRuntime("a", acp.StatusIdle, time.Now().UnixMilli()-1000)
+	b, _ := mockRuntime("b", acp.StatusIdle, time.Now().UnixMilli()-500)
+	_ = p.Insert(a)
+	_ = p.Insert(b)
 	if p.Size() != 2 {
 		t.Fatalf("size=%d", p.Size())
 	}
 	// Third insert should reclaim oldest idle (a).
-	if err := p.Insert(mockRuntime("c", acp.StatusIdle, time.Now().UnixMilli())); err != nil {
+	c, _ := mockRuntime("c", acp.StatusIdle, time.Now().UnixMilli())
+	if err := p.Insert(c); err != nil {
 		t.Fatal(err)
 	}
 	if p.Has("a") {
@@ -59,13 +67,68 @@ func TestPoolInsertReclaimIdle(t *testing.T) {
 	}
 }
 
-func TestPoolFullAllBusy(t *testing.T) {
+func TestPoolWaitsWhenFullAllBusyUntilIdle(t *testing.T) {
 	p := NewRuntimePool(1)
-	_ = p.Insert(mockRuntime("busy", acp.StatusStreaming, time.Now().UnixMilli()))
-	err := p.Insert(mockRuntime("other", acp.StatusIdle, time.Now().UnixMilli()))
-	if err == nil {
-		t.Fatal("expected full pool error")
+	busy, st := mockRuntime("busy", acp.StatusStreaming, time.Now().UnixMilli())
+	_ = p.Insert(busy)
+
+	done := make(chan error, 1)
+	go func() {
+		other, _ := mockRuntime("other", acp.StatusIdle, time.Now().UnixMilli())
+		done <- p.Insert(other)
+	}()
+
+	// Still busy: insert must not finish immediately.
+	select {
+	case err := <-done:
+		t.Fatalf("insert should wait while busy, got err=%v", err)
+	case <-time.After(150 * time.Millisecond):
 	}
+
+	// Flip to idle so reclaim frees the slot.
+	*st = acp.StatusIdle
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("insert did not complete after idle reclaim")
+	}
+	if !p.Has("other") {
+		t.Fatal("other should be resident")
+	}
+	if p.Has("busy") {
+		t.Fatal("busy should have been reclaimed")
+	}
+}
+
+func TestPoolWaitsWhenFullUntilClose(t *testing.T) {
+	p := NewRuntimePool(1)
+	busy, _ := mockRuntime("busy", acp.StatusStreaming, time.Now().UnixMilli())
+	_ = p.Insert(busy)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.BeginSpawn()
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("BeginSpawn should wait while full, got err=%v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	p.Close("busy")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("BeginSpawn did not complete after Close")
+	}
+	p.CancelSpawn()
 }
 
 func TestIsIdleStatus(t *testing.T) {
@@ -83,11 +146,18 @@ func TestBeginSpawnReservesCapacity(t *testing.T) {
 	if err := p.BeginSpawn(); err != nil {
 		t.Fatal(err)
 	}
-	// Concurrent second begin must fail while first reservation is held.
-	if err := p.BeginSpawn(); err == nil {
-		t.Fatal("expected full pool on second BeginSpawn")
+	// Concurrent second begin blocks until first reservation is inserted + reclaimable.
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- p.BeginSpawn()
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("second BeginSpawn should wait, got err=%v", err)
+	case <-time.After(50 * time.Millisecond):
 	}
-	rt := mockRuntime("a", acp.StatusIdle, 10)
+
+	rt, _ := mockRuntime("a", acp.StatusIdle, 10)
 	rt.Dispose = func() { disposed = append(disposed, "a") }
 	if err := p.Insert(rt); err != nil {
 		t.Fatal(err)
@@ -95,11 +165,18 @@ func TestBeginSpawnReservesCapacity(t *testing.T) {
 	if p.Size() != 1 {
 		t.Fatalf("size=%d", p.Size())
 	}
-	// After insert, a new spawn can reclaim the idle resident.
-	if err := p.BeginSpawn(); err != nil {
-		t.Fatal(err)
+
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second BeginSpawn did not complete after idle insert")
 	}
-	if err := p.Insert(mockRuntime("b", acp.StatusIdle, 20)); err != nil {
+
+	b, _ := mockRuntime("b", acp.StatusIdle, 20)
+	if err := p.Insert(b); err != nil {
 		t.Fatal(err)
 	}
 	if p.Size() != 1 {
@@ -132,4 +209,25 @@ func TestCancelSpawnReleasesReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.CancelSpawn()
+}
+
+func TestBeginSpawnErrorsAfterDisposeAll(t *testing.T) {
+	p := NewRuntimePool(1)
+	busy, _ := mockRuntime("busy", acp.StatusStreaming, time.Now().UnixMilli())
+	_ = p.Insert(busy)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.BeginSpawn()
+	}()
+	time.Sleep(50 * time.Millisecond)
+	p.DisposeAll()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected disposed error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("BeginSpawn did not exit after DisposeAll")
+	}
 }

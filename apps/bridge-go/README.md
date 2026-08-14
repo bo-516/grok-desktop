@@ -53,9 +53,9 @@ ws://127.0.0.1:<port>?token=<token>
 | `BRIDGE_PORT` | `8765` | Bind port (`0` = ephemeral) |
 | `BRIDGE_TOKEN` | random | Shared secret (`?token=` / `X-Bridge-Token` / `Authorization: Bearer`) |
 | `BRIDGE_ALLOWED_ORIGINS` | Vite dev + `null` + `file://` | Comma-separated Origin allow-list |
-| `BRIDGE_CWD` | repo `demo/` or cwd | Default workspace |
+| `BRIDGE_CWD` | monorepo root in a checkout; `<Documents>/Grok` when packaged | Default workspace |
 | `BRIDGE_ALWAYS_APPROVE` | unset | `1` → auto-approve tool permission with `allow_once` |
-| `BRIDGE_POOL_CAPACITY` | `4` | Max concurrent agent processes (1–16) |
+| `BRIDGE_POOL_CAPACITY` | `8` | Max concurrent agent processes (1–16); full+busy waits for a free slot |
 | `GROK_BIN` | `~/.grok/bin/grok` or `PATH` | grok CLI path |
 | `XAI_API_KEY` | — | Auth source for agent + environment probe |
 
@@ -68,7 +68,7 @@ Missing `Origin` is allowed (non-browser clients). Illegal Origin → **403**. M
   "type": "hello",
   "cwd": "…",
   "port": 8765,
-  "poolCapacity": 4,
+  "poolCapacity": 8,
   "impl": "go",
   "version": "0.1.0"
 }
@@ -104,7 +104,7 @@ internal/session/    disk list, workspace entries, crash recovery seeds
 | Request | Status |
 |---|---|
 | `set_model` / `set_mode` | ACP RPC; `restart_required` on method-not-found |
-| `compact` / `token_usage` / `fork_session` | ACP RPC (`token_usage` / `fork_session` reply on `cli_result`) |
+| `compact` / `token_usage` / `billing` / `fork_session` | ACP RPC (`token_usage` / `billing` / `fork_session` reply on `cli_result`) |
 | `cli` → `sessions_list` | disk walk under `~/.grok/sessions` |
 | `cli` → `inspect` / `mcp_*` / `worktree_*` / `auth_*` / … | one-shot `grok` via `spawn.RunGrokCli` |
 | `cli` → `prompts_*` | disk user-prompts store |
@@ -114,6 +114,7 @@ internal/session/    disk list, workspace entries, crash recovery seeds
 
 | Variable | Default | Cap |
 |---|---|---|
-| `BRIDGE_POOL_CAPACITY` | `4` | max `16` (min effective `1`) |
+| `BRIDGE_POOL_CAPACITY` | `8` | max `16` (min effective `1`) |
 
 Concurrent `start` / crash recovery uses `BeginSpawn` reservations so resident + in-flight processes never exceed capacity.
+When the pool is full and every resident is busy, `BeginSpawn` / `Insert` **wait** (poll idle status / close) instead of returning a pool-full error.

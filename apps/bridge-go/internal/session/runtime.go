@@ -254,7 +254,13 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		LastUsed:    time.Now().UnixMilli(),
 		SpawnConfig: opts.SpawnConfig,
 		GetStatus: func() acp.SessionStatus {
-			return client.GetSessionState().Status
+			st := client.GetSessionState()
+			// session/load replay promotes streaming internally; the pool
+			// must not report Working or the rail/composer look live.
+			if client.IsReplaying() && st.Status == acp.StatusStreaming {
+				return acp.StatusIdle
+			}
+			return st.Status
 		},
 		GetSessionState: func() acp.SessionState {
 			return client.GetSessionState()
@@ -289,6 +295,9 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		},
 		TokenUsage: func() (any, error) {
 			return client.TokenUsage(hs.SessionID)
+		},
+		Billing: func() (any, error) {
+			return client.Request("_x.ai/billing", map[string]any{})
 		},
 		ForkSession: func(sourceCwd, newCwd string) (any, error) {
 			src := stringsTrim(sourceCwd)

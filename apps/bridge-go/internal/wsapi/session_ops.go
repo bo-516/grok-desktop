@@ -154,6 +154,54 @@ func (h *Handlers) handleTokenUsage(ws *websocket.Conn, msg map[string]any) erro
 	return nil
 }
 
+// handleBilling runs _x.ai/billing and replies on cli_result
+// (same envelope as Node so the desktop pendingCli promise settles).
+//
+// @param ws Reply socket (unicast cli_result).
+// @param msg Client frame with requestId and optional sessionId.
+// @returns Always nil; failures ride inside the cli_result envelope.
+func (h *Handlers) handleBilling(ws *websocket.Conn, msg map[string]any) error {
+	sessionID, _ := msg["sessionId"].(string)
+	requestID, _ := msg["requestId"].(string)
+	rt, err := session.RequireSessionRuntime(h.Pool, h.State.FocusedSessionID, sessionID)
+	if err != nil {
+		h.Send(ws, map[string]any{
+			"type": "cli_result",
+			"result": map[string]any{
+				"requestId": requestID, "ok": false, "error": err.Error(),
+			},
+		})
+		return nil
+	}
+	h.Pool.Touch(rt.SessionID)
+	if rt.Billing == nil {
+		h.Send(ws, map[string]any{
+			"type": "cli_result",
+			"result": map[string]any{
+				"requestId": requestID, "ok": false, "error": "billing not available",
+			},
+		})
+		return nil
+	}
+	data, err := rt.Billing()
+	if err != nil {
+		h.Send(ws, map[string]any{
+			"type": "cli_result",
+			"result": map[string]any{
+				"requestId": requestID, "ok": false, "error": err.Error(),
+			},
+		})
+		return nil
+	}
+	h.Send(ws, map[string]any{
+		"type": "cli_result",
+		"result": map[string]any{
+			"requestId": requestID, "ok": true, "data": data,
+		},
+	})
+	return nil
+}
+
 // handleForkSession runs _x.ai/session/fork and replies on cli_result with the
 // agent bag (newSessionId, …). Source/new cwd default to the runtime cwd.
 //

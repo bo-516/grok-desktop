@@ -9,6 +9,10 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 )
 
+// roomPollInterval is how often waiters recheck for idle reclaim while full.
+// Busy sessions become idle without an explicit pool signal, so we poll GetStatus.
+const roomPollInterval = 100 * time.Millisecond
+
 // SessionStatus alias for pool status checks.
 type SessionStatus = acp.SessionStatus
 
@@ -54,7 +58,9 @@ type PooledRuntime struct {
 	SetMode      func(modeID string) error
 	Compact      func(instruction string) error
 	TokenUsage   func() (any, error)
-	ForkSession  func(sourceCwd, newCwd string) (any, error)
+	// Billing fetches account weekly remaining via `_x.ai/billing`.
+	Billing     func() (any, error)
+	ForkSession func(sourceCwd, newCwd string) (any, error)
 	Dispose      func()
 }
 
@@ -71,6 +77,8 @@ type PoolEntry struct {
 // Idle (idle/disconnected) entries are reclaimed LRU; busy never evicted.
 // In-flight spawns (BeginSpawn … Insert/CancelSpawn) count against capacity so
 // concurrent start/recovery cannot overshoot (mirrors Node RuntimePool).
+// When full and all resident sessions are busy, BeginSpawn/Insert wait until a
+// slot frees (idle reclaim or close) instead of returning an error.
 type RuntimePool struct {
 	Capacity int
 	mu       sync.Mutex
@@ -78,9 +86,13 @@ type RuntimePool struct {
 	m map[string]*PooledRuntime
 	// pendingSpawns is the number of BeginSpawn reservations not yet Insert/CancelSpawn.
 	pendingSpawns int
+	// disposed is set by DisposeAll so waiters exit instead of blocking forever.
+	disposed bool
 }
 
 // NewRuntimePool creates a pool with at least capacity 1.
+// @param capacity Max concurrent resident processes (clamped to ≥1).
+// @returns Empty pool ready for BeginSpawn/Insert.
 func NewRuntimePool(capacity int) *RuntimePool {
 	if capacity < 1 {
 		capacity = 1
@@ -99,6 +111,7 @@ func (p *RuntimePool) Size() int {
 }
 
 // Get returns a runtime by session id.
+// @param sessionID ACP session id; missing id yields nil.
 func (p *RuntimePool) Get(sessionID string) *PooledRuntime {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -106,6 +119,7 @@ func (p *RuntimePool) Get(sessionID string) *PooledRuntime {
 }
 
 // Has reports whether the pool holds a process for sessionID.
+// @param sessionID ACP session id to probe.
 func (p *RuntimePool) Has(sessionID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -114,6 +128,7 @@ func (p *RuntimePool) Has(sessionID string) bool {
 }
 
 // Touch updates lastUsed for LRU bookkeeping.
+// @param sessionID Target; no-op when missing.
 func (p *RuntimePool) Touch(sessionID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -123,12 +138,14 @@ func (p *RuntimePool) Touch(sessionID string) {
 }
 
 // BeginSpawn reserves a pool slot before spawning a child process.
-// Reclaims idle LRU when needed; returns error when all resident sessions are busy.
+// Reclaims idle LRU when needed; when all residents are busy, blocks until a
+// slot frees (idle reclaim via status poll, or Close) or DisposeAll runs.
 // Pair with Insert (consumes the reservation) or CancelSpawn on failure.
+// @returns nil on success; error only when the pool was disposed while waiting.
 func (p *RuntimePool) BeginSpawn() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if err := p.ensureRoomIncludingPendingLocked(); err != nil {
+	if err := p.waitForRoomIncludingPendingLocked(); err != nil {
 		return err
 	}
 	p.pendingSpawns++
@@ -146,7 +163,9 @@ func (p *RuntimePool) CancelSpawn() {
 
 // Insert adds or replaces a runtime; reclaims idle LRU when over capacity.
 // Consumes one pending spawn reservation when present.
-// Returns error when full and no idle victim exists.
+// When full and all busy, waits for room (same policy as BeginSpawn).
+// @param runtime Handle after handshake (SessionID must be the real ACP id).
+// @returns nil on success; error only when disposed while waiting.
 func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -160,7 +179,7 @@ func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 	if p.pendingSpawns > 0 {
 		p.pendingSpawns--
 	}
-	if err := p.ensureCapacityForInsertLocked(); err != nil {
+	if err := p.waitForCapacityForInsertLocked(); err != nil {
 		return err
 	}
 	runtime.LastUsed = time.Now().UnixMilli()
@@ -169,6 +188,8 @@ func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 }
 
 // Close disposes and removes a session; returns whether it existed.
+// @param sessionID Target id.
+// @returns true when a resident was removed.
 func (p *RuntimePool) Close(sessionID string) bool {
 	p.mu.Lock()
 	rt, ok := p.m[sessionID]
@@ -182,14 +203,16 @@ func (p *RuntimePool) Close(sessionID string) bool {
 	return ok
 }
 
-// DisposeAll closes every child process.
+// DisposeAll closes every child process and wakes capacity waiters.
 func (p *RuntimePool) DisposeAll() {
 	p.mu.Lock()
+	p.disposed = true
 	rts := make([]*PooledRuntime, 0, len(p.m))
 	for _, rt := range p.m {
 		rts = append(rts, rt)
 	}
 	p.m = make(map[string]*PooledRuntime)
+	p.pendingSpawns = 0
 	p.mu.Unlock()
 	for _, rt := range rts {
 		rt.Dispose()
@@ -226,11 +249,14 @@ func (p *RuntimePool) List() []PoolEntry {
 }
 
 // IsIdleStatus reports whether a session may be reclaimed by LRU.
+// @param status Current SessionStatus; streaming / waiting_permission / connecting count as busy.
 func IsIdleStatus(status SessionStatus) bool {
 	return status == acp.StatusIdle || status == acp.StatusDisconnected
 }
 
 // PickLruIdleVictim returns the oldest idle sessionId, or empty when none.
+// @param entries Snapshot of id / lastUsed / status.
+// @returns Reclaimable session id, or "" when every entry is busy.
 func PickLruIdleVictim(entries []struct {
 	SessionID string
 	LastUsed  int64
@@ -252,31 +278,54 @@ func PickLruIdleVictim(entries []struct {
 	return bestID
 }
 
-// ensureCapacityForInsertLocked frees a resident slot for insert (not pending).
-// Caller must hold p.mu.
-func (p *RuntimePool) ensureCapacityForInsertLocked() error {
-	for len(p.m) >= p.Capacity {
-		if err := p.reclaimOneIdleOrThrowLocked(); err != nil {
-			return err
+// waitForCapacityForInsertLocked blocks until len(m) < Capacity (after reclaim).
+// Caller must hold p.mu. Unlocks briefly while sleeping so Close can proceed.
+// @returns error when disposed while waiting.
+func (p *RuntimePool) waitForCapacityForInsertLocked() error {
+	for {
+		if p.disposed {
+			return fmt.Errorf("RuntimePool disposed")
 		}
+		for len(p.m) >= p.Capacity {
+			if !p.reclaimOneIdleLocked() {
+				break
+			}
+		}
+		if len(p.m) < p.Capacity {
+			return nil
+		}
+		p.mu.Unlock()
+		time.Sleep(roomPollInterval)
+		p.mu.Lock()
 	}
-	return nil
 }
 
-// ensureRoomIncludingPendingLocked frees room counting in-flight BeginSpawn.
-// Caller must hold p.mu.
-func (p *RuntimePool) ensureRoomIncludingPendingLocked() error {
-	for len(p.m)+p.pendingSpawns >= p.Capacity {
-		if err := p.reclaimOneIdleOrThrowLocked(); err != nil {
-			return err
+// waitForRoomIncludingPendingLocked blocks until residents+pending < Capacity.
+// Caller must hold p.mu. Unlocks briefly while sleeping so Close can proceed.
+// @returns error when disposed while waiting.
+func (p *RuntimePool) waitForRoomIncludingPendingLocked() error {
+	for {
+		if p.disposed {
+			return fmt.Errorf("RuntimePool disposed")
 		}
+		for len(p.m)+p.pendingSpawns >= p.Capacity {
+			if !p.reclaimOneIdleLocked() {
+				break
+			}
+		}
+		if len(p.m)+p.pendingSpawns < p.Capacity {
+			return nil
+		}
+		p.mu.Unlock()
+		time.Sleep(roomPollInterval)
+		p.mu.Lock()
 	}
-	return nil
 }
 
-// reclaimOneIdleOrThrowLocked evicts one idle LRU victim or errors when all-busy.
+// reclaimOneIdleLocked evicts one idle LRU victim.
 // Caller must hold p.mu.
-func (p *RuntimePool) reclaimOneIdleOrThrowLocked() error {
+// @returns true when a victim was removed; false when all residents are busy.
+func (p *RuntimePool) reclaimOneIdleLocked() bool {
 	type snap struct {
 		SessionID string
 		LastUsed  int64
@@ -302,11 +351,11 @@ func (p *RuntimePool) reclaimOneIdleOrThrowLocked() error {
 	}
 	victim := PickLruIdleVictim(converted)
 	if victim == "" {
-		return fmt.Errorf("RuntimePool full (%d): all sessions busy; close one or wait for idle", p.Capacity)
+		return false
 	}
 	if rt, ok := p.m[victim]; ok {
 		delete(p.m, victim)
 		go rt.Dispose()
 	}
-	return nil
+	return true
 }

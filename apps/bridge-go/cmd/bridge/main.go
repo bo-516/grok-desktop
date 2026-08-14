@@ -11,11 +11,26 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/wsapi"
 )
 
 func main() {
-	defaultCwd := defaultWorkspaceCwd()
+	// Prefer the executable dir (installed binary next to a checkout), then
+	// cwd so `go run ./cmd/bridge` from the repo still resolves as dev.
+	start := ""
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		if session.FindRepoRoot(exeDir) != "" {
+			start = exeDir
+		}
+	}
+	if start == "" {
+		if wd, err := os.Getwd(); err == nil {
+			start = wd
+		}
+	}
+	defaultCwd := session.ResolveDefaultWorkspaceCwd(start)
 	cfg := wsapi.ConfigFromEnv(defaultCwd)
 	srv := wsapi.NewServer(cfg)
 
@@ -35,34 +50,4 @@ func main() {
 			os.Exit(1)
 		}
 	}
-}
-
-// defaultWorkspaceCwd mirrors Node: repo demo/ when running from source tree,
-// otherwise the process working directory.
-func defaultWorkspaceCwd() string {
-	// apps/bridge-go/cmd/bridge → repo root is ../../../..
-	exe, err := os.Executable()
-	_ = exe
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	// Prefer BRIDGE_CWD via ConfigFromEnv; this is only the fallback default.
-	// Walk up looking for demo/ next to apps/.
-	dir := wd
-	for i := 0; i < 6; i++ {
-		demo := filepath.Join(dir, "demo")
-		apps := filepath.Join(dir, "apps")
-		if st, err := os.Stat(demo); err == nil && st.IsDir() {
-			if _, err := os.Stat(apps); err == nil {
-				return demo
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return wd
 }

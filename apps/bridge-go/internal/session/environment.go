@@ -24,21 +24,22 @@ type EnvironmentInfo struct {
 	PoolCapacity    int     `json:"poolCapacity"`
 }
 
-// PoolCapacityFromEnv reads BRIDGE_POOL_CAPACITY (default 4, max 16).
+// PoolCapacityFromEnv reads BRIDGE_POOL_CAPACITY (default 8, max 16).
+// @returns Effective capacity in [1, 16]; invalid/empty env falls back to 8.
 func PoolCapacityFromEnv() int {
 	raw := os.Getenv("BRIDGE_POOL_CAPACITY")
 	if raw == "" {
-		return 4
+		return 8
 	}
 	n := 0
 	for _, c := range raw {
 		if c < '0' || c > '9' {
-			return 4
+			return 8
 		}
 		n = n*10 + int(c-'0')
 	}
 	if n < 1 {
-		return 4
+		return 8
 	}
 	if n > 16 {
 		return 16

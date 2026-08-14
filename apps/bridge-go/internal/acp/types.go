@@ -34,13 +34,26 @@ type PermissionOption struct {
 	Kind     string `json:"kind,omitempty"`
 }
 
+// ReasoningEffort is one row of a model's advertised reasoning-effort menu
+// (grok-build model `_meta.reasoningEfforts`). Desktop `/effort` and the
+// composer Thinking menu list exactly these rows and invent nothing, so the
+// ladder must survive the bridge or both surfaces come up empty.
+type ReasoningEffort struct {
+	ID      string `json:"id"`
+	Label   string `json:"label,omitempty"`
+	Default bool   `json:"default,omitempty"`
+}
+
 // AvailableModel is a picker catalog entry.
 // TotalContextTokens is the model window size from agent `_meta.totalContextTokens`
 // (F-CTX-01 composer context ring). Omitted when the agent did not declare it.
+// ReasoningEfforts is that model's advertised effort ladder; omitted when the
+// agent did not declare one.
 type AvailableModel struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name,omitempty"`
-	TotalContextTokens int    `json:"totalContextTokens,omitempty"`
+	ID                 string            `json:"id"`
+	Name               string            `json:"name,omitempty"`
+	TotalContextTokens int               `json:"totalContextTokens,omitempty"`
+	ReasoningEfforts   []ReasoningEffort `json:"reasoningEfforts,omitempty"`
 }
 
 // SessionState is the minimal snapshot held by the Go bridge.

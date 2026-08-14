@@ -74,10 +74,12 @@ func TestReplayBufferedNotBroadcast(t *testing.T) {
 func TestReplayEndCarriesUpdates(t *testing.T) {
 	tr := &fakeTransport{}
 	var got []acp.ReplayBufferedUpdate
+	var endStatus acp.SessionStatus
 	client := acp.NewClient(acp.ClientOptions{
 		Transport: tr,
 		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
 			got = append([]acp.ReplayBufferedUpdate{}, updates...)
+			endStatus = status
 		},
 	})
 	client.ReplaceSessionState(acp.EmptySession("s1", "/w", "m", "build"))
@@ -87,6 +89,9 @@ func TestReplayEndCarriesUpdates(t *testing.T) {
 		tr.inject(sessionUpdateLine("s1", fmt.Sprintf("e%d", i), text))
 	}
 	client.SetReplaying(false)
+	if endStatus != acp.StatusIdle {
+		t.Fatalf("replay_end of a finished load must be idle, got %q", endStatus)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 updates, got %d", len(got))
 	}
@@ -162,6 +167,26 @@ func TestReplayBufferCap(t *testing.T) {
 	}
 	if total != n {
 		t.Fatalf("expected total buffered %d, got %d from %v", n, total, endCounts)
+	}
+}
+
+func TestMetadataUpdateLeavesIdleAfterLoad(t *testing.T) {
+	// Post session/load, grok-build often emits available_commands / mode.
+	// Those must not mark the finished transcript streaming.
+	tr := &fakeTransport{}
+	client := acp.NewClient(acp.ClientOptions{Transport: tr})
+	client.ReplaceSessionState(acp.EmptySession("s1", "/w", "m", "build"))
+	tr.inject(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact"}]}}}`)
+	if client.GetSessionState().Status != acp.StatusIdle {
+		t.Fatalf("commands update must stay idle, got %q", client.GetSessionState().Status)
+	}
+	tr.inject(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"current_mode_update","mode":"ask"}}}`)
+	if client.GetSessionState().Status != acp.StatusIdle {
+		t.Fatalf("mode update must stay idle, got %q", client.GetSessionState().Status)
+	}
+	tr.inject(sessionUpdateLine("s1", "e-live", "still writing"))
+	if client.GetSessionState().Status != acp.StatusStreaming {
+		t.Fatalf("answer chunk must restore streaming, got %q", client.GetSessionState().Status)
 	}
 }
 

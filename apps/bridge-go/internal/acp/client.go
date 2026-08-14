@@ -83,7 +83,11 @@ type Client struct {
 	state          SessionState
 	settleTimer    *time.Timer
 	promptInFlight bool
-	disposed       bool
+	// promptOriginated is true once this process sent session/prompt.
+	// session/load of a still-running turn has no local prompt RPC; the
+	// short quiet settle must not flip that turn idle on every tool gap.
+	promptOriginated bool
+	disposed         bool
 	replaying      bool
 	// Buffer of raw updates absorbed while replaying (not yet flushed).
 	replayBuf []ReplayBufferedUpdate
@@ -220,7 +224,7 @@ func (c *Client) emitReplayEnd(sessionID string, buf []ReplayBufferedUpdate, st 
 	if c.onReplayEnd == nil {
 		return
 	}
-	c.onReplayEnd(sessionID, buf, st.Status, st.Model, st.Mode, len(buf), bytes, elapsedMs)
+	c.onReplayEnd(sessionID, buf, ReplayWireStatus(st.Status), st.Model, st.Mode, len(buf), bytes, elapsedMs)
 }
 
 // appendReplayUpdateLocked buffers one update and flushes mid-window if caps hit.
@@ -248,7 +252,9 @@ func (c *Client) appendReplayUpdateLocked(update map[string]any, eventID string)
 	// Cap hit: drain buffer for an intermediate replay_end; stay replaying.
 	flushBuf, flushBytes, flushElapsed = c.takeReplayBufferLocked()
 	flushSessionID = c.state.ID
-	flushStatus = c.state.Status
+	// Internal status may be streaming from replayed answer chunks; the
+	// mid-window wire must stay idle so a long session/load does not look live.
+	flushStatus = ReplayWireStatus(c.state.Status)
 	flushModel = c.state.Model
 	flushMode = c.state.Mode
 	// Restart timing for the next chunk of the same window.
@@ -283,6 +289,7 @@ func (c *Client) Prompt(sessionID string, blocks []ContentBlock) (any, error) {
 	c.state.ErrorMessage = ""
 	c.state.LastAgentText = ""
 	c.promptInFlight = true
+	c.promptOriginated = true
 	st := c.state
 	c.mu.Unlock()
 	c.emitState(st)
@@ -303,7 +310,7 @@ func (c *Client) Prompt(sessionID string, blocks []ContentBlock) (any, error) {
 	c.mu.Unlock()
 	// F-CTX-01: fan out usage before settle so the ring paints with idle status.
 	c.relayPromptResultUsage(sessionID, result)
-	c.scheduleSettle()
+	c.scheduleSettle(false)
 	return result, nil
 }
 
@@ -409,7 +416,7 @@ func (c *Client) Cancel(sessionID string) {
 	c.transport.Write(jsonrpc.EncodeNotification("session/cancel", map[string]any{
 		"sessionId": sessionID,
 	}))
-	c.scheduleSettle()
+	c.scheduleSettle(true)
 }
 
 // SetModel switches model mid-session via session/set_model when the agent supports it.
@@ -545,8 +552,17 @@ func (c *Client) emitState(st SessionState) {
 	}
 }
 
-func (c *Client) scheduleSettle() {
+// scheduleSettle arms the idle quiet window.
+// After session/load this process has not sent a prompt; skip the short
+// quiet settle so a still-running turn does not flicker Worked on every
+// tool gap. force=true is turn_completed / cancel.
+// @param force Settle even when no local prompt was sent.
+func (c *Client) scheduleSettle(force bool) {
 	c.mu.Lock()
+	if !force && !c.promptOriginated && !c.promptInFlight {
+		c.mu.Unlock()
+		return
+	}
 	if c.settleTimer != nil {
 		c.settleTimer.Stop()
 	}
@@ -641,25 +657,13 @@ func (c *Client) handleSessionUpdate(params any) {
 		sessionID = c.state.ID
 	}
 	// Patch minimal fields from known update kinds (no timeline).
-	if su, _ := update["sessionUpdate"].(string); su == "current_mode_update" {
-		if mode, ok := update["mode"].(string); ok && mode != "" {
-			c.state.Mode = mode
-		} else if mid, ok := update["currentModeId"].(string); ok && mid != "" {
-			if mid == "ask" || mid == "plan" || mid == "build" {
-				c.state.Mode = mid
-			}
-		}
-	}
-	if su, _ := update["sessionUpdate"].(string); su == "session_info_update" {
-		if title, ok := update["title"].(string); ok {
-			c.state.Title = title
-		}
-	}
-	// Live activity → streaming unless waiting for permission.
-	if c.state.Status != StatusWaitingPermission && c.state.Status != StatusDisconnected {
-		if c.promptInFlight || c.state.Status == StatusStreaming {
-			c.state.Status = StatusStreaming
-		}
+	applyLifecycleUpdate(&c.state, update)
+	su, _ := update["sessionUpdate"].(string)
+	// Only thoughts / tools / answer chunks restore Working after session/load
+	// forced idle. available_commands / mode / title after a finished
+	// transcript must not look live (desktop last-row is the old agent bubble).
+	if IsLiveWorkSessionUpdate(su) {
+		PromoteLiveStreamingStatus(&c.state)
 	}
 	st := c.state
 	replaying := c.replaying
@@ -698,8 +702,10 @@ func (c *Client) handleSessionUpdate(params any) {
 		c.onSessionUpdate(update, sessionID, eventID)
 	}
 	c.emitState(st)
-	if promptInFlight || st.Status == StatusStreaming {
-		c.scheduleSettle()
+	if su == "turn_completed" {
+		c.scheduleSettle(true)
+	} else if promptInFlight || st.Status == StatusStreaming {
+		c.scheduleSettle(false)
 	}
 }
 
@@ -754,13 +760,16 @@ func IsSessionUpdateMethod(method string) bool {
 }
 
 // ExtractSessionUpdate pulls the update object + sessionId + eventId from params.
+// Copies params._meta.totalTokens onto the update so relay (inner update only)
+// still carries live context-window occupancy for the composer ring.
 func ExtractSessionUpdate(params any) (update map[string]any, sessionID string, eventID string) {
 	p, ok := params.(map[string]any)
 	if !ok {
 		return nil, "", ""
 	}
 	var u map[string]any
-	if nested, ok := p["update"].(map[string]any); ok {
+	nested, hasNested := p["update"].(map[string]any)
+	if hasNested {
 		u = nested
 	} else {
 		u = p
@@ -778,7 +787,41 @@ func ExtractSessionUpdate(params any) (update map[string]any, sessionID string, 
 	if eventID == "" {
 		eventID = extractEventID(u)
 	}
+	// Only stamp from the envelope _meta when update is nested — a bare
+	// update's _meta is the tool vendor bag, not occupancy.
+	if hasNested {
+		stampLiveContextTokens(u, p["_meta"])
+	}
 	return u, sessionID, eventID
+}
+
+// stampLiveContextTokens copies params-level _meta.totalTokens onto update._meta.
+// Mutates update in place; the map is our parsed JSON, not shared with the agent.
+func stampLiveContextTokens(update map[string]any, paramsMeta any) {
+	live, ok := readMetaTotalTokens(paramsMeta)
+	if !ok {
+		return
+	}
+	meta, _ := update["_meta"].(map[string]any)
+	if meta == nil {
+		update["_meta"] = map[string]any{"totalTokens": live}
+		return
+	}
+	if existing, has := meta["totalTokens"]; has {
+		if n, ok := existing.(float64); ok && n == live {
+			return
+		}
+	}
+	meta["totalTokens"] = live
+}
+
+// readMetaTotalTokens reads a finite non-negative totalTokens from a _meta bag.
+func readMetaTotalTokens(meta any) (float64, bool) {
+	rec, ok := meta.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	return readNonNegNumber(rec["totalTokens"])
 }
 
 func extractEventID(obj map[string]any) string {

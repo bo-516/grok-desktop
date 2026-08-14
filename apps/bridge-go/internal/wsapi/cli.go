@@ -3,6 +3,7 @@ package wsapi
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/websocket"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
@@ -93,6 +94,8 @@ func dispatchCliCommand(command string, args map[string]any, cwd string, onAuthL
 	switch command {
 	case "sessions_list":
 		return sessionsList()
+	case "session_history":
+		return sessionHistory(stringArg(args, "sessionId"), cwd, stringArg(args, "cwd"))
 	case "sessions_search":
 		return sessionsSearch(stringArg(args, "query"), cwd)
 	case "sessions_delete":
@@ -281,6 +284,23 @@ func coercePromptEntries(args map[string]any) []userprompts.PromptEntry {
 		out = append(out, e)
 	}
 	return out
+}
+
+// sessionHistory reads one session's chat_history.jsonl (or updates.jsonl)
+// without spawning grok-build. cwd from the CLI frame is a lookup hint; an
+// explicit args.cwd wins. Missing files return an empty payload so the
+// desktop can keep waiting on session/load.
+func sessionHistory(sessionID, frameCwd, argsCwd string) (any, error) {
+	hint := stringsTrim(argsCwd)
+	if hint == "" {
+		hint = stringsTrim(frameCwd)
+	}
+	hist := session.ReadSessionHistoryFromDisk(sessionID, hint, "", 0)
+	return hist, nil
+}
+
+func stringsTrim(s string) string {
+	return strings.TrimSpace(s)
 }
 
 // sessionsList enumerates `~/.grok/sessions` across every workspace folder and
