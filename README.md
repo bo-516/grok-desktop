@@ -41,7 +41,8 @@ npm install
 UI layout follows the Framer prototype (left sessions · chat · bottom composer).
 
 ```bash
-# Terminal A — real grok-build, cwd=demo/
+# Terminal A — real grok-build (prefers go-bridge; Node if the binary is missing)
+# cwd=<repo> in a checkout
 npm run bridge
 
 # Terminal B — UI (auto-connects to bridge; no mock)
@@ -50,12 +51,21 @@ npm run dev
 
 Open http://localhost:8172.
 
+One process for **web + desktop** (Vite HMR and a Wails window; each owns its own live bridge):
+
+```bash
+npm run run:both
+# Node bridge instead of Go: npm run run:node-both
+# Menu (web / desktop / both): npm run run:dev
+```
+
 - **Multi-session**: one `grok agent stdio` process per live session; background chats keep streaming
-- **LRU pool**: default capacity **4** (`BRIDGE_POOL_CAPACITY`); only **idle** sessions are reclaimed
+- **LRU pool**: default capacity **8** (`BRIDGE_POOL_CAPACITY`); only **idle** sessions are reclaimed; full+busy waits for a free slot
 - **New chat** / sidebar: project groups, status pips (including background live), `session/load` resume
 - **Streaming markdown** in agent bubbles (fences, lists, bold/code while tokens still arrive)
 - Composer: Enter to send, Shift+Enter for newline; Ask/Plan/Build chip
 - Bridge down → offline banner; history still shown; reconnect via footer
+- **Default workspace** (no project / unset `BRIDGE_CWD`): the monorepo root in a checkout; packaged / production uses `Documents/Grok` on macOS and Windows (Linux same leaf). `demo/` stays the constrained sandbox for `demo:e2e` / `m0:live`.
 
 ### Dev: ai-inspector (⌘-click → Grok Build)
 

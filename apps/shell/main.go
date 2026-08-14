@@ -1,7 +1,7 @@
 // Package main is the thin Wails v3 desktop shell for grok-desktop.
 //
 // Responsibilities only:
-//  1. Resolve bridge.impl (config file + GROK_DESKTOP_BRIDGE env, default node)
+//  1. Resolve bridge.impl (config file + GROK_DESKTOP_BRIDGE env, default go)
 //  2. Pick free port + generate random token
 //  3. Spawn selected bridge as a **separate child process** (never in-process)
 //  4. Embed apps/desktop dist and inject window.__GROK_BRIDGE_URL__
@@ -32,6 +32,8 @@ func main() {
 }
 
 // run wires config → bridge spawn → Wails window → cleanup.
+// Missing monorepo markers is packaged mode: empty repoRoot, workspace
+// cwd from ResolveBridgeLaunchCwd (Documents/Grok unless BRIDGE_CWD is set).
 func run() error {
 	// File logs first so even config/bridge failures leave a trail.
 	sessionLog, logErr := SetupSessionLogging()
@@ -48,16 +50,8 @@ func run() error {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	repoRoot, err := RepoRoot("")
-	if err != nil {
-		// Fall back to executable-relative walk when cwd is outside the monorepo.
-		if exe, e2 := os.Executable(); e2 == nil {
-			repoRoot, err = RepoRoot(exe)
-		}
-		if err != nil {
-			return err
-		}
-	}
+	// Missing monorepo markers is packaged mode (empty repoRoot), not fatal.
+	repoRoot := ResolveOptionalRepoRoot()
 
 	port, err := PickFreePort()
 	if err != nil {
@@ -69,10 +63,7 @@ func run() error {
 	}
 	host := "127.0.0.1"
 	wsURL := BridgeWSURL(host, port, token)
-	cwd := DefaultBridgeCWD(repoRoot)
-	if v := os.Getenv("BRIDGE_CWD"); v != "" {
-		cwd = v
-	}
+	cwd := ResolveBridgeLaunchCwd(repoRoot)
 
 	log.Printf("[shell] bridge.impl=%s port=%d repo=%s", impl, port, repoRoot)
 

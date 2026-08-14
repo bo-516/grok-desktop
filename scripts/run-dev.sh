@@ -7,10 +7,12 @@
 #   ./scripts/run-dev.sh node-web        # 2) Node bridge + Vite web
 #   ./scripts/run-dev.sh go-desktop      # 3) Go bridge + Wails shell
 #   ./scripts/run-dev.sh node-desktop    # 4) Node bridge + Wails shell
-#   ./scripts/run-dev.sh 1|2|3|4        # same as above
+#   ./scripts/run-dev.sh go-both         # 5) Go: Vite web + Wails desktop
+#   ./scripts/run-dev.sh node-both       # 6) Node: Vite web + Wails desktop
+#   ./scripts/run-dev.sh 1|2|3|4|5|6    # same as above
 #
 # Env overrides:
-#   BRIDGE_CWD          workspace for agent (default: <repo>/demo)
+#   BRIDGE_CWD          workspace for agent (default: <repo> in this script)
 #   BRIDGE_PORT         fixed port for web mode (default: free / 8765)
 #   VITE_PORT           Vite port (default: 8172)
 #   SKIP_BUILD=1        do not rebuild stale go/shell/desktop artifacts
@@ -24,209 +26,50 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-BRIDGE_CWD="${BRIDGE_CWD:-$ROOT/demo}"
+# Dev default: the checkout itself. Production packaged runs use <Documents>/Grok
+# (see apps/bridge/src/defaultWorkspace.ts). demo/ stays for demo:e2e / m0:live.
+BRIDGE_CWD="${BRIDGE_CWD:-$ROOT}"
 VITE_PORT="${VITE_PORT:-8172}"
 NODE_BRIDGE_SRC="$ROOT/apps/bridge/src/server.ts"
 GO_BRIDGE_BIN="$ROOT/apps/bridge-go/bin/bridge-go"
 SHELL_BIN="$ROOT/apps/shell/bin/grok-desktop"
 TSX_BIN="$ROOT/node_modules/.bin/tsx"
 
-# PIDs we own in web mode (desktop shell owns its own bridge).
+# PIDs we own. Desktop-only uses exec (no SHELL_PID). Both-mode tracks both UIs.
+# Desktop shell always owns its own bridge (separate port/token from the web bridge).
 BRIDGE_PID=""
 WEB_PID=""
+SHELL_PID=""
 
 log() { printf '\033[1;34m[run-dev]\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m[run-dev]\033[0m %s\n' "$*" >&2; }
 
+# Stop the process whose pid is stored in the variable named by $1 (no-op if empty / dead).
+stop_pid() {
+  local pid="${!1:-}"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+}
+
 cleanup() {
   local code=$?
-  # Kill process groups we started (web mode only).
-  if [[ -n "${WEB_PID}" ]] && kill -0 "$WEB_PID" 2>/dev/null; then
-    kill "$WEB_PID" 2>/dev/null || true
-    wait "$WEB_PID" 2>/dev/null || true
-  fi
+  # Web Vite, then its bridge group, then Wails (shell kills its own bridge).
+  stop_pid WEB_PID
   if [[ -n "${BRIDGE_PID}" ]] && kill -0 "$BRIDGE_PID" 2>/dev/null; then
     # Prefer process-group kill when bridge was launched with setsid.
     kill -- "-$BRIDGE_PID" 2>/dev/null || kill "$BRIDGE_PID" 2>/dev/null || true
     wait "$BRIDGE_PID" 2>/dev/null || true
   fi
+  stop_pid SHELL_PID
   exit "$code"
 }
 trap cleanup EXIT INT TERM
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    err "missing command: $1"
-    exit 1
-  }
-}
-
-ensure_tsx() {
-  if [[ -x "$TSX_BIN" ]]; then
-    return 0
-  fi
-  if command -v tsx >/dev/null 2>&1; then
-    TSX_BIN="$(command -v tsx)"
-    return 0
-  fi
-  err "tsx not found — run: npm install"
-  exit 1
-}
-
-# True when $1 is missing/non-executable, or any Go source under $2 is newer than $1.
-needs_rebuild() {
-  local bin="$1"
-  local src_dir="$2"
-  if [[ ! -x "$bin" ]]; then
-    return 0
-  fi
-  if find "$src_dir" \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
-    -newer "$bin" -print -quit 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
-}
-
-# True when desktop UI sources are newer than dist/index.html (or dist is missing).
-# Ignores node_modules / dist so incremental checks stay cheap.
-desktop_dist_stale() {
-  local dist_index="$ROOT/apps/desktop/dist/index.html"
-  local src_root="$ROOT/apps/desktop"
-  if [[ ! -f "$dist_index" ]]; then
-    return 0
-  fi
-  # Config / entry at package root.
-  local f
-  for f in \
-    "$src_root/package.json" \
-    "$src_root/vite.config.ts" \
-    "$src_root/vite.config.js" \
-    "$src_root/index.html" \
-    "$src_root/uno.config.ts" \
-    "$src_root/uno.config.js" \
-    "$src_root/tsconfig.json"; do
-    if [[ -f "$f" && "$f" -nt "$dist_index" ]]; then
-      return 0
-    fi
-  done
-  # Application sources (prune heavy trees).
-  if find "$src_root" \
-    \( -path "$src_root/node_modules" -o -path "$src_root/dist" -o -path "$src_root/test" \) -prune -o \
-    -type f \( \
-      -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' \
-      -o -name '*.html' -o -name '*.svg' \
-    \) -newer "$dist_index" -print -quit 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
-}
-
-ensure_go_bridge() {
-  if ! needs_rebuild "$GO_BRIDGE_BIN" "$ROOT/apps/bridge-go"; then
-    return 0
-  fi
-  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
-    err "Go bridge binary missing or stale: $GO_BRIDGE_BIN (SKIP_BUILD=1)"
-    exit 1
-  fi
-  need_cmd go
-  log "building Go bridge → $GO_BRIDGE_BIN"
-  mkdir -p "$(dirname "$GO_BRIDGE_BIN")"
-  (cd "$ROOT/apps/bridge-go" && go build -o bin/bridge-go ./cmd/bridge)
-}
-
-# Rebuild apps/desktop/dist when UI source is newer (or dist missing).
-# Wails embeds a static copy — without this, "dev" desktop silently runs stale JS.
-ensure_desktop_dist() {
-  if ! desktop_dist_stale; then
-    return 0
-  fi
-  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
-    err "desktop dist missing or stale (SKIP_BUILD=1) — run: npm run build -w @grok-desktop/desktop"
-    exit 1
-  fi
-  log "building desktop UI → apps/desktop/dist (source newer than dist or dist missing)"
-  npm run build -w @grok-desktop/desktop
-}
-
-# Copy desktop dist into shell embed tree when missing or older than desktop dist.
-ensure_shell_frontend_sync() {
-  local src_index="$ROOT/apps/desktop/dist/index.html"
-  local dst_index="$ROOT/apps/shell/frontend/dist/index.html"
-  if [[ ! -f "$src_index" ]]; then
-    err "desktop dist missing after ensure_desktop_dist — abort"
-    exit 1
-  fi
-  if [[ -f "$dst_index" ]] && ! find "$ROOT/apps/desktop/dist" -type f \
-    -newer "$dst_index" -print -quit 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
-    err "shell frontend embed stale (SKIP_BUILD=1) — run: bash apps/shell/build/sync-frontend.sh"
-    exit 1
-  fi
-  log "syncing desktop dist → apps/shell/frontend/dist (go:embed input)"
-  if [[ -f "$ROOT/apps/shell/build/sync-frontend.sh" ]]; then
-    bash "$ROOT/apps/shell/build/sync-frontend.sh"
-  else
-    rm -rf "$ROOT/apps/shell/frontend/dist"
-    mkdir -p "$ROOT/apps/shell/frontend/dist"
-    cp -R "$ROOT/apps/desktop/dist/." "$ROOT/apps/shell/frontend/dist/"
-  fi
-}
-
-ensure_shell() {
-  # Dev desktop path: UI source → Vite dist → shell embed → go:embed binary.
-  # Previously only rebuilt on shell .go changes and only synced when index.html
-  # was missing, so TS fixes never reached the Wails window without manual steps.
-  ensure_desktop_dist
-  ensure_shell_frontend_sync
-
-  local need_shell=0
-  if [[ ! -x "$SHELL_BIN" ]]; then
-    need_shell=1
-  elif find "$ROOT/apps/shell" \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
-    -not -path '*/frontend/*' -not -path '*/bin/*' \
-    -newer "$SHELL_BIN" -print -quit 2>/dev/null | grep -q .; then
-    need_shell=1
-  elif find "$ROOT/apps/shell/frontend/dist" -type f \
-    -newer "$SHELL_BIN" -print -quit 2>/dev/null | grep -q .; then
-    # go:embed freezes dist at compile time — any newer asset requires relink.
-    need_shell=1
-  fi
-
-  if [[ "$need_shell" -eq 0 ]]; then
-    return 0
-  fi
-  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
-    err "shell binary missing or stale: $SHELL_BIN (SKIP_BUILD=1)"
-    exit 1
-  fi
-  need_cmd go
-  log "building Wails shell → $SHELL_BIN"
-  mkdir -p "$(dirname "$SHELL_BIN")"
-  (cd "$ROOT/apps/shell" && go build -o bin/grok-desktop .)
-}
-
-# Pick a free loopback port (or honor BRIDGE_PORT).
-pick_port() {
-  if [[ -n "${BRIDGE_PORT:-}" ]]; then
-    echo "$BRIDGE_PORT"
-    return
-  fi
-  # Prefer python for portability; fall back to 8765.
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-    return
-  fi
-  echo 8765
-}
+# Rebuild / port helpers (need_cmd, ensure_*, pick_port).
+# shellcheck source=scripts/run-dev-build.sh
+. "$ROOT/scripts/run-dev-build.sh"
 
 # Start Node or Go bridge; set BRIDGE_WS_URL globally after ready.
 # $1 = node|go
@@ -313,6 +156,8 @@ PY
   log "bridge log: $log_file"
 }
 
+# Start Vite against the script-owned bridge. Sets WEB_PID; does not wait
+# (caller waits so both-mode can also watch the Wails shell).
 start_web() {
   log "starting Vite UI on http://127.0.0.1:${VITE_PORT} …"
   log "  VITE_BRIDGE_URL=$BRIDGE_WS_URL"
@@ -325,9 +170,11 @@ start_web() {
   ) &
   WEB_PID=$!
   log "web PID=$WEB_PID — open http://127.0.0.1:${VITE_PORT}"
-  wait "$WEB_PID"
 }
 
+# Start the Wails shell. $1 = node|go.
+# Desktop-only: exec (replace this script). Both-mode: DESKTOP_BG=1 backgrounds
+# into SHELL_PID so Vite can run alongside; the shell still owns its own bridge.
 start_desktop() {
   local impl="$1"
   ensure_shell
@@ -339,7 +186,41 @@ start_desktop() {
   export GROK_DESKTOP_BRIDGE="$impl"
   export BRIDGE_CWD
   # Shell discovers monorepo from cwd / executable path.
+  if [[ "${DESKTOP_BG:-0}" == "1" ]]; then
+    "$SHELL_BIN" &
+    SHELL_PID=$!
+    log "desktop PID=$SHELL_PID"
+    return
+  fi
   exec "$SHELL_BIN"
+}
+
+# Block until Vite or the Wails shell exits; cleanup then tears down the rest.
+# Polls because macOS /bin/bash is 3.2 (no `wait -n`).
+wait_ui_children() {
+  while true; do
+    if [[ -n "${WEB_PID}" ]] && ! kill -0 "$WEB_PID" 2>/dev/null; then
+      log "web exited"
+      return 0
+    fi
+    if [[ -n "${SHELL_PID}" ]] && ! kill -0 "$SHELL_PID" 2>/dev/null; then
+      log "desktop exited"
+      return 0
+    fi
+    sleep 0.3
+  done
+}
+
+# Shared web+desktop stack: Vite (script-owned bridge) + Wails (its own bridge).
+# $1 = node|go. Two bridges on purpose — desktop always injects its own WS URL.
+start_both() {
+  local impl="$1"
+  start_bridge "$impl"
+  start_web
+  DESKTOP_BG=1
+  start_desktop "$impl"
+  log "both running — web http://127.0.0.1:${VITE_PORT} + Wails desktop"
+  wait_ui_children
 }
 
 print_menu() {
@@ -351,6 +232,8 @@ print_menu() {
     2) bridge (node) + web     (Vite browser)
     3) bridge (go)   + desktop (Wails shell)
     4) bridge (node) + desktop (Wails shell)
+    5) bridge (go)   + both    (Vite + Wails)
+    6) bridge (node) + both    (Vite + Wails)
     q) quit
 
 EOF
@@ -362,6 +245,8 @@ resolve_choice() {
     2 | node-web | node_web | nodeweb) echo node-web ;;
     3 | go-desktop | go_desktop | godesktop) echo go-desktop ;;
     4 | node-desktop | node_desktop | nodedesktop) echo node-desktop ;;
+    5 | go-both | go_both | goboth | both | all) echo go-both ;;
+    6 | node-both | node_both | nodeboth) echo node-both ;;
     q | quit | exit) echo quit ;;
     *) echo "" ;;
   esac
@@ -372,10 +257,12 @@ run_mode() {
     go-web)
       start_bridge go
       start_web
+      wait "$WEB_PID"
       ;;
     node-web)
       start_bridge node
       start_web
+      wait "$WEB_PID"
       ;;
     go-desktop)
       start_desktop go
@@ -383,12 +270,18 @@ run_mode() {
     node-desktop)
       start_desktop node
       ;;
+    go-both)
+      start_both go
+      ;;
+    node-both)
+      start_both node
+      ;;
     quit)
       exit 0
       ;;
     *)
       err "unknown mode: $1"
-      err "use: go-web | node-web | go-desktop | node-desktop | 1|2|3|4"
+      err "use: go-web | node-web | go-desktop | node-desktop | go-both | node-both | 1-6"
       exit 1
       ;;
   esac
@@ -415,7 +308,7 @@ main() {
 
   print_menu
   while true; do
-    read -r -p "Select [1-4/q]: " choice
+    read -r -p "Select [1-6/q]: " choice
     mode="$(resolve_choice "$choice")"
     if [[ -z "$mode" ]]; then
       err "invalid choice: $choice"

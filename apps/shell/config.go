@@ -15,9 +15,9 @@ import (
 type BridgeImpl string
 
 const (
-	// BridgeImplNode runs apps/bridge via node/tsx (default / oracle).
+	// BridgeImplNode runs apps/bridge via node/tsx (oracle / fallback).
 	BridgeImplNode BridgeImpl = "node"
-	// BridgeImplGo runs apps/bridge-go binary when present.
+	// BridgeImplGo runs apps/bridge-go. Product default when env/config omit impl.
 	BridgeImplGo BridgeImpl = "go"
 )
 
@@ -28,35 +28,37 @@ type Config struct {
 	BridgeImpl BridgeImpl `json:"bridge.impl"`
 }
 
-// DefaultConfig returns the product default (Node bridge).
+// DefaultConfig returns the product default (Go bridge).
 func DefaultConfig() Config {
-	return Config{BridgeImpl: BridgeImplNode}
+	return Config{BridgeImpl: BridgeImplGo}
 }
 
 // ParseBridgeImpl normalizes a raw string to BridgeImpl.
-// Returns an error when the value is non-empty but not "node" or "go".
+// Empty string is the product default (Go). Non-empty values that are not
+// "node" or "go" return an error so a typo cannot silently pick Node.
 func ParseBridgeImpl(raw string) (BridgeImpl, error) {
 	v := strings.ToLower(strings.TrimSpace(raw))
 	switch v {
-	case "", string(BridgeImplNode):
-		return BridgeImplNode, nil
-	case string(BridgeImplGo):
+	case "", string(BridgeImplGo):
 		return BridgeImplGo, nil
+	case string(BridgeImplNode):
+		return BridgeImplNode, nil
 	default:
 		return "", fmt.Errorf("invalid bridge.impl %q (want node|go)", raw)
 	}
 }
 
-// ResolveBridgeImpl applies env override then config file then default.
+// ResolveBridgeImpl applies env override then config file then default (Go).
 // Env GROK_DESKTOP_BRIDGE always wins when set and non-empty.
 // cfg is the value loaded from the user config file (may be zero).
+// Empty cfg.BridgeImpl selects Go — Node is never implied.
 // Returns the selected impl or an error if env/config value is illegal.
 func ResolveBridgeImpl(envValue string, cfg Config) (BridgeImpl, error) {
 	if strings.TrimSpace(envValue) != "" {
 		return ParseBridgeImpl(envValue)
 	}
 	if cfg.BridgeImpl == "" {
-		return BridgeImplNode, nil
+		return BridgeImplGo, nil
 	}
 	return ParseBridgeImpl(string(cfg.BridgeImpl))
 }

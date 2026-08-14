@@ -28,6 +28,7 @@ type BridgeLaunchParams struct {
 	// Cwd is BRIDGE_CWD (workspace root for agent sessions).
 	Cwd string
 	// RepoRoot is the monorepo root used to resolve scripts/binaries.
+	// Empty is packaged mode: locate the Go binary next to the executable.
 	RepoRoot string
 	// Stdout/Stderr optional sinks (default os.Stdout/os.Stderr).
 	Stdout io.Writer
@@ -65,6 +66,9 @@ func DefaultAllowedOrigins() string {
 
 // StartBridge spawns the selected bridge as a child process with its own process group
 // (Unix Setpgid) so Stop can kill the whole tree.
+// Empty RepoRoot is packaged mode: locate Go bridge next to the executable and
+// use Cwd (or ResolveBridgeLaunchCwd) as cmd.Dir. Node + empty repo is an
+// explicit source-checkout error, not a tsx lookup failure.
 // Returns a running BridgeProcess or an error (e.g. go binary missing).
 func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 	if p.Host == "" {
@@ -79,19 +83,33 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 	if p.Stderr == nil {
 		p.Stderr = os.Stderr
 	}
-	if p.RepoRoot == "" {
-		return nil, fmt.Errorf("StartBridge: RepoRoot is required")
-	}
 	if p.Port <= 0 {
 		return nil, fmt.Errorf("StartBridge: Port must be positive")
 	}
 	if strings.TrimSpace(p.Token) == "" {
 		return nil, fmt.Errorf("StartBridge: Token is required")
 	}
+	if strings.TrimSpace(p.Cwd) == "" {
+		p.Cwd = ResolveBridgeLaunchCwd(p.RepoRoot)
+	}
 
 	var cmd *exec.Cmd
 	switch p.Impl {
-	case BridgeImplNode, "":
+	case BridgeImplGo, "":
+		// Empty impl is Go — product default. Node is explicit-only.
+		// Checkout: monorepo bin/. Packaged (empty repoRoot): exe-adjacent.
+		bin := FindGoBridgeBinary(p.RepoRoot)
+		if bin == "" {
+			return nil, fmt.Errorf(
+				"go bridge selected but binary not found (looked under %v); build with: (cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge) — or set GROK_DESKTOP_BRIDGE=node",
+				GoBridgeBinaryCandidates(p.RepoRoot),
+			)
+		}
+		cmd = exec.Command(bin)
+	case BridgeImplNode:
+		if strings.TrimSpace(p.RepoRoot) == "" {
+			return nil, fmt.Errorf("Node bridge requires a source checkout — packaged builds use the Go bridge")
+		}
 		script := NodeBridgeScript(p.RepoRoot)
 		if st, err := os.Stat(script); err != nil || st.IsDir() {
 			return nil, fmt.Errorf("node bridge script missing: %s", script)
@@ -102,21 +120,12 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 		}
 		args := append(append([]string{}, prefix...), script)
 		cmd = exec.Command(tsx, args...)
-	case BridgeImplGo:
-		// Prefer monorepo build output (bin/bridge-go); fall back to legacy names.
-		bin := FindGoBridgeBinary(p.RepoRoot)
-		if bin == "" {
-			return nil, fmt.Errorf(
-				"go bridge selected but binary not found (looked under %v); build with: (cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge) — or set GROK_DESKTOP_BRIDGE=node",
-				GoBridgeBinaryCandidates(p.RepoRoot),
-			)
-		}
-		cmd = exec.Command(bin)
 	default:
 		return nil, fmt.Errorf("unknown bridge impl %q", p.Impl)
 	}
 
-	cmd.Dir = p.RepoRoot
+	// Workspace cwd is where the agent should run; repoRoot only locates scripts.
+	cmd.Dir = p.Cwd
 	cmd.Stdout = p.Stdout
 	cmd.Stderr = p.Stderr
 	cmd.Env = bridgeEnv(os.Environ(), p)
@@ -238,4 +247,12 @@ func (b *BridgeProcess) Pid() int {
 		return 0
 	}
 	return b.cmd.Process.Pid
+}
+
+// Dir is the child process working directory (workspace cwd, not repo root).
+func (b *BridgeProcess) Dir() string {
+	if b == nil || b.cmd == nil {
+		return ""
+	}
+	return b.cmd.Dir
 }

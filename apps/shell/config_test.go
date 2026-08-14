@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// TestResolveBridgeImpl_Default ensures empty env + empty config → node.
+// TestResolveBridgeImpl_Default ensures empty env + empty config → go.
 func TestResolveBridgeImpl_Default(t *testing.T) {
 	impl, err := ResolveBridgeImpl("", Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if impl != BridgeImplNode {
-		t.Fatalf("want node, got %q", impl)
+	if impl != BridgeImplGo {
+		t.Fatalf("want go, got %q", impl)
 	}
 }
 
@@ -53,6 +53,17 @@ func TestResolveBridgeImpl_Invalid(t *testing.T) {
 	}
 	if _, err := ResolveBridgeImpl("", Config{BridgeImpl: "rust"}); err == nil {
 		t.Fatal("expected error for invalid config")
+	}
+}
+
+// TestParseBridgeImpl_EmptyIsGo keeps the product default on blank input.
+func TestParseBridgeImpl_EmptyIsGo(t *testing.T) {
+	impl, err := ParseBridgeImpl("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if impl != BridgeImplGo {
+		t.Fatalf("want go, got %q", impl)
 	}
 }
 
@@ -102,8 +113,8 @@ func TestLoadConfigFile_Missing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BridgeImpl != BridgeImplNode {
-		t.Fatalf("want default node, got %q", cfg.BridgeImpl)
+	if cfg.BridgeImpl != BridgeImplGo {
+		t.Fatalf("want default go, got %q", cfg.BridgeImpl)
 	}
 }
 

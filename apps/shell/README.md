@@ -31,7 +31,7 @@ apps/shell/
 
 1. Env **`GROK_DESKTOP_BRIDGE=node|go`** (wins when set)
 2. User config file `bridge.impl` / nested `bridge.impl`
-3. Default: **`node`**
+3. Default: **`go`** (Node only when env/config says `node`)
 
 Config file path:
 
@@ -73,7 +73,7 @@ or flat:
 { "bridge.impl": "go" }
 ```
 
-Go bridge binary is optional. If `go` is selected and no binary is found under:
+Go bridge is the product default. If `go` is selected (including default) and no binary is found under:
 
 - `apps/bridge-go/bin/bridge`
 - `apps/bridge-go/bridge`
@@ -89,7 +89,7 @@ the shell **errors clearly** (no silent fallback to mock or node).
 | `BRIDGE_TOKEN` | Random base64url secret |
 | `BRIDGE_HOST` | `127.0.0.1` |
 | `BRIDGE_ALLOWED_ORIGINS` | `null`, `file://`, `wails://localhost`, Vite dev origins, … |
-| `BRIDGE_CWD` | `demo/` under monorepo (or env override) |
+| `BRIDGE_CWD` | Monorepo root in a checkout; `<Documents>/Grok` when packaged (or env override) |
 
 Frontend receives:
 
@@ -122,14 +122,14 @@ Binary: **`apps/shell/bin/grok-desktop`**
 From the monorepo (shell discovers repo root via `apps/bridge/src/server.ts`):
 
 ```bash
-# Default: Node bridge (requires node + tsx + workspace deps)
+# Default: Go bridge (needs apps/bridge-go/bin/bridge-go)
 ./apps/shell/bin/grok-desktop
 
-# Force Node
-GROK_DESKTOP_BRIDGE=node ./apps/shell/bin/grok-desktop
-
-# Force Go (needs bridge-go binary built first)
+# Force Go
 GROK_DESKTOP_BRIDGE=go ./apps/shell/bin/grok-desktop
+
+# Force Node (tsx + workspace deps)
+GROK_DESKTOP_BRIDGE=node ./apps/shell/bin/grok-desktop
 
 # Optional workspace root for agent sessions
 BRIDGE_CWD=/path/to/project ./apps/shell/bin/grok-desktop
