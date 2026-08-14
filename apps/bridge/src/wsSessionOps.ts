@@ -9,12 +9,14 @@ import { dispatchCliCommand } from "./cliDispatch.js";
 import type { ClientMsg, ServerMsg } from "./protocol.js";
 import type { RuntimePool } from "./runtimePool.js";
 
-/** Minimal runtime surface used by set_model / set_mode / token_usage / fork. */
+/** Minimal runtime surface used by set_model / set_mode / token_usage / billing / fork. */
 export type SessionOpRuntime = {
   sessionId: string;
   setModel?: (modelId: string) => Promise<void>;
   setMode?: (modeId: string) => Promise<void>;
   tokenUsage?: () => Promise<unknown>;
+  /** Account weekly remaining via `_x.ai/billing`. */
+  billing?: () => Promise<unknown>;
   forkSession?: (opts?: {
     sourceCwd?: string;
     newCwd?: string;
@@ -142,6 +144,51 @@ export async function handleTokenUsage(
   }
   try {
     const data = await rt.tokenUsage();
+    send(ws, {
+      type: "cli_result",
+      result: { requestId, ok: true, data },
+    });
+  } catch (e) {
+    send(ws, {
+      type: "cli_result",
+      result: {
+        requestId,
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      },
+    });
+  }
+}
+
+/**
+ * `_x.ai/billing` → cli_result envelope for the UI weekly remaining chip.
+ * @param deps Pool + send + requireRuntime.
+ * @param ws Reply socket.
+ * @param sessionId Optional target (must be a live resident to carry the RPC).
+ * @param requestId Client correlation id.
+ */
+export async function handleBilling(
+  deps: SessionOpDeps,
+  ws: WebSocket,
+  sessionId: string | undefined,
+  requestId: string,
+): Promise<void> {
+  const { pool, send, requireRuntime } = deps;
+  const rt = requireRuntime(sessionId);
+  pool.touch(rt.sessionId);
+  if (!rt.billing) {
+    send(ws, {
+      type: "cli_result",
+      result: {
+        requestId,
+        ok: false,
+        error: "billing not available",
+      },
+    });
+    return;
+  }
+  try {
+    const data = await rt.billing();
     send(ws, {
       type: "cli_result",
       result: { requestId, ok: true, data },

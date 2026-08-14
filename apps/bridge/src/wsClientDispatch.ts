@@ -28,6 +28,7 @@ import {
   handleSetModel,
   handleForkSession,
   handleTokenUsage,
+  handleBilling,
   type SessionOpDeps,
 } from "./wsSessionOps.js";
 
@@ -235,6 +236,10 @@ export async function dispatchClientMsg(
   }
   if (msg.type === "token_usage") {
     await handleTokenUsage(opDeps, ws, msg.sessionId, msg.requestId);
+    return;
+  }
+  if (msg.type === "billing") {
+    await handleBilling(opDeps, ws, msg.sessionId, msg.requestId);
     return;
   }
   if (msg.type === "fork_session") {

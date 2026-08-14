@@ -110,6 +110,11 @@ export type ClientMsg =
   | { type: "compact"; sessionId?: string; instruction?: string }
   | { type: "token_usage"; sessionId?: string; requestId: string }
   /**
+   * Account billing / weekly remaining (`_x.ai/billing`).
+   * Replies on `cli_result` with the raw credits-config bag.
+   */
+  | { type: "billing"; sessionId?: string; requestId: string }
+  /**
    * Fork the source session into a peer (`_x.ai/session/fork`).
    * Replies on `cli_result` with `{ newSessionId, … }`.
    */
@@ -136,6 +141,7 @@ export type ClientMsg =
       command:
         | "inspect"
         | "sessions_list"
+        | "session_history"
         | "sessions_search"
         | "sessions_delete"
         | "export"

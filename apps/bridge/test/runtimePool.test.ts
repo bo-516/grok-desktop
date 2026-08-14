@@ -1,5 +1,5 @@
 /**
- * RuntimePool pure-logic unit tests: idle LRU reclaim / busy not reclaimed.
+ * RuntimePool pure-logic unit tests: idle LRU reclaim / busy waits for room.
  */
 
 import assert from "node:assert/strict";
@@ -12,19 +12,21 @@ import {
 } from "../src/runtimePool.js";
 import type { SessionState, SessionStatus } from "@grok-desktop/acp-core";
 
-/** Build a minimal fake runtime. */
+/** Build a minimal fake runtime; status can mutate via the returned box. */
 function fakeRuntime(
   id: string,
   status: SessionStatus,
   lastUsed: number,
   disposed: string[],
+  statusBox?: { status: SessionStatus },
 ): PooledRuntime {
+  const box = statusBox ?? { status };
   const state = {
     id,
     workspace: "/tmp",
     model: "",
     mode: "build" as const,
-    status,
+    status: box.status,
     timeline: [],
     toolCalls: {},
     lastAgentText: "",
@@ -33,8 +35,8 @@ function fakeRuntime(
     sessionId: id,
     cwd: "/tmp",
     lastUsed,
-    getStatus: () => status,
-    getSessionState: () => state,
+    getStatus: () => box.status,
+    getSessionState: () => ({ ...state, status: box.status }),
     prompt: async () => undefined,
     cancel: () => undefined,
     respondPermission: () => undefined,
@@ -73,36 +75,40 @@ describe("pickLruIdleVictim", () => {
 });
 
 describe("RuntimePool", () => {
-  it("beginSpawn reserves capacity so concurrent starts cannot overshoot", () => {
+  it("beginSpawn reserves capacity so concurrent starts cannot overshoot", async () => {
     const disposed: string[] = [];
     const pool = new RuntimePool(1);
-    pool.beginSpawn();
-    assert.throws(() => pool.beginSpawn(), /RuntimePool full/);
-    pool.insert(fakeRuntime("a", "idle", 10, disposed));
-    assert.equal(pool.size, 1);
-    // After insert, a new spawn can reclaim the idle resident.
-    pool.beginSpawn();
-    pool.insert(fakeRuntime("b", "idle", 20, disposed));
+    await pool.beginSpawn();
+    // Second begin blocks until the first reservation is consumed and idle is reclaimable.
+    let secondResolved = false;
+    const second = pool.beginSpawn().then(() => {
+      secondResolved = true;
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(secondResolved, false);
+    await pool.insert(fakeRuntime("a", "idle", 10, disposed));
+    await second;
+    await pool.insert(fakeRuntime("b", "idle", 20, disposed));
     assert.equal(pool.size, 1);
     assert.ok(disposed.includes("a"));
   });
 
-  it("cancelSpawn releases a reservation without insert", () => {
+  it("cancelSpawn releases a reservation without insert", async () => {
     const pool = new RuntimePool(1);
-    pool.beginSpawn();
+    await pool.beginSpawn();
     pool.cancelSpawn();
     // Second begin must succeed once the first reservation is cancelled.
-    pool.beginSpawn();
+    await pool.beginSpawn();
     pool.cancelSpawn();
   });
 
-  it("evicts idle LRU when at capacity", () => {
+  it("evicts idle LRU when at capacity", async () => {
     const disposed: string[] = [];
     const pool = new RuntimePool(2);
-    pool.insert(fakeRuntime("a", "idle", 10, disposed));
-    pool.insert(fakeRuntime("b", "idle", 20, disposed));
+    await pool.insert(fakeRuntime("a", "idle", 10, disposed));
+    await pool.insert(fakeRuntime("b", "idle", 20, disposed));
     pool.touch("a");
-    pool.insert(fakeRuntime("c", "idle", 30, disposed));
+    await pool.insert(fakeRuntime("c", "idle", 30, disposed));
     // b is oldest idle after touch(a)
     assert.ok(disposed.includes("b"));
     assert.equal(pool.has("a"), true);
@@ -110,15 +116,56 @@ describe("RuntimePool", () => {
     assert.equal(pool.has("b"), false);
   });
 
-  it("throws when full and all busy", () => {
+  it("waits when full and all busy until a session becomes idle", async () => {
     const disposed: string[] = [];
     const pool = new RuntimePool(1);
-    pool.insert(fakeRuntime("busy", "streaming", 1, disposed));
-    assert.throws(
-      () => pool.insert(fakeRuntime("next", "idle", 2, disposed)),
-      /full/,
-    );
-    assert.equal(disposed.length, 0);
+    const statusBox = { status: "streaming" as SessionStatus };
+    await pool.insert(fakeRuntime("busy", "streaming", 1, disposed, statusBox));
+
+    let inserted = false;
+    const pending = pool.insert(fakeRuntime("next", "idle", 2, disposed)).then(() => {
+      inserted = true;
+    });
+    // Still busy: insert must wait (not throw).
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(inserted, false);
     assert.equal(pool.has("busy"), true);
+
+    // Become idle so reclaim can free the slot.
+    statusBox.status = "idle";
+    await pending;
+    assert.equal(inserted, true);
+    assert.ok(disposed.includes("busy"));
+    assert.equal(pool.has("next"), true);
+  });
+
+  it("waits when full until close frees a slot", async () => {
+    const disposed: string[] = [];
+    const pool = new RuntimePool(1);
+    await pool.insert(fakeRuntime("busy", "streaming", 1, disposed));
+
+    let reserved = false;
+    const pending = pool.beginSpawn().then(() => {
+      reserved = true;
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(reserved, false);
+
+    pool.close("busy");
+    await pending;
+    assert.equal(reserved, true);
+    pool.cancelSpawn();
+  });
+
+  it("disposeAll unblocks waiters with a disposed error", async () => {
+    const disposed: string[] = [];
+    const pool = new RuntimePool(1);
+    await pool.insert(fakeRuntime("busy", "streaming", 1, disposed));
+
+    const pending = pool.beginSpawn();
+    await new Promise((r) => setTimeout(r, 50));
+    pool.disposeAll();
+    await assert.rejects(pending, /disposed/i);
+    assert.ok(disposed.includes("busy"));
   });
 });

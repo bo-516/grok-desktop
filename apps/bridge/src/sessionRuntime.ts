@@ -261,7 +261,15 @@ export async function createSessionRuntime(
       cwd,
       lastUsed: Date.now(),
       spawnConfig: opts.spawnConfig,
-      getStatus: (): SessionStatus => client.getSessionState().status,
+      getStatus: (): SessionStatus => {
+        const status = client.getSessionState().status;
+        // session/load replay promotes streaming internally; the pool must
+        // not report Working or the rail/composer look like a live reply.
+        if (client.isReplaying() && status === "streaming") {
+          return "idle";
+        }
+        return status;
+      },
       getSessionState: () => client.getSessionState(),
       prompt: async (text: string, blocks?: ContentBlock[]) => {
         if (blocks && blocks.length > 0) {
@@ -286,6 +294,7 @@ export async function createSessionRuntime(
         await client.compact(sessionId, instruction);
       },
       tokenUsage: async () => client.tokenUsage(sessionId),
+      billing: async () => client.request("_x.ai/billing", {}),
       forkSession: async (opts) => {
         const sourceCwd = (opts?.sourceCwd ?? cwd).trim() || cwd;
         const newCwd = (opts?.newCwd ?? sourceCwd).trim() || sourceCwd;

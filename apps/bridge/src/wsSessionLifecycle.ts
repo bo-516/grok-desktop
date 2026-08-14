@@ -145,7 +145,8 @@ export async function startOrResume(
   const replayGate = createSessionReplayGate(broadcast);
 
   // Reserve capacity before spawn so concurrent start/recovery cannot overshoot.
-  pool.beginSpawn();
+  // When the pool is full and all busy, waits for a free/idle slot (no throw).
+  await pool.beginSpawn();
   let runtime;
   try {
     runtime = await createSessionRuntime({
@@ -258,7 +259,7 @@ export async function startOrResume(
     throw e;
   }
 
-  pool.insert(runtime);
+  await pool.insert(runtime);
   state.focusedSessionId = runtime.sessionId;
   const initial = runtime.getSessionState();
   sessionSeeds.set(runtime.sessionId, initial);

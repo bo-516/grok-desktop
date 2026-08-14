@@ -12,6 +12,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
+  ensureWorkspaceDir,
+  resolveDefaultWorkspaceCwd,
+} from "./defaultWorkspace.js";
+import {
   checkEnvironment,
   poolCapacityFromEnv,
 } from "./environment.js";
@@ -27,11 +31,12 @@ import {
 import { createBridgeHandlers } from "./wsHandlers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "../../..");
-const DEFAULT_CWD = path.resolve(REPO_ROOT, "demo");
 const PORT = resolveListenPort(process.env.BRIDGE_PORT);
 const HOST = process.env.BRIDGE_HOST?.trim() || "127.0.0.1";
-const CWD = process.env.BRIDGE_CWD ?? DEFAULT_CWD;
+/** Dev: monorepo root. Prod: <Documents>/Grok. BRIDGE_CWD wins. */
+const CWD = ensureWorkspaceDir(
+  resolveDefaultWorkspaceCwd({ startDir: __dirname }),
+);
 const ALWAYS_APPROVE = process.env.BRIDGE_ALWAYS_APPROVE === "1";
 const POOL_CAPACITY = poolCapacityFromEnv();
 const BRIDGE_TOKEN = resolveBridgeToken(process.env.BRIDGE_TOKEN);

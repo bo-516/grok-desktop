@@ -3,6 +3,7 @@
  */
 
 import * as cli from "./cliCommands.js";
+import { readSessionHistoryFromDisk } from "./sessionDiskHistory.js";
 import type { PromptEntry, PromptScope } from "./userPromptsFormat.js";
 import {
   promptsClear,
@@ -28,6 +29,11 @@ export async function dispatchCliCommand(
       return cli.inspectJson(cwd);
     case "sessions_list":
       return cli.sessionsList(cwd);
+    case "session_history":
+      return readSessionHistoryFromDisk({
+        sessionId: String(args.sessionId ?? ""),
+        cwd: typeof args.cwd === "string" ? args.cwd : cwd,
+      });
     case "sessions_search":
       return cli.sessionsSearch(String(args.query ?? ""), cwd);
     case "sessions_delete":

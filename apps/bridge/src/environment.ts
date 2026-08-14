@@ -12,9 +12,9 @@ import { isGrokVersionSupported } from "./versionCheck.js";
 
 /** Default pool capacity (one process per session); override with BRIDGE_POOL_CAPACITY. */
 export function poolCapacityFromEnv(): number {
-  const raw = Number(process.env.BRIDGE_POOL_CAPACITY ?? 4);
+  const raw = Number(process.env.BRIDGE_POOL_CAPACITY ?? 8);
   if (!Number.isFinite(raw) || raw < 1) {
-    return 4;
+    return 8;
   }
   return Math.min(Math.floor(raw), 16);
 }

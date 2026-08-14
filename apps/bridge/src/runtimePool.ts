@@ -1,6 +1,7 @@
 /**
  * Multi-session runtime pool: one ACP session = one grok child process.
  * Idle slots are reclaimed by lastUsed LRU; busy (streaming / waiting_permission) are never evicted.
+ * When full and all busy, beginSpawn/insert wait (poll) for room instead of throwing.
  */
 
 import type {
@@ -10,6 +11,19 @@ import type {
 } from "@grok-desktop/acp-core";
 import type { PoolEntry } from "./protocol.js";
 import type { SessionSpawnConfig } from "./sessionRuntime.js";
+
+/** How often waiters recheck for idle reclaim while the pool is full. */
+const ROOM_POLL_MS = 100;
+
+/**
+ * Sleep helper for capacity waiters (does not block the event loop).
+ * @param ms Duration in milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /** One runtime handle resident in the pool. */
 export type PooledRuntime = {
@@ -29,6 +43,11 @@ export type PooledRuntime = {
   setMode?: (modeId: string) => Promise<void>;
   compact?: (instruction?: string) => Promise<void>;
   tokenUsage?: () => Promise<unknown>;
+  /**
+   * Account billing / weekly remaining via `_x.ai/billing`.
+   * @returns Raw grok-build credits-config bag.
+   */
+  billing?: () => Promise<unknown>;
   /**
    * Branch this session into a peer via `_x.ai/session/fork`.
    * @param opts Optional source/new cwd overrides; defaults to this runtime cwd.
@@ -65,6 +84,7 @@ export function pickLruIdleVictim(
 
 /**
  * RuntimePool: Map insertion order plus delete/re-insert on touch for approximate LRU order.
+ * Full + all-busy waits (polls getStatus) instead of throwing.
  */
 export class RuntimePool {
   /** Max concurrent resident processes. */
@@ -75,6 +95,8 @@ export class RuntimePool {
    * Counted against capacity so concurrent start/recovery cannot overshoot.
    */
   private pendingSpawns = 0;
+  /** Set by disposeAll so waiters exit instead of blocking forever. */
+  private disposed = false;
 
   /**
    * @param capacity Capacity, at least 1.
@@ -117,11 +139,13 @@ export class RuntimePool {
 
   /**
    * Reserve a pool slot before spawning a child process.
-   * Reclaims idle LRU when needed; throws when all resident sessions are busy.
+   * Reclaims idle LRU when needed; when all residents are busy, waits until a
+   * slot frees (idle reclaim via status poll, or close) or disposeAll runs.
    * Pair with {@link insert} (consumes the reservation) or {@link cancelSpawn}.
+   * @throws When the pool was disposed while waiting.
    */
-  beginSpawn(): void {
-    this.ensureRoomIncludingPending();
+  async beginSpawn(): Promise<void> {
+    await this.waitForRoomIncludingPending();
     this.pendingSpawns += 1;
   }
 
@@ -137,10 +161,11 @@ export class RuntimePool {
   /**
    * Insert or replace a runtime; if over capacity, reclaim idle LRU first.
    * Consumes one pending spawn reservation when present.
+   * When full and all busy, waits for room (same policy as beginSpawn).
    * @param runtime Handle after handshake (sessionId must be the real ACP id).
-   * @throws When the pool is full and no idle entry can be reclaimed.
+   * @throws When the pool was disposed while waiting.
    */
-  insert(runtime: PooledRuntime): void {
+  async insert(runtime: PooledRuntime): Promise<void> {
     if (this.map.has(runtime.sessionId)) {
       const old = this.map.get(runtime.sessionId);
       if (old && old !== runtime) {
@@ -152,7 +177,7 @@ export class RuntimePool {
     if (this.pendingSpawns > 0) {
       this.pendingSpawns -= 1;
     }
-    this.ensureCapacityForInsert();
+    await this.waitForCapacityForInsert();
     runtime.lastUsed = Date.now();
     this.map.set(runtime.sessionId, runtime);
   }
@@ -172,12 +197,14 @@ export class RuntimePool {
     return true;
   }
 
-  /** Close all child processes. */
+  /** Close all child processes and mark the pool disposed so waiters exit. */
   disposeAll(): void {
+    this.disposed = true;
     for (const rt of this.map.values()) {
       rt.dispose();
     }
     this.map.clear();
+    this.pendingSpawns = 0;
   }
 
   /**
@@ -198,29 +225,52 @@ export class RuntimePool {
   }
 
   /**
-   * Free a resident slot for insert: reclaim idle LRU only (not pending spawns).
-   * @throws When there is no free slot and nothing idle to reclaim.
+   * Wait until map.size < capacity after reclaiming idle victims.
+   * @throws When disposed while waiting.
    */
-  private ensureCapacityForInsert(): void {
-    while (this.map.size >= this.capacity) {
-      this.reclaimOneIdleOrThrow();
+  private async waitForCapacityForInsert(): Promise<void> {
+    for (;;) {
+      if (this.disposed) {
+        throw new Error("RuntimePool disposed");
+      }
+      while (this.map.size >= this.capacity) {
+        if (!this.reclaimOneIdle()) {
+          break;
+        }
+      }
+      if (this.map.size < this.capacity) {
+        return;
+      }
+      await sleep(ROOM_POLL_MS);
     }
   }
 
   /**
-   * Free room counting in-flight {@link beginSpawn} reservations.
-   * @throws When capacity is exhausted by residents + pending spawns.
+   * Wait until residents + pendingSpawns < capacity after reclaiming idle victims.
+   * @throws When disposed while waiting.
    */
-  private ensureRoomIncludingPending(): void {
-    while (this.map.size + this.pendingSpawns >= this.capacity) {
-      this.reclaimOneIdleOrThrow();
+  private async waitForRoomIncludingPending(): Promise<void> {
+    for (;;) {
+      if (this.disposed) {
+        throw new Error("RuntimePool disposed");
+      }
+      while (this.map.size + this.pendingSpawns >= this.capacity) {
+        if (!this.reclaimOneIdle()) {
+          break;
+        }
+      }
+      if (this.map.size + this.pendingSpawns < this.capacity) {
+        return;
+      }
+      await sleep(ROOM_POLL_MS);
     }
   }
 
   /**
-   * Evict one idle LRU victim or throw when the pool is all-busy.
+   * Evict one idle LRU victim.
+   * @returns true when a victim was removed; false when all residents are busy.
    */
-  private reclaimOneIdleOrThrow(): void {
+  private reclaimOneIdle(): boolean {
     const victimId = pickLruIdleVictim(
       [...this.map.values()].map((rt) => ({
         sessionId: rt.sessionId,
@@ -229,10 +279,9 @@ export class RuntimePool {
       })),
     );
     if (!victimId) {
-      throw new Error(
-        `RuntimePool full (${this.capacity}): all sessions busy; close one or wait for idle`,
-      );
+      return false;
     }
     this.close(victimId);
+    return true;
   }
 }
