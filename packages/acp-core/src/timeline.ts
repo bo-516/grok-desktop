@@ -7,6 +7,11 @@
  */
 
 import type { SessionState, SessionUpdate } from "./types.js";
+import {
+  applyLiveContextOccupancy,
+  stampLiveContextTokens,
+} from "./sessionTokenUsage.js";
+import { applySessionUpdateKind } from "./timelineApply.js";
 
 export { nextTimelineId, resetTimelineIdCounter } from "./timelineId.js";
 export {
@@ -42,19 +47,28 @@ export {
   replaceTimelineItem,
   tryAbsorbEchoIntoSeedTextRow,
 } from "./timelineTextMerge.js";
-export { applySessionUpdate } from "./timelineApply.js";
 export {
   applyOrchestrationUpdate,
   isOrchestrationUpdate,
 } from "./timelineOrchestration.js";
 export {
+  applyLiveContextOccupancy,
+  contextTokensForWindow,
   contextUsagePercent,
+  mergeTurnUsagePreservingOccupancy,
   parsePromptResultUsage,
   parseTurnCompletedUsage,
   parseUsageBag,
+  readLiveContextTokens,
+  stampLiveContextTokens,
   turnCompletedUpdateFromUsage,
   type SessionTokenUsage,
 } from "./sessionTokenUsage.js";
+export {
+  hasLiveContextOccupancy,
+  parseTokenUsageRpc,
+  parseUsageUpdate,
+} from "./sessionTokenUsageRpc.js";
 export {
   SPAWN_SUBAGENT_TOOL,
   WAIT_SUBAGENT_TOOL,
@@ -67,6 +81,9 @@ export {
   parseSpawnedSubagentId,
   waitBarrierTaskIds,
   sanitizeToolRawInput,
+  spawnCardDescription,
+  spawnCardType,
+  linkSpawnCardIfReady,
   readToolMeta,
   readToolRawInput,
 } from "./subagentLink.js";
@@ -74,6 +91,8 @@ export {
 /**
  * Extract a SessionUpdate from a session/update notification params object.
  * Accepts both `{ update: {...} }` and a bare update object.
+ * Copies `params._meta.totalTokens` onto the update so relay (which forwards
+ * only the inner update) still carries live context occupancy.
  * @param params Notification params or bare update; invalid shapes → null.
  * @returns Typed update or null when sessionUpdate discriminant is missing.
  */
@@ -89,7 +108,31 @@ export function extractSessionUpdate(params: unknown): SessionUpdate | null {
   if (typeof update.sessionUpdate !== "string") {
     return null;
   }
-  return update as SessionUpdate;
+  // Bare-update callers pass the update as params; p._meta is then the
+  // update's own meta (tool vendor bag). Only stamp from the envelope
+  // when `update` is a nested field — otherwise we would copy tool meta.
+  const paramsMeta = Object.prototype.hasOwnProperty.call(p, "update")
+    ? p._meta
+    : undefined;
+  return stampLiveContextTokens(update, paramsMeta) as SessionUpdate;
+}
+
+/**
+ * Immutably apply one ACP `session/update`, then merge live occupancy.
+ * Kind reduce lives in applySessionUpdateKind; occupancy is applied here so
+ * every return path (including early no-ops) can still refresh the ring.
+ * @param state Current session snapshot; not mutated in place.
+ * @param update Event already extracted by extractSessionUpdate.
+ * @returns New session state shared by UI, bridge, and tests.
+ */
+export function applySessionUpdate(
+  state: SessionState,
+  update: SessionUpdate,
+): SessionState {
+  return applyLiveContextOccupancy(
+    applySessionUpdateKind(state, update),
+    update as { _meta?: unknown },
+  );
 }
 
 /**

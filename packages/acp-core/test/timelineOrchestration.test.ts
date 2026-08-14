@@ -130,6 +130,23 @@ describe("timeline orchestration", () => {
     assert.equal(card?.tokensUsed, 29295);
   });
 
+  it("subagent_spawned accepts camelCase identity fields", () => {
+    const state = applySessionUpdate(createSessionState({ id: "parent" }), {
+      sessionUpdate: "subagent_spawned",
+      subagentId: "camel-child",
+      childSessionId: "camel-child",
+      parentPromptId: "round-1",
+      subagentType: "explore",
+      description: "camel case spawn",
+    });
+    const card = state.subagents?.["camel-child"];
+    assert.equal(card?.childSessionId, "camel-child");
+    assert.equal(card?.parentPromptId, "round-1");
+    assert.equal(card?.type, "explore");
+    assert.equal(card?.description, "camel case spawn");
+    assert.equal(card?.status, "running");
+  });
+
   it("missing subagent_id / goal_id returns prior state without throw", () => {
     const state = createSessionState({ id: "parent" });
     const afterSub = applySessionUpdate(state, {
@@ -176,6 +193,42 @@ describe("timeline orchestration", () => {
     assert.equal(state.goal?.phase, "idle");
     assert.equal(state.goal?.status, "complete");
     assert.equal(state.goal?.lastEvent, "goal_complete");
+  });
+
+  it("goal_updated keeps last_event_detail across omit frames and new ids drop it", () => {
+    let state = createSessionState({ id: "parent" });
+    const detail =
+      "All seven checklist items and four ACs are implemented and gated.";
+    state = applySessionUpdate(state, {
+      ...GOAL,
+      last_event: "worker_completed",
+      last_event_detail: detail,
+    });
+    assert.equal(state.goal?.lastEvent, "worker_completed");
+    assert.equal(state.goal?.lastEventDetail, detail);
+    const timelineLen = state.timeline.length;
+    state = applySessionUpdate(state, {
+      ...GOAL,
+      last_event: "worker_completed",
+      status: "user_paused",
+      phase: "idle",
+    });
+    assert.equal(state.goal?.status, "user_paused");
+    assert.equal(state.goal?.lastEventDetail, detail);
+    assert.equal(state.timeline.length, timelineLen);
+    state = applySessionUpdate(state, {
+      ...GOAL,
+      last_event: "worker_completed",
+      last_event_detail: "Shorter replacement summary.",
+    });
+    assert.equal(state.goal?.lastEventDetail, "Shorter replacement summary.");
+    state = applySessionUpdate(state, {
+      ...GOAL,
+      goal_id: "a-different-goal",
+      last_event: "goal_created",
+    });
+    assert.equal(state.goal?.goalId, "a-different-goal");
+    assert.equal(state.goal?.lastEventDetail, undefined);
   });
 
   it("task_backgrounded then task_completed merges same taskId from task_snapshot", () => {
@@ -275,6 +328,10 @@ description: goal plan writer`;
       content: [{ type: "content", content: { type: "text", text: spawnBody } }],
     });
     assert.equal(state.subagentLinks?.[SPAWNED.subagent_id], toolCallId);
+    const stub = state.subagents?.[SPAWNED.subagent_id];
+    assert.equal(stub?.status, "running");
+    assert.equal(stub?.childSessionId, SPAWNED.subagent_id);
+    assert.equal(stub?.toolCallId, toolCallId);
     const lenAfterLink = state.timeline.length;
     state = applySessionUpdate(state, { ...SPAWNED });
     assert.equal(state.timeline.length, lenAfterLink);

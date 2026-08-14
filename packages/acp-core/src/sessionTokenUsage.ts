@@ -1,24 +1,33 @@
 /**
- * Pure helpers for agent turn_completed usage rollups.
- * Purpose: parse the real grok-build `usage` bag into SessionState.tokenUsage
- * without I/O so reducers and unit tests share one fault-tolerant path.
+ * Pure helpers for agent usage rollups and live context-window occupancy.
+ * Purpose: parse grok-build `usage` bags and `params._meta.totalTokens` into
+ * SessionState.tokenUsage without I/O so reducers and unit tests share one path.
  * Boundary: never invent zeros for missing counters — omit the snapshot instead.
  * Does not import types.ts (SessionTokenUsage is defined here to avoid a cycle).
  */
 
 /**
- * Last completed turn's token usage from `turn_completed.usage` or
- * `session/prompt` result `_meta` (same counter names).
- * Real grok-build shape (stable): input/output/total + optional cache/reasoning.
+ * Last known token usage for the composer context ring and turn rollup.
+ * `inputTokens` / `outputTokens` / `totalTokens` are the last completed turn's
+ * billed counters (`turn_completed.usage` or prompt `_meta`). Those sums can
+ * exceed the model window across multiple modelCalls — they are not occupancy.
+ * `contextTokensUsed` is the live window fill from `params._meta.totalTokens`
+ * (matches on-disk `signals.json.contextTokensUsed` at turn end).
  * Unreported optional fields stay undefined — never collapse to 0 in the parser.
  */
 export type SessionTokenUsage = {
-  /** Tokens in the model input (best proxy for context-window fill). */
+  /** Billed input tokens for the last completed turn (sum across modelCalls). */
   inputTokens: number;
   /** Tokens the model generated this turn. */
   outputTokens: number;
   /** input + output for the completed turn (may span multiple modelCalls). */
   totalTokens: number;
+  /**
+   * Live context-window occupancy from grok-build `params._meta.totalTokens`.
+   * Updated mid-turn as tools / model calls land; preferred over inputTokens
+   * for the composer ring. Absent until the first stamped live update.
+   */
+  contextTokensUsed?: number;
   /** Cache hits read this turn, when the agent reports them. */
   cachedReadTokens?: number;
   /** Reasoning/thinking tokens, when the agent reports them. */
@@ -77,11 +86,15 @@ export function parseUsageBag(raw: unknown): SessionTokenUsage | null {
   const reasoningTokens = readNonNegNumber(bag.reasoningTokens);
   const modelCalls = readNonNegNumber(bag.modelCalls);
   const numTurns = readNonNegNumber(bag.numTurns);
+  const contextTokensUsed = readNonNegNumber(bag.contextTokensUsed);
   const out: SessionTokenUsage = {
     inputTokens,
     outputTokens,
     totalTokens,
   };
+  if (contextTokensUsed !== undefined) {
+    out.contextTokensUsed = contextTokensUsed;
+  }
   if (cachedReadTokens !== undefined) {
     out.cachedReadTokens = cachedReadTokens;
   }
@@ -171,6 +184,9 @@ export function turnCompletedUpdateFromUsage(
   if (usage.numTurns !== undefined) {
     bag.numTurns = usage.numTurns;
   }
+  if (usage.contextTokensUsed !== undefined) {
+    bag.contextTokensUsed = usage.contextTokensUsed;
+  }
   return {
     sessionUpdate: "turn_completed",
     usage: bag,
@@ -178,9 +194,32 @@ export function turnCompletedUpdateFromUsage(
 }
 
 /**
- * Context-window fill ratio for the last completed turn.
- * Uses `inputTokens` (what the model actually saw) over the advertised limit.
- * @param usage Last turn usage; null/undefined → null.
+ * Occupancy for the context ring: live `_meta.totalTokens` when present,
+ * otherwise last-turn billed `inputTokens` (older snapshots / first paint).
+ * @param usage Session token snapshot; null/undefined → null.
+ * @returns Non-negative token count, or null when usage is missing.
+ */
+export function contextTokensForWindow(
+  usage: SessionTokenUsage | null | undefined,
+): number | null {
+  if (!usage) {
+    return null;
+  }
+  if (
+    typeof usage.contextTokensUsed === "number" &&
+    Number.isFinite(usage.contextTokensUsed) &&
+    usage.contextTokensUsed > 0
+  ) {
+    return usage.contextTokensUsed;
+  }
+  return usage.inputTokens;
+}
+
+/**
+ * Context-window fill ratio for the composer ring.
+ * Prefers live occupancy (`contextTokensUsed`) so a multi-call turn does not
+ * flash billed `inputTokens` (often larger than the model window).
+ * @param usage Latest usage snapshot; null/undefined → null.
  * @param contextLimit Model totalContextTokens; ≤0 or missing → null.
  * @returns Percentage in [0, ∞); callers clamp the ring fill to 100.
  */
@@ -188,8 +227,127 @@ export function contextUsagePercent(
   usage: SessionTokenUsage | null | undefined,
   contextLimit: number | null | undefined,
 ): number | null {
-  if (!usage || contextLimit == null || !(contextLimit > 0)) {
+  const used = contextTokensForWindow(usage);
+  if (used == null || contextLimit == null || !(contextLimit > 0)) {
     return null;
   }
-  return (usage.inputTokens / contextLimit) * 100;
+  return (used / contextLimit) * 100;
+}
+
+/**
+ * Read live occupancy from an extracted update's `_meta.totalTokens`.
+ * grok-build stamps this on nearly every `session/update` params._meta; extract
+ * copies it onto the update so the desktop reducer still sees it after relay.
+ * @param update Extracted SessionUpdate or any bag that may carry `_meta`.
+ * @returns Finite occupancy ≥ 0, or undefined when absent / invalid.
+ */
+export function readLiveContextTokens(update: {
+  _meta?: unknown;
+}): number | undefined {
+  return readLiveContextTokensFromMeta(update._meta);
+}
+
+/**
+ * Copy `params._meta.totalTokens` onto the extracted update's `_meta`.
+ * The bridge relays only the inner `update` object; without this stamp the
+ * desktop reduce never sees mid-turn occupancy.
+ * @param update Inner sessionUpdate bag (may already have tool `_meta`).
+ * @param paramsMeta Notification-level `_meta` from session/update params.
+ * @returns Same object when there is nothing to stamp; a shallow copy otherwise.
+ */
+export function stampLiveContextTokens(
+  update: Record<string, unknown>,
+  paramsMeta: unknown,
+): Record<string, unknown> {
+  const live = readLiveContextTokensFromMeta(paramsMeta);
+  if (live === undefined) {
+    return update;
+  }
+  const existing = update._meta;
+  const existingRec =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : null;
+  if (existingRec && existingRec.totalTokens === live) {
+    return update;
+  }
+  return {
+    ...update,
+    _meta: existingRec
+      ? { ...existingRec, totalTokens: live }
+      : { totalTokens: live },
+  };
+}
+
+/**
+ * Keep mid-turn occupancy when a `turn_completed` billed bag arrives.
+ * turn_completed itself has no `_meta.totalTokens`; overwriting would drop
+ * occupancy and the ring would jump to billed input (can exceed the window).
+ * A previous occupancy of 0 is treated as unset — early `_meta.totalTokens: 0`
+ * stamps must not mask a later billed bag or a real occupancy backfill.
+ * @param usage Fresh billed snapshot from parseTurnCompletedUsage.
+ * @param previous Current session.tokenUsage (may already hold occupancy).
+ * @returns usage, or a copy with previous contextTokensUsed restored.
+ */
+export function mergeTurnUsagePreservingOccupancy(
+  usage: SessionTokenUsage,
+  previous: SessionTokenUsage | undefined,
+): SessionTokenUsage {
+  if (usage.contextTokensUsed !== undefined) {
+    return usage;
+  }
+  const occ = previous?.contextTokensUsed;
+  if (occ === undefined || occ <= 0) {
+    return usage;
+  }
+  return { ...usage, contextTokensUsed: occ };
+}
+
+/**
+ * Read a non-negative `totalTokens` off a `_meta` record.
+ * @param meta Untrusted `_meta` bag.
+ * @returns Finite number ≥ 0, or undefined when absent / invalid.
+ */
+function readLiveContextTokensFromMeta(meta: unknown): number | undefined {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return undefined;
+  }
+  return readNonNegNumber((meta as Record<string, unknown>).totalTokens);
+}
+
+/**
+ * Copy live occupancy from `_meta.totalTokens` onto tokenUsage when it changed.
+ * Structural on purpose — this module must not import SessionState (cycle).
+ * No-op when the stamp is missing or already applied so empty chunks keep
+ * the same state reference.
+ * @param state Session after the kind-specific reduce (needs tokenUsage).
+ * @param update Extracted update (may carry stamped `_meta.totalTokens`).
+ * @returns state, or a shallow copy with tokenUsage.contextTokensUsed updated.
+ */
+export function applyLiveContextOccupancy<
+  T extends { tokenUsage?: SessionTokenUsage },
+>(state: T, update: { _meta?: unknown }): T {
+  const live = readLiveContextTokens(update);
+  if (live === undefined) {
+    return state;
+  }
+  const prev = state.tokenUsage;
+  if (prev?.contextTokensUsed === live) {
+    return state;
+  }
+  // Do not invent a zero-only snapshot before the first real stamp — that
+  // would mark hasUsage and pin the composer ring at 0% for the rest of the
+  // turn when later envelopes omit totalTokens (session/load replay).
+  if (live === 0 && !prev) {
+    return state;
+  }
+  const tokenUsage: SessionTokenUsage = prev
+    ? { ...prev, contextTokensUsed: live }
+    : {
+        inputTokens: live,
+        outputTokens: 0,
+        totalTokens: live,
+        contextTokensUsed: live,
+      };
+  return { ...state, tokenUsage };
 }

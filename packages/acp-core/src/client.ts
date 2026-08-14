@@ -35,6 +35,7 @@ import type {
 import { runAcpHandshake } from "./clientHandshake.js";
 import { dispatchAcpMessage } from "./clientDispatch.js";
 import { EventIdDedupe } from "./eventIdDedupe.js";
+import { shouldArmQuietSettle } from "./sessionLiveStatus.js";
 
 export type { AcpTransport } from "./transport.js";
 
@@ -96,6 +97,12 @@ export class AcpClient {
   private state: SessionState;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private promptInFlight = false;
+  /**
+   * True once this process has sent session/prompt.
+   * session/load of a still-running turn has no local prompt RPC; quiet
+   * settle must not flip that turn idle on every thought/tool gap.
+   */
+  private promptOriginated = false;
   private disposed = false;
   /** Set-based eventId ring so redelivered session/update does not double-apply. */
   private readonly eventDedupe = new EventIdDedupe();
@@ -235,6 +242,7 @@ export class AcpClient {
     this.setState(appendUserPrompt(this.state, blocks));
     this.setState(markPromptStarted(this.state));
     this.promptInFlight = true;
+    this.promptOriginated = true;
     try {
       const result = (await this.request("session/prompt", {
         sessionId,
@@ -280,7 +288,7 @@ export class AcpClient {
     this.transport.write(
       encodeNotification("session/cancel", { sessionId }),
     );
-    this.scheduleSettle();
+    this.scheduleSettle({ force: true });
   }
 
   /**
@@ -339,7 +347,23 @@ export class AcpClient {
     this.onStateChange?.(next);
   }
 
-  private scheduleSettle(): void {
+  /**
+   * Arm the idle quiet window.
+   * After session/load this process has not sent a prompt; skip the short
+   * quiet settle so a still-running turn does not flicker Worked on every
+   * tool gap. `{ force: true }` is turn_completed / cancel.
+   * @param opts.force Settle even when no local prompt was sent.
+   */
+  private scheduleSettle(opts?: { force?: boolean }): void {
+    if (
+      !shouldArmQuietSettle({
+        force: opts?.force,
+        promptOriginated: this.promptOriginated,
+        promptInFlight: this.promptInFlight,
+      })
+    ) {
+      return;
+    }
     if (this.settleTimer) {
       clearTimeout(this.settleTimer);
     }
@@ -376,7 +400,7 @@ export class AcpClient {
         getSessionState: () => this.getSessionState(),
         replaceSessionState: (state) => this.replaceSessionState(state),
         write: (line) => this.transport.write(line),
-        scheduleSettle: () => this.scheduleSettle(),
+        scheduleSettle: (settleOpts) => this.scheduleSettle(settleOpts),
         isPromptInFlight: () => this.promptInFlight,
         autoPermissionOptionId: this.autoPermissionOptionId,
         respondPermission: (optionId) => this.respondPermission(optionId),

@@ -53,8 +53,12 @@ export type DispatchHost = {
   replaceSessionState: (state: SessionState) => void;
   /** Write a transport line. */
   write: (line: string) => void;
-  /** Quiet settle after streaming activity. */
-  scheduleSettle: () => void;
+  /**
+   * Quiet settle after streaming activity.
+   * Pass `{ force: true }` for turn_completed / cancel so a resumed
+   * in-progress turn (no local session/prompt) can still go idle.
+   */
+  scheduleSettle: (opts?: { force?: boolean }) => void;
   /** Whether a prompt RPC is in flight. */
   isPromptInFlight: () => boolean;
   /** Auto-respond option id, or null. */
@@ -138,8 +142,12 @@ export function dispatchAcpMessage(
         host.replaceSessionState(
           applySessionUpdate(host.getSessionState(), update),
         );
-        // activity delays settle
-        if (
+        // turn_completed is the real end of a resumed-in-flight turn
+        // (this process never sent session/prompt). Force settle so
+        // Working chrome does not stick after the agent stops.
+        if (update.sessionUpdate === "turn_completed") {
+          host.scheduleSettle({ force: true });
+        } else if (
           host.isPromptInFlight() ||
           host.getSessionState().status === "streaming"
         ) {

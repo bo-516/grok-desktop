@@ -9,7 +9,7 @@
  * Pure — no I/O.
  */
 
-import type { ToolCallCard } from "./types.js";
+import type { SessionState, SubagentCard, ToolCallCard } from "./types.js";
 
 /** Vendor meta key carrying grok-build's tool descriptor. */
 const VENDOR_TOOL_META_KEY = "x.ai/tool";
@@ -171,7 +171,109 @@ export function sanitizeToolRawInput(
   if (typeof src.task_id === "string" && src.task_id.trim()) {
     out.task_id = src.task_id.trim();
   }
+  // Role type from spawn input (general-purpose / explore / plan).
+  if (typeof src.subagent_type === "string" && src.subagent_type.trim()) {
+    out.subagent_type = src.subagent_type.trim();
+  }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Agent-written spawn description for a stub / roster card.
+ * Prefers sanitized `rawInput.description`; falls back to a non-generic title.
+ * @param card Spawn tool card (may lack both fields before the first update).
+ * @returns Trimmed label, or empty when nothing usable is on the card.
+ */
+export function spawnCardDescription(card: ToolCallCard): string {
+  const raw = card.rawInput?.description;
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  const title = card.title?.trim() ?? "";
+  if (title && title !== SPAWN_SUBAGENT_TOOL) {
+    return title;
+  }
+  return "";
+}
+
+/**
+ * Spawn `subagent_type` from sanitized rawInput.
+ * @param card Spawn tool card.
+ * @returns Type string, or empty when the agent omitted it.
+ */
+export function spawnCardType(card: ToolCallCard): string {
+  const raw = card.rawInput?.subagent_type;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : "";
+}
+
+/**
+ * True when the spawn tool itself failed (child never started).
+ * A completed spawn only means the child started — not that it finished.
+ * @param card Spawn tool card status.
+ */
+function spawnToolFailed(card: ToolCallCard): boolean {
+  const status = String(card.status ?? "").trim().toLowerCase();
+  return status === "failed" || status === "error";
+}
+
+/**
+ * Record the spawn join key and ensure an Agents-rail card exists.
+ *
+ * Spawn-tool completion writes `subagent_id:` into the body. That is enough
+ * to list the child even when `_x.ai/session/update` `subagent_spawned` is
+ * late, dropped, or omitted from session/load replay. First link write wins.
+ *
+ * @param state Session snapshot after the tool card was patched.
+ * @param toolCallId Timeline tool card id.
+ * @param card Patched card (ignored when it is not a spawn).
+ * @returns State with `subagentLinks` / `subagents` updated, or the input
+ *   state when the card is not a completed spawn with an id line.
+ */
+export function linkSpawnCardIfReady(
+  state: SessionState,
+  toolCallId: string,
+  card: ToolCallCard,
+): SessionState {
+  if (!isSpawnSubagentCard(card)) {
+    return state;
+  }
+  const spawnedId = parseSpawnedSubagentId(card.content);
+  if (!spawnedId) {
+    return state;
+  }
+  // First link write wins — a later spawn card must not steal the join key.
+  const existingLink = state.subagentLinks?.[spawnedId];
+  const subagentLinks = existingLink
+    ? (state.subagentLinks ?? {})
+    : { ...(state.subagentLinks ?? {}), [spawnedId]: toolCallId };
+  const existing = state.subagents?.[spawnedId];
+  if (!existing) {
+    const stub: SubagentCard = {
+      subagentId: spawnedId,
+      // grok-build uses the same id for the child session.
+      childSessionId: spawnedId,
+      type: spawnCardType(card),
+      description: spawnCardDescription(card),
+      status: spawnToolFailed(card) ? "failed" : "running",
+      toolCallId,
+    };
+    return {
+      ...state,
+      subagentLinks,
+      subagents: { ...(state.subagents ?? {}), [spawnedId]: stub },
+    };
+  }
+  if (existing.toolCallId) {
+    return existingLink ? state : { ...state, subagentLinks };
+  }
+  return {
+    ...state,
+    subagentLinks,
+    subagents: {
+      ...(state.subagents ?? {}),
+      [spawnedId]: { ...existing, toolCallId },
+    },
+  };
 }
 
 /**

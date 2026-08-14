@@ -6,9 +6,11 @@
 import type {
   AvailableCommand,
   AvailableModel,
+  AvailableReasoningEffort,
   InitializeResult,
   SessionState,
 } from "./types.js";
+import { mergeAvailableModelsPreferContext } from "./sessionStateMerge.js";
 
 /** Display data that can be projected onto SessionState immediately after initialize. */
 export type InitializeSessionMetadata = {
@@ -103,14 +105,73 @@ export function normalizeAvailableModels(value: unknown): AvailableModel[] {
     const totalContextTokens = readPositiveInt(
       meta?.totalContextTokens ?? record.totalContextTokens,
     );
+    const reasoningEfforts = readReasoningEfforts(
+      meta?.reasoning_efforts ??
+        meta?.reasoningEfforts ??
+        record.reasoning_efforts ??
+        record.reasoningEfforts,
+    );
     const model: AvailableModel = name ? { id, name } : { id };
     if (totalContextTokens !== undefined) {
       model.totalContextTokens = totalContextTokens;
+    }
+    if (reasoningEfforts) {
+      model.reasoningEfforts = reasoningEfforts;
     }
     models.push(model);
   }
 
   return models;
+}
+
+/**
+ * Parse grok-build `_meta.reasoning_efforts` (or a top-level alias) into catalog rows.
+ * Accepts `{ id|value, label|name, default? }` objects and bare id strings.
+ * @param value Untrusted array from initialize / session model catalog.
+ * @returns Deduped rows, or undefined when nothing valid was present.
+ */
+function readReasoningEfforts(
+  value: unknown,
+): AvailableReasoningEffort[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+  const out: AvailableReasoningEffort[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item === "string") {
+      const effortId = item.trim();
+      if (!effortId || seen.has(effortId)) {
+        continue;
+      }
+      seen.add(effortId);
+      out.push({ id: effortId });
+      continue;
+    }
+    const rec = asRecord(item);
+    if (!rec) {
+      continue;
+    }
+    const effortId = String(rec.id ?? rec.value ?? "").trim();
+    if (!effortId || seen.has(effortId)) {
+      continue;
+    }
+    seen.add(effortId);
+    const labelRaw = rec.label ?? rec.name;
+    const label =
+      typeof labelRaw === "string" && labelRaw.trim()
+        ? labelRaw.trim()
+        : undefined;
+    const row: AvailableReasoningEffort = { id: effortId };
+    if (label) {
+      row.label = label;
+    }
+    if (rec.default === true) {
+      row.default = true;
+    }
+    out.push(row);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -266,23 +327,28 @@ export function preferCommands(
 }
 
 /**
- * Pick availableModels after session/load: loaded list, then current, then init.
- * @param loaded From session/load result.
+ * Pick availableModels after session/new|load: loaded list, then current, then init.
+ * Thin session catalogs often keep names / efforts but drop totalContextTokens;
+ * fill those gaps from initialize so the composer tip can show "0 of N filled"
+ * instead of the "No turns yet" fallback.
+ * @param loaded From session/new or session/load result.
  * @param current Existing client state.
- * @param fromInit From initialize metadata.
+ * @param fromInit From initialize metadata (source of missing window / effort).
  */
 export function resolveAvailableModels(
   loaded: NonNullable<SessionState["availableModels"]>,
   current: SessionState["availableModels"] | undefined,
   fromInit: NonNullable<SessionState["availableModels"]>,
 ): NonNullable<SessionState["availableModels"]> {
-  if (loaded.length > 0) {
-    return loaded;
-  }
-  if (current && current.length > 0) {
-    return current;
-  }
-  return fromInit;
+  const picked =
+    loaded.length > 0
+      ? loaded
+      : current && current.length > 0
+        ? current
+        : fromInit;
+  return (
+    mergeAvailableModelsPreferContext(picked, fromInit) ?? picked
+  );
 }
 
 /**

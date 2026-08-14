@@ -122,6 +122,42 @@ describe("timeline / tool patch-merge", () => {
       assert.equal(state.timeline[0].text, "think more");
       assert.equal(state.timeline[0].collapsed, true);
     }
+    // Idle hydrate (session/load) must become live when thoughts resume.
+    assert.equal(state.status, "streaming");
+  });
+
+  it("tool_call after idle hydrate restores streaming", () => {
+    let state = createSessionState({ id: "s1" });
+    assert.equal(state.status, "idle");
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call",
+      toolCallId: "tc-live",
+      title: "read foo.ts",
+      kind: "read",
+      status: "in_progress",
+    });
+    assert.equal(state.status, "streaming");
+    state = applySessionUpdate(state, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tc-live",
+      status: "completed",
+    });
+    assert.equal(state.status, "streaming");
+  });
+
+  it("live activity does not override waiting_permission", () => {
+    let state = createSessionState({ id: "s1" });
+    state = setPendingPermission(state, {
+      requestId: 1,
+      sessionId: "s1",
+      toolCall: { toolCallId: "t" },
+      options: [],
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "still thinking" },
+    });
+    assert.equal(state.status, "waiting_permission");
   });
 
   it("completes Thinking when the agent starts its visible answer", () => {
@@ -172,6 +208,21 @@ describe("timeline / tool patch-merge", () => {
       },
     });
     assert.equal(u?.sessionUpdate, "agent_message_chunk");
+  });
+
+  it("extractSessionUpdate stamps envelope totalTokens onto update _meta", () => {
+    const u = extractSessionUpdate({
+      sessionId: "s",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { text: "x" },
+      },
+      _meta: { totalTokens: 65237, eventId: "s-1" },
+    });
+    assert.equal(
+      (u as { _meta?: { totalTokens?: number } } | null)?._meta?.totalTokens,
+      65237,
+    );
   });
 
   it("permission shaping defaults four options and buildPermissionOutcome", () => {

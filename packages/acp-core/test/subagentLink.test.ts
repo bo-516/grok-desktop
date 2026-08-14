@@ -145,5 +145,14 @@ describe("subagentLink", () => {
       task_ids: ["a", "b"],
     });
     assert.equal(sanitizeToolRawInput({ prompt: "only prompt" }), undefined);
+    const withType = sanitizeToolRawInput({
+      description: "role",
+      subagent_type: "explore",
+      prompt: "dropped",
+    });
+    assert.deepEqual(withType, {
+      description: "role",
+      subagent_type: "explore",
+    });
   });
 });

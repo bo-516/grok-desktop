@@ -23,60 +23,16 @@ import {
   isOrchestrationUpdate,
 } from "./timelineOrchestration.js";
 import {
-  isSpawnSubagentCard,
-  parseSpawnedSubagentId,
+  linkSpawnCardIfReady,
   readToolMeta,
   readToolRawInput,
 } from "./subagentLink.js";
-import { parseTurnCompletedUsage } from "./sessionTokenUsage.js";
-
-/**
- * When a spawn card body carries `subagent_id:`, record the join key and
- * back-fill any orchestration card that arrived earlier without a toolCallId.
- * Idempotent: an existing link for the same subagentId is never overwritten.
- * @param state Session snapshot after the tool card was patched.
- * @param toolCallId Timeline tool card id.
- * @param card Patched card (may or may not be a spawn).
- * @returns State with `subagentLinks` / matching `subagents` updated, or
- *   the input state when no spawn id is present.
- */
-function linkSpawnCardIfReady(
-  state: SessionState,
-  toolCallId: string,
-  card: ToolCallCard,
-): SessionState {
-  if (!isSpawnSubagentCard(card)) {
-    return state;
-  }
-  const spawnedId = parseSpawnedSubagentId(card.content);
-  if (!spawnedId) {
-    return state;
-  }
-  // Do not overwrite an earlier link for the same subagent (first write wins).
-  if (state.subagentLinks?.[spawnedId]) {
-    return state;
-  }
-  const subagentLinks = {
-    ...(state.subagentLinks ?? {}),
-    [spawnedId]: toolCallId,
-  };
-  const existing = state.subagents?.[spawnedId];
-  if (!existing) {
-    return { ...state, subagentLinks };
-  }
-  // Back-fill toolCallId on the orchestration card if it landed first.
-  if (existing.toolCallId) {
-    return { ...state, subagentLinks };
-  }
-  return {
-    ...state,
-    subagentLinks,
-    subagents: {
-      ...(state.subagents ?? {}),
-      [spawnedId]: { ...existing, toolCallId },
-    },
-  };
-}
+import {
+  mergeTurnUsagePreservingOccupancy,
+  parseTurnCompletedUsage,
+} from "./sessionTokenUsage.js";
+import { parseUsageUpdate } from "./sessionTokenUsageRpc.js";
+import { withLiveStreamingStatus } from "./sessionLiveStatus.js";
 
 /**
  * Session-update kinds that insert a visible timeline row (or update one).
@@ -152,13 +108,14 @@ function normalizeMode(raw: string): SessionState["mode"] | null {
 }
 
 /**
- * Immutably apply one ACP `session/update`.
- * Visible kinds (message / tool) end active Thinking; silent metadata does not.
+ * Kind-specific reduce (timeline / plan / billed usage). Occupancy is merged
+ * afterwards by {@link applySessionUpdate} in timeline.ts so every return path,
+ * including early no-ops, can still refresh the context ring.
  * @param state Current session snapshot; not mutated in place.
  * @param update Event already extracted by extractSessionUpdate; unknown types are kept as soft error rows for diagnostics.
- * @returns New session state shared by UI, bridge, and tests.
+ * @returns Next state before live occupancy is merged.
  */
-export function applySessionUpdate(
+export function applySessionUpdateKind(
   state: SessionState,
   update: SessionUpdate,
 ): SessionState {
@@ -183,14 +140,12 @@ export function applySessionUpdate(
       const merged = appendOrMergeAgentText(base.timeline, text);
       // Wire/seed state may omit lastAgentText; never concat onto undefined.
       const prevAgent = base.lastAgentText ?? "";
-      return {
+      return withLiveStreamingStatus({
         ...base,
         timeline: merged.timeline,
         // Seed claim on session/load must not dump history into lastAgentText.
         lastAgentText: merged.liveApplied ? prevAgent + text : prevAgent,
-        status:
-          base.status === "waiting_permission" ? base.status : "streaming",
-      };
+      });
     }
     case "agent_thought_chunk": {
       const text = chunkText(update);
@@ -198,7 +153,9 @@ export function applySessionUpdate(
         return state;
       }
       const timeline = appendOrMergeThought(state.timeline, text);
-      return { ...state, timeline };
+      // session/load forces idle so history is not live; a still-running turn
+      // continues as thoughts/tools and must restore Working chrome.
+      return withLiveStreamingStatus({ ...state, timeline });
     }
     case "tool_call": {
       const base = withFinalizedThoughtIfVisible(state, kind);
@@ -237,10 +194,12 @@ export function applySessionUpdate(
               toolCallId,
             },
           ];
-      return linkSpawnCardIfReady(
-        { ...base, toolCalls, timeline },
-        toolCallId,
-        card,
+      return withLiveStreamingStatus(
+        linkSpawnCardIfReady(
+          { ...base, toolCalls, timeline },
+          toolCallId,
+          card,
+        ),
       );
     }
     case "tool_call_update": {
@@ -296,10 +255,12 @@ export function applySessionUpdate(
               toolCallId,
             },
           ];
-      return linkSpawnCardIfReady(
-        { ...base, toolCalls, timeline },
-        toolCallId,
-        card,
+      return withLiveStreamingStatus(
+        linkSpawnCardIfReady(
+          { ...base, toolCalls, timeline },
+          toolCallId,
+          card,
+        ),
       );
     }
     case "plan": {
@@ -378,13 +339,37 @@ export function applySessionUpdate(
       };
     }
     case "turn_completed": {
-      // F-CTX-01: last-turn usage rollup for the composer context ring.
+      // F-CTX-01: billed turn rollup. Occupancy lives on contextTokensUsed
+      // and must survive this overwrite (turn_completed has no live stamp).
       // Silent metadata — must not finalize thought or append a timeline row.
       const tokenUsage = parseTurnCompletedUsage(update);
       if (!tokenUsage) {
         return state;
       }
-      return { ...state, tokenUsage };
+      return {
+        ...state,
+        tokenUsage: mergeTurnUsagePreservingOccupancy(
+          tokenUsage,
+          state.tokenUsage,
+        ),
+      };
+    }
+    case "usage_update": {
+      // ACP session-usage RFD: `used` is live window fill. Soft-ignore used
+      // to swallow this kind via /usage/ and leave the composer ring at 0%.
+      const tokenUsage = parseUsageUpdate(
+        update as { sessionUpdate?: string } & Record<string, unknown>,
+      );
+      if (!tokenUsage) {
+        return state;
+      }
+      return {
+        ...state,
+        tokenUsage: mergeTurnUsagePreservingOccupancy(
+          tokenUsage,
+          state.tokenUsage,
+        ),
+      };
     }
     default: {
       // Soft-ignore unknown kinds that look like metadata; only soft-error opaque ones.
@@ -392,7 +377,8 @@ export function applySessionUpdate(
       // `subagent` / `task` are gone: those kinds are handled above, and leaving
       // them here would let the fallback shadow real cases. Remaining vendor
       // kinds below are explicitly listed rather than pattern-matched.
-      // `turn_completed` is handled above — do not re-list it as knownSilent.
+      // `turn_completed` / `usage_update` are handled above — do not
+      // re-list them as knownSilent (the /usage/ soft regex would no-op).
       const soft = /token|usage|context|compact|notification|hook/i;
       const knownSilent = new Set([
         "session_recap", // candidate for the session header

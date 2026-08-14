@@ -13,6 +13,12 @@ export * from "./client.js";
 export * from "./mockAgent.js";
 export * from "./sessionTitle.js";
 export * from "./sessionFork.js";
+export * from "./sessionBilling.js";
+export * from "./sessionStateMerge.js";
+export {
+  shouldArmQuietSettle,
+  withLiveStreamingStatus,
+} from "./sessionLiveStatus.js";
 export * from "./eventIdDedupe.js";
 export {
   dispatchAcpMessage,

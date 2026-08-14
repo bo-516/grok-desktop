@@ -208,8 +208,11 @@ export async function runAcpHandshake(
       interim.availableCommands,
       initialMetadata.availableCommands,
     ),
-    availableModels:
-      sessionModels.length > 0 ? sessionModels : modelsFromInit,
+    availableModels: resolveAvailableModels(
+      sessionModels,
+      interim.availableModels,
+      modelsFromInit,
+    ),
     agentCapabilities,
     configOptions: interim.configOptions,
     title: interim.title,

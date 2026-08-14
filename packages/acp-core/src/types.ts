@@ -244,10 +244,14 @@ export type SessionUpdate =
   | {
       sessionUpdate: "agent_message_chunk";
       content?: { type?: string; text?: string };
+      /** Stamped envelope occupancy / eventId after extractSessionUpdate. */
+      _meta?: Record<string, unknown>;
     }
   | {
       sessionUpdate: "agent_thought_chunk";
       content?: { type?: string; text?: string };
+      /** Stamped envelope occupancy / eventId after extractSessionUpdate. */
+      _meta?: Record<string, unknown>;
     }
   | {
       sessionUpdate: "tool_call";
@@ -327,12 +331,20 @@ export type GoalSnapshot = {
   /** Last state-machine transition name (e.g. `goal_created`). */
   lastEvent?: string;
   lastEventAt?: string;
+  /**
+   * Prose from `last_event_detail` (worker FINAL_RESPONSE / completion note).
+   * Goal mode often never emits a trailing `agent_message_chunk`; this is the
+   * only user-facing wrap-up on the wire. Later `goal_updated` frames that
+   * omit the field must not wipe a previously captured value.
+   */
+  lastEventDetail?: string;
 };
 
 /**
  * One subagent the orchestrator spawned.
- * `spawned` creates the card, `finished` patches it in place — same lifecycle
- * as `toolCalls`, so out-of-order or replayed events converge on one row.
+ * A completed `spawn_subagent` tool may create the card first; `subagent_spawned`
+ * / `subagent_finished` then patch it in place — same lifecycle as `toolCalls`,
+ * so out-of-order or replayed events converge on one row.
  * Unreported counters stay `undefined` (not `0`) so the UI can hide missing data.
  */
 export type SubagentCard = {
@@ -371,7 +383,10 @@ export type BackgroundTaskCard = {
   toolCallId?: string;
   command: string;
   cwd?: string;
-  /** Absolute log path under `<session>/terminal/`; readable for a preview. */
+  /**
+   * Absolute log path under `<session>/terminal/` (outside the project
+   * workspace). Preview must sandbox the read to that directory.
+   */
   outputFile?: string;
   description?: string;
   status: string;
@@ -428,9 +443,10 @@ export type SessionState = {
   lastAgentText: string;
   errorMessage?: string;
   /**
-   * Latest turn token usage from `turn_completed` (F-CTX-01).
-   * Overwritten each completed turn; absent until the first rollup arrives.
-   * Silent metadata — never becomes a timeline row.
+   * Latest token usage (F-CTX-01): billed last-turn counters plus live
+   * `contextTokensUsed` occupancy from mid-turn `_meta.totalTokens`.
+   * Occupancy refreshes as tools / model calls land; billed fields overwrite
+   * on `turn_completed` without dropping occupancy. Silent metadata.
    */
   tokenUsage?: SessionTokenUsage;
   /** Goal-mode snapshot; absent when the agent is not running an orchestrated goal. */
@@ -447,6 +463,16 @@ export type SessionState = {
   subagentLinks?: Record<string, string>;
 };
 
+/** One row in a model's advertised reasoning-effort menu. */
+export type AvailableReasoningEffort = {
+  /** Wire id sent as `--reasoning-effort` / `/effort` (e.g. `xhigh`). */
+  id: string;
+  /** Human label when the agent supplied one (`Extra High Effort`). */
+  label?: string;
+  /** True when this row is a model/catalog default. */
+  default?: boolean;
+};
+
 /** One model the agent advertises for session/set_model and the model picker. */
 export type AvailableModel = {
   /** Stable model id passed to session/set_model. */
@@ -458,6 +484,12 @@ export type AvailableModel = {
    * Used for the composer context ring; omitted when the agent did not declare it.
    */
   totalContextTokens?: number;
+  /**
+   * Reasoning-effort ladder from `_meta.reasoning_efforts` (grok-build / models
+   * cache). Composer Thinking menu uses this when config_option_update is empty.
+   * Omitted when the agent did not declare a per-model menu.
+   */
+  reasoningEfforts?: AvailableReasoningEffort[];
 };
 
 export type InitializeResult = {

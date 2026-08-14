@@ -9,6 +9,7 @@ import {
   extractInitializeSessionMetadata,
   extractModelFromSessionResult,
   normalizeAvailableModels,
+  resolveAvailableModels,
 } from "../src/sessionMetadata.js";
 
 describe("normalizeAvailableModels", () => {
@@ -41,6 +42,32 @@ describe("normalizeAvailableModels", () => {
     assert.equal(models[0]?.totalContextTokens, 500000);
     assert.equal(models[1]?.totalContextTokens, 128000);
     assert.equal(models[2]?.totalContextTokens, undefined);
+  });
+
+  it("preserves reasoning_efforts from model _meta (grok-4.6 catalog)", () => {
+    const models = normalizeAvailableModels([
+      {
+        id: "grok-4.6",
+        name: "Grok 4.6",
+        _meta: {
+          reasoning_efforts: [
+            {
+              id: "xhigh",
+              value: "xhigh",
+              label: "Extra High Effort",
+              default: true,
+            },
+            { id: "high", value: "high", label: "High Effort" },
+            "medium",
+          ],
+        },
+      },
+    ]);
+    assert.deepEqual(models[0]?.reasoningEfforts, [
+      { id: "xhigh", label: "Extra High Effort", default: true },
+      { id: "high", label: "High Effort" },
+      { id: "medium" },
+    ]);
   });
 
   it("returns empty for non-arrays", () => {
@@ -132,5 +159,25 @@ describe("extractAvailableModelsFromSessionResult", () => {
       }),
       "grok-mock",
     );
+  });
+});
+
+describe("resolveAvailableModels", () => {
+  it("fills totalContextTokens from initialize when session/new dropped them", () => {
+    const merged = resolveAvailableModels(
+      [{ id: "grok-4.6", name: "Grok 4.6" }],
+      undefined,
+      [{ id: "grok-4.6", name: "Grok 4.6", totalContextTokens: 256_000 }],
+    );
+    assert.equal(merged[0]?.totalContextTokens, 256_000);
+  });
+
+  it("keeps a loaded catalog that already has a window size", () => {
+    const merged = resolveAvailableModels(
+      [{ id: "grok-4.6", totalContextTokens: 500_000 }],
+      [{ id: "grok-4.6", totalContextTokens: 256_000 }],
+      [{ id: "grok-4.6", totalContextTokens: 128_000 }],
+    );
+    assert.equal(merged[0]?.totalContextTokens, 500_000);
   });
 });

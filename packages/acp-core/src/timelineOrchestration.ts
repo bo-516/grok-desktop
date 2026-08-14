@@ -55,6 +55,27 @@ function readString(update: SessionUpdate, key: string): string | undefined {
 }
 
 /**
+ * Read the first non-empty string among alias keys (snake_case then camelCase).
+ * grok-build historically emits snake_case; a camelCase payload must still
+ * create a card — otherwise the Agents rail stays empty while spawn tools show.
+ * @param update Raw session update.
+ * @param keys Field names in preference order.
+ * @returns First trimmed hit, or undefined when every alias is missing.
+ */
+function readStringAlias(
+  update: SessionUpdate,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = readString(update, key);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Read a finite number field from a raw agent payload.
  * Missing counters must stay undefined rather than collapse to 0 — a card
  * showing "0 tokens" for an unreported field is a lie the UI cannot detect.
@@ -177,7 +198,8 @@ function applyBackgroundTaskUpdate(
  * @param state Current snapshot; not mutated in place.
  * @param update Raw orchestration update (snake_case payload).
  * @returns New state with `goal` / `subagents` / `backgroundTasks` updated;
- *   `timeline` is returned untouched by contract.
+ *   `timeline` is returned untouched by contract. Goal wrap-up text lives on
+ *   `goal.lastEventDetail`, never as a synthesized timeline row.
  */
 export function applyOrchestrationUpdate(
   state: SessionState,
@@ -190,6 +212,12 @@ export function applyOrchestrationUpdate(
     if (!goalId) {
       return state;
     }
+    /** Fresh worker/orchestrator prose; undefined when this frame omitted it. */
+    const incomingDetail = readString(update, "last_event_detail");
+    /** Previous goal on this session; used only to keep an omitted wrap-up. */
+    const prior = state.goal;
+    /** Same goal id → keep prior lastEventDetail; a new id must not inherit it. */
+    const sameGoal = prior?.goalId === goalId;
     const goal: GoalSnapshot = {
       goalId,
       objective: readString(update, "objective") ?? "",
@@ -202,12 +230,15 @@ export function applyOrchestrationUpdate(
       tokensUsed: readNumber(update, "tokens_used") ?? 0,
       lastEvent: readString(update, "last_event"),
       lastEventAt: readString(update, "last_event_timestamp"),
+      // Classifier / pause frames omit the worker summary; keep the last one.
+      lastEventDetail:
+        incomingDetail ?? (sameGoal ? prior?.lastEventDetail : undefined),
     };
     return { ...state, goal };
   }
 
   if (kind === "subagent_spawned" || kind === "subagent_finished") {
-    const subagentId = readString(update, "subagent_id");
+    const subagentId = readStringAlias(update, "subagent_id", "subagentId");
     if (!subagentId) {
       return state;
     }
@@ -225,9 +256,17 @@ export function applyOrchestrationUpdate(
     const linkedToolCallId = state.subagentLinks?.[subagentId];
     const card = patchSubagentCard(existing, {
       subagentId,
-      childSessionId: readString(update, "child_session_id"),
-      parentPromptId: readString(update, "parent_prompt_id"),
-      type: readString(update, "subagent_type"),
+      childSessionId: readStringAlias(
+        update,
+        "child_session_id",
+        "childSessionId",
+      ),
+      parentPromptId: readStringAlias(
+        update,
+        "parent_prompt_id",
+        "parentPromptId",
+      ),
+      type: readStringAlias(update, "subagent_type", "subagentType"),
       description: readString(update, "description"),
       model: readString(update, "model"),
       // spawned carries no status field; finished reports completed / failed.
