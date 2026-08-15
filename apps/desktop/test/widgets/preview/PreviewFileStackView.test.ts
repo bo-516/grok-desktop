@@ -6,7 +6,10 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
-import { PreviewFileStackView } from "@/widgets/preview/PreviewFileStackView";
+import {
+  PreviewFileStackView,
+  type PreviewFileStackViewProps,
+} from "@/widgets/preview/PreviewFileStackView";
 import { readAllUnoShortcuts } from "../../helpers/sourceFiles";
 
 /**
@@ -15,13 +18,13 @@ import { readAllUnoShortcuts } from "../../helpers/sourceFiles";
  * @returns Static HTML of the stack.
  */
 function renderStack(refreshing: boolean): string {
-  return renderToStaticMarkup(
-    createElement(
-      PreviewFileStackView,
-      { refreshing },
-      createElement("pre", null, "kept"),
-    ),
-  );
+  // Props are built up front: the variadic createElement overload does not
+  // satisfy a props type that declares `children` as required.
+  const props: PreviewFileStackViewProps = {
+    refreshing,
+    children: createElement("pre", null, "kept"),
+  };
+  return renderToStaticMarkup(createElement(PreviewFileStackView, props));
 }
 
 describe("PreviewFileStackView", () => {
