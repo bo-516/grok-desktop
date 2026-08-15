@@ -10,19 +10,30 @@
 
 | 平台 | 下载 | 然后 |
 |---|---|---|
-| **macOS** — Apple 芯片 + Intel | [**Grok-Desktop-macos-universal.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip) | 解压，把 **Grok Desktop.app** 拖进 `/Applications` |
+| **macOS** — Apple 芯片 + Intel | [**Grok-Desktop-macos-universal.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip) | 解压，把 **Grok Desktop.app** 拖进 `/Applications`，再清掉隔离标记（见下） |
 | **Windows** — x64 | [**Grok-Desktop-windows-amd64.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-windows-amd64.zip) | 解压，两个 `.exe` 放同一目录，运行 `grok-desktop.exe` |
 | **Linux** | 自行构建 | Wails 需要 cgo + webkit2gtk，见[打包发布](#打包发布) |
 
 全部版本：[Releases](https://github.com/bo-516/grok-desktop/releases)。
 
+> [!IMPORTANT]
+> **macOS —— 构建产物只做了 ad-hoc 签名，没有公证。** Gatekeeper 会拦下首次启动，弹「Apple 无法验证…」，且默认按钮是**移到废纸篓**。两条路绕过。
+>
+> **已经用浏览器下载了？** 清掉浏览器打上的隔离标记 —— 跑一次，之后每次打开都正常：
+>
+> ```bash
+> xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
+> ```
+>
+> **或者干脆不用浏览器。** `curl` 不会打这个标记，这样装完一个框都不弹：
+>
+> ```bash
+> curl -fsSL https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip -o /tmp/grok-desktop.zip && ditto -xk /tmp/grok-desktop.zip /Applications && rm /tmp/grok-desktop.zip
+> ```
+>
+> 不想碰终端？双击一次，再到**系统设置 → 隐私与安全性 → 仍要打开**放行 —— Sequoia 之后「右键 → 打开」这个老办法已经不管用了。
+
 **先装 agent。** 这个应用是真实 `grok` CLI 的窗口，所以 CLI 必须在 PATH 上（或位于 `~/.grok/bin/grok`）并已 `grok login` —— 或者设好 `XAI_API_KEY`。没有它桥也能起来，但 UI 会显示鉴权横幅。
-
-**macOS**：构建产物只做了 ad-hoc 签名，没有公证，首次打开会被 Gatekeeper 拦下。双击一次，然后到 **系统设置 → 隐私与安全性 → 仍要打开** 放行即可（Sequoia 之后「右键 → 打开」这个老办法已经不管用了）。之后每次打开都正常。想用一条命令解决也行：
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
-```
 
 **Windows 10** 还需要 [Edge WebView2 运行时](https://developer.microsoft.com/microsoft-edge/webview2/)；Windows 11 自带。
 

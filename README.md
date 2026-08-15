@@ -10,19 +10,30 @@ A desktop client for [grok-build](https://docs.x.ai/build/overview). It speaks A
 
 | Platform | Download | Then |
 |---|---|---|
-| **macOS** — Apple silicon + Intel | [**Grok-Desktop-macos-universal.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip) | Unzip, drag **Grok Desktop.app** to `/Applications` |
+| **macOS** — Apple silicon + Intel | [**Grok-Desktop-macos-universal.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip) | Unzip, drag **Grok Desktop.app** to `/Applications`, then clear quarantine (below) |
 | **Windows** — x64 | [**Grok-Desktop-windows-amd64.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-windows-amd64.zip) | Unzip, keep both `.exe` files in one folder, run `grok-desktop.exe` |
 | **Linux** | build from source | Wails needs cgo + webkit2gtk — see [Build a release](#build-a-release) |
 
 Every version: [Releases](https://github.com/bo-516/grok-desktop/releases).
 
+> [!IMPORTANT]
+> **macOS — builds are ad-hoc signed, not notarized.** Gatekeeper refuses the first launch with *“Apple could not verify…”*, where the default button is **Move to Trash**. Two ways past it.
+>
+> **Downloaded it in a browser?** Clear the quarantine flag the browser attached — once, then every launch is normal:
+>
+> ```bash
+> xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
+> ```
+>
+> **Or skip the browser.** `curl` never sets that flag, so this installs with no dialog at all:
+>
+> ```bash
+> curl -fsSL https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip -o /tmp/grok-desktop.zip && ditto -xk /tmp/grok-desktop.zip /Applications && rm /tmp/grok-desktop.zip
+> ```
+>
+> No terminal? Double-click once, then allow it under **System Settings → Privacy & Security → Open Anyway** — Control-clicking the app no longer gets around this on Sequoia and later.
+
 **First, install the agent.** The app is a window onto the real `grok` CLI, so it has to be on PATH (or at `~/.grok/bin/grok`) and signed in with `grok login` — or set `XAI_API_KEY`. Without it the bridge starts and the UI shows an auth banner.
-
-**macOS**: builds are ad-hoc signed, not notarized, so Gatekeeper blocks the first launch. Double-click it once, then allow it under **System Settings → Privacy & Security → Open Anyway**. (Control-clicking the app no longer gets around this on Sequoia and later.) Every launch after that is normal. If you'd rather do it in one command:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
-```
 
 **Windows 10** also needs the [Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/); Windows 11 ships with it.
 
