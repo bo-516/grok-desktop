@@ -21,6 +21,7 @@ import {
   type SetState,
 } from "./sessionStoreLiveInbound";
 import { applyLiveInboundSession } from "./sessionStoreLiveApply";
+import { applyAuthProbe, authedFromEnvironment } from "./sessionStoreAuth";
 import { forgetAllTurnEdges } from "./sessionTurnEdge";
 import {
   applyPoolBusyToSession,
@@ -209,8 +210,14 @@ export async function startLiveBridgeSession(
         onEnvironment: (env) => {
           set({
             environment: env,
+            // Same field the 3s auth poll writes — one flag, two writers, so
+            // the login gate never has to reconcile two sources.
+            authed: authedFromEnvironment(env),
             bridgeInfo: env.ok ? env.message : get().bridgeInfo,
           });
+        },
+        onAuthState: (auth) => {
+          applyAuthProbe(set, get, auth);
         },
         onInfo: (message, sessionId) => {
           set({ bridgeInfo: message, lastError: null });

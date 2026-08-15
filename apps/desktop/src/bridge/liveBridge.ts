@@ -11,6 +11,7 @@ import type { ContentBlock, SessionState } from "@grok-desktop/acp-core";
 import { createLiveBridgeDispatch } from "./liveBridgeDispatch";
 import { createLiveBridgeFs } from "./liveBridgeFs";
 import type {
+  AuthProbe,
   BridgeServerMsg,
   CliChannelResult,
   EnvironmentInfo,
@@ -24,6 +25,7 @@ import type {
 } from "./liveBridgeTypes";
 
 export type {
+  AuthProbe,
   BridgeServerMsg,
   CliChannelResult,
   EnvironmentInfo,
@@ -67,6 +69,13 @@ export function connectLiveBridge(
   closeSession: (sessionId: string) => boolean;
   listPool: () => boolean;
   checkEnvironment: () => boolean;
+  /**
+   * Cheap login-state probe (`check_auth` → `auth_state`). Safe on the 3s
+   * poll cadence because the bridge answers from an env read plus one stat;
+   * `checkEnvironment` spawns `grok --version` and must stay event-driven.
+   * @returns False when the socket is not open (the tick is simply skipped).
+   */
+  checkAuth: () => boolean;
   /**
    * `@` completion index.
    * @param query Fragment after `@`.
@@ -285,6 +294,7 @@ export function connectLiveBridge(
     closeSession: (sessionId) => send({ type: "close_session", sessionId }),
     listPool: () => send({ type: "list_pool" }),
     checkEnvironment: () => send({ type: "check_environment" }),
+    checkAuth: () => send({ type: "check_auth" }),
     listWorkspaceEntries: fsApi.listWorkspaceEntries,
     writeWorkspaceFile: fsApi.writeWorkspaceFile,
     readWorkspaceFile: fsApi.readWorkspaceFile,

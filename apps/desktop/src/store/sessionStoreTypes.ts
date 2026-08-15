@@ -9,7 +9,7 @@ import type {
   SessionBillingSnapshot,
   SessionState,
 } from "@grok-desktop/acp-core";
-import type { EnvironmentInfo, PoolEntry } from "../bridge/liveBridge";
+import type { AuthProbe, EnvironmentInfo, PoolEntry } from "../bridge/liveBridge";
 import type { SessionRecord } from "./sessionCatalog";
 import type {
   ConnectionMode,
@@ -21,7 +21,7 @@ import type { StartOpts } from "./sessionStoreSupport";
 import type { PromptQueueItem } from "@/lib/promptQueue";
 import type { WeeklyUsageOutcome } from "@/lib/weeklyUsagePoll";
 
-export type { ConnectionMode, EnvironmentInfo, PoolEntry };
+export type { AuthProbe, ConnectionMode, EnvironmentInfo, PoolEntry };
 export type { ContentBlock, SessionState, SessionRecord };
 export type { PromptQueueItem };
 
@@ -79,6 +79,16 @@ export type SessionStore = {
   catalogRevision: number;
   poolEntries: PoolEntry[];
   environment: EnvironmentInfo | null;
+  /**
+   * Login state, and the single source of truth the login gate reads.
+   *
+   * null means "not probed yet" — the gate must stay closed then, or a cold
+   * start would flash the sign-in modal at every launch before the first
+   * answer lands. Written by both the full `environment` probe and the 3s
+   * `auth_state` poll, so a `grok login` / `grok logout` run outside the app
+   * still lands here within one tick.
+   */
+  authed: boolean | null;
   /**
    * Last successful `_x.ai/billing` snapshot (account weekly / monthly remaining).
    * Shared across sessions; kept as last-known-good when a later fetch fails.
@@ -215,6 +225,26 @@ export type SessionStore = {
   disconnect: () => void;
   hydrateCatalog: () => void;
   refreshEnvironment: () => void;
+  /**
+   * Ask the bridge for login state only (`check_auth`). Cheap enough for the
+   * 3s poll; the answer arrives asynchronously on `authed`. No-op when the
+   * bridge socket is down — the reconnect loop owns that case.
+   */
+  refreshAuth: () => void;
+  /**
+   * Run `grok login` (opens the browser) and re-probe as soon as it returns.
+   * The CLI can outlive the client's request timeout, which is exactly why
+   * the 3s poll exists — this only shortens the happy path.
+   * @returns True when the CLI exited cleanly and a credential now exists.
+   */
+  authLogin: () => Promise<boolean>;
+  /**
+   * Run `grok logout`, then re-probe. The bridge disposes every runtime in
+   * the pool on success, so the open session is dead afterwards regardless of
+   * what this resolves to.
+   * @returns True when the CLI reported success.
+   */
+  authLogout: () => Promise<boolean>;
   /**
    * Pull weekly remaining from the live grok-build `x.ai/billing` extension.
    * No-op when disconnected, in-flight, or the agent does not expose billing.

@@ -1,10 +1,12 @@
 /**
- * Session bootstrap, environment refresh, attention notifications,
- * and 3s live-bridge auto-reconnect while disconnected.
+ * Session bootstrap, environment refresh, attention notifications, and the two
+ * 3s background loops: auto-reconnect while the bridge is down, login-state
+ * poll while it is up (exactly one of them is ever armed).
  * Extracted from useAppShellWidget to keep the shell hook under the line budget.
  */
 
 import { useEffect, useRef } from "react";
+import { shouldArmAuthPoll, startAuthPollLoop } from "../../lib/authPoll";
 import {
   shouldArmBridgeReconnect,
   startBridgeReconnectLoop,
@@ -14,7 +16,8 @@ import { useSessionStore } from "../../store/sessionStore";
 
 /**
  * Hydrate catalog, resume last session, refresh env, dock/OS attention badge,
- * and retry the live bridge every 3s while `connectionMode` is disconnected.
+ * retry the live bridge every 3s while `connectionMode` is disconnected, and
+ * re-probe login every 3s while it is live.
  * @param args Session status fields used for notifications and badge count.
  */
 export function useShellSessionLifecycle(args: {
@@ -34,6 +37,7 @@ export function useShellSessionLifecycle(args: {
   const reconnect = useSessionStore((s) => s.reconnect);
   const ensureConnected = useSessionStore((s) => s.ensureConnected);
   const refreshEnvironment = useSessionStore((s) => s.refreshEnvironment);
+  const refreshAuth = useSessionStore((s) => s.refreshAuth);
   const autoStarted = useRef(false);
 
   useEffect(() => {
@@ -59,6 +63,19 @@ export function useShellSessionLifecycle(args: {
       refreshEnvironment();
     }
   }, [args.connectionMode, refreshEnvironment]);
+
+  // Bridge up: re-probe login every 3s. `grok login` completes in a browser
+  // and `grok logout` can be run in any terminal — neither notifies us, so the
+  // sign-in gate would otherwise stay wrong until the next reconnect.
+  useEffect(() => {
+    if (!shouldArmAuthPoll(args.connectionMode)) {
+      return;
+    }
+    return startAuthPollLoop(refreshAuth, {
+      setInterval: (handler, ms) => window.setInterval(handler, ms),
+      clearInterval: (id) => window.clearInterval(id),
+    });
+  }, [args.connectionMode, refreshAuth]);
 
   // Bridge down: retry every 3s until live (or the user leaves this screen).
   useEffect(() => {

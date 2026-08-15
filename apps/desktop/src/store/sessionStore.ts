@@ -55,6 +55,7 @@ import { ensureLiveBridgeConnected } from "./sessionStoreReconnect";
 import { renameSessionAction } from "./sessionStoreRename";
 import { forkSessionAction } from "./sessionStoreFork";
 import { refreshWeeklyUsageAction } from "./sessionStoreBilling";
+import { authLoginAction, authLogoutAction } from "./sessionStoreAuth";
 
 export type {
   ConnectionMode,
@@ -90,6 +91,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   catalogRevision: 0,
   poolEntries: [],
   environment: null,
+  /** null until the first probe answers — the gate stays shut while unknown. */
+  authed: null,
   weeklyUsage: null,
   /** True after New chat until first send or selectSession. */
   localDraft: false,
@@ -116,6 +119,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   refreshEnvironment: () => {
     get().live?.checkEnvironment();
   },
+
+  refreshAuth: () => {
+    get().live?.checkAuth();
+  },
+
+  authLogin: async () => authLoginAction(set, get),
+
+  authLogout: async () => authLogoutAction(set, get),
 
   refreshWeeklyUsage: async () => refreshWeeklyUsageAction(set, get),
 

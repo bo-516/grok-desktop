@@ -24,6 +24,25 @@ type EnvironmentInfo struct {
 	PoolCapacity    int     `json:"poolCapacity"`
 }
 
+// AuthProbe is the cheap auth-only subset of EnvironmentInfo, sent as the
+// `auth_state` answer to `check_auth`. Field names mirror EnvironmentInfo so
+// the desktop can read either message with the same accessor.
+type AuthProbe struct {
+	Authed          bool   `json:"authed"`
+	AuthSource      string `json:"authSource"` // xai_api_key | cached_token | none
+	AuthPathChecked string `json:"authPathChecked"`
+}
+
+// ProbeAuth wraps ProbeAuthSource in the wire struct for `auth_state`.
+// No subprocess is involved (env read + one stat), which is what makes this
+// safe on the desktop's 3s login poll; CheckEnvironment is not.
+//
+// @returns Login state, winning credential source, and the path stat-ed.
+func ProbeAuth() AuthProbe {
+	authed, source, path := ProbeAuthSource()
+	return AuthProbe{Authed: authed, AuthSource: source, AuthPathChecked: path}
+}
+
 // PoolCapacityFromEnv reads BRIDGE_POOL_CAPACITY (default 8, max 16).
 // @returns Effective capacity in [1, 16]; invalid/empty env falls back to 8.
 func PoolCapacityFromEnv() int {

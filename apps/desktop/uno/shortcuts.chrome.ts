@@ -156,6 +156,28 @@ export const chromeShortcuts: Record<string, string> = {
     "confirm-detail": "m-0",
 
     /*
+     * Signed-out gate (LoginGateView). Centered column on the shared
+     * `modal-panel` surface: logo, title, copy, actions, fallback hint.
+     * gap-3 (not the panel's gap-4) — six stacked elements at 4 read as a
+     * form, and the logo already carries the top breathing room.
+     */
+    "login-gate": "gap-3 items-center text-center pt-6 pb-5",
+    /*
+     * 56px keeps the icon a mark, not a splash screen. The asset is the app
+     * tile (dark, self-contained), so it needs no ring or fill of its own —
+     * only the radius so its corners match the panel.
+     */
+    "login-gate-logo": "block w-14 h-14 rounded-14px select-none",
+    "login-gate-title": "flex-none text-center",
+    "login-gate-copy":
+      "m-0 max-w-[34ch] text-13px leading-relaxed text-fg-secondary",
+    /* Primary first, dismiss under it — this is a gate, not a confirm. */
+    "login-gate-actions": "flex flex-col items-stretch gap-1.5 w-full pt-1",
+    "login-gate-primary": "w-full min-h-8 rounded-pill font-medium",
+    "login-gate-hint":
+      "m-0 max-w-[38ch] text-11px leading-snug text-fg-muted [overflow-wrap:anywhere]",
+
+    /*
      * Side drawers (Settings / Environment / Overview / Tasks).
      * Fixed overlay + elevated dark surface + explicit text-fg — without these
      * the panel was a bare flex child (native white form chrome + light text =

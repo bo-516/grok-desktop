@@ -92,6 +92,13 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		h.Send(ws, map[string]any{"type": "environment", "env": env})
 		return nil
 
+	// Login state only — an env read plus one stat, no `grok --version` spawn.
+	// That cheapness is the contract: the desktop polls this every 3s to catch
+	// a browser login or a `grok logout` that happened outside the app.
+	case "check_auth":
+		h.Send(ws, map[string]any{"type": "auth_state", "auth": session.ProbeAuth()})
+		return nil
+
 	case "list_pool":
 		h.Send(ws, map[string]any{"type": "pool", "entries": h.Pool.List()})
 		return nil

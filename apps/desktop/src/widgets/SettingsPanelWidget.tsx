@@ -68,6 +68,9 @@ export function SettingsPanelWidget(props: {
   const restartNotice = useSessionStore((s) => s.restartNotice);
   const clearRestartNotice = useSessionStore((s) => s.clearRestartNotice);
   const runCli = useSessionStore((s) => s.runCli);
+  /** Auth actions re-probe on return so this drawer never shows a stale row. */
+  const authLogin = useSessionStore((s) => s.authLogin);
+  const authLogout = useSessionStore((s) => s.authLogout);
 
   const [applied, setApplied] = useState<SettingsSpawnDraft>(() =>
     createDefaultSettingsDraft(defaultCompatMap()),
@@ -194,6 +197,7 @@ export function SettingsPanelWidget(props: {
     [platform, draft.sandbox],
   );
   const environment = useSessionStore((s) => s.environment);
+  const authed = useSessionStore((s) => s.authed);
   const credSource = useMemo(
     () =>
       resolveCredentialSource({
@@ -202,8 +206,13 @@ export function SettingsPanelWidget(props: {
       }),
     [environment?.authSource],
   );
-  /** True when bridge probe reports a usable credential (drives Login/Logout exclusivity). */
-  const loggedIn = environment?.authed === true;
+  /**
+   * True when the bridge reports a usable credential (drives Login/Logout
+   * exclusivity). Reads the polled store flag, not `environment.authed`, so a
+   * sign-out that happened elsewhere flips this row within one 3s tick instead
+   * of waiting for the next full environment probe.
+   */
+  const loggedIn = authed === true;
   const alwaysApproveLocked =
     typeof localStorage !== "undefined" &&
     localStorage.getItem("grok-desktop.requirements.always_approve_locked") ===
@@ -248,6 +257,8 @@ export function SettingsPanelWidget(props: {
           <SettingsAccountSectionView
             loggedIn={loggedIn}
             onRunCli={(command) => void runCli(command)}
+            onLogin={() => void authLogin()}
+            onLogout={() => void authLogout()}
           />
         }
         footer={footer}

@@ -395,6 +395,10 @@ export function createLiveBridgeDispatch(
       handlers.onEnvironment?.(msg.env);
       return true;
     }
+    if (msg.type === "auth_state") {
+      handlers.onAuthState?.(msg.auth);
+      return true;
+    }
     if (msg.type === "info") {
       handlers.onInfo?.(msg.message, msg.sessionId);
       return true;

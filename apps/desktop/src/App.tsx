@@ -18,6 +18,7 @@ import { MultiSessionOverviewWidget } from "./widgets/MultiSessionOverviewWidget
 import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
 import { ContextDrawerWidget } from "@/widgets/contextRail";
 import { PreviewDrawerWidget } from "@/widgets/preview";
+import { LoginGateWidget } from "@/widgets/auth";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
@@ -116,7 +117,7 @@ export function App() {
               waitingPermission={
                 shell.session.status === "waiting_permission"
               }
-              onLogin={() => void shell.runCli("auth_login")}
+              onLogin={() => void shell.authLogin()}
               onDismissRestart={shell.clearRestartNotice}
             />
             <TimelineWidget />
@@ -157,6 +158,8 @@ export function App() {
       </div>
 
       {shell.session.pendingPermission ? <PermissionModalView /> : null}
+      {/* Signed-out gate — self-hiding; owns its own open state. */}
+      <LoginGateWidget />
       <CommandPaletteWidget
         open={shell.paletteOpen}
         onClose={() => shell.setPaletteOpen(false)}

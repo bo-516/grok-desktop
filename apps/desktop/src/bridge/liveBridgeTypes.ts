@@ -64,6 +64,21 @@ export type EnvironmentInfo = {
   poolCapacity: number;
 };
 
+/**
+ * Aligned with bridge AuthProbe — the cheap auth-only slice of
+ * {@link EnvironmentInfo}, answered by `check_auth` without spawning the CLI.
+ * This is what the 3s login poll reads; the full environment probe stays
+ * event-driven because it shells out to `grok --version`.
+ */
+export type AuthProbe = {
+  /** True when the bridge host has a usable credential. */
+  authed: boolean;
+  /** Which credential won; `none` when logged out. */
+  authSource: EnvironmentInfo["authSource"];
+  /** Absolute cached-token path the bridge stat-ed. */
+  authPathChecked: string;
+};
+
 export type CliChannelResult = {
   requestId: string;
   ok: boolean;
@@ -139,6 +154,7 @@ export type BridgeServerMsg =
     }
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
+  | { type: "auth_state"; auth: AuthProbe }
   | { type: "stderr"; text: string; sessionId?: string }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "info"; message: string; sessionId?: string }
@@ -199,6 +215,11 @@ export type LiveBridgeHandlers = {
   ) => void;
   onPool?: (entries: PoolEntry[]) => void;
   onEnvironment?: (env: EnvironmentInfo) => void;
+  /**
+   * Login-state tick from `check_auth`. Fires on every poll, so consumers
+   * must treat it as idempotent and only react to an actual change.
+   */
+  onAuthState?: (auth: AuthProbe) => void;
   onInfo?: (message: string, sessionId?: string) => void;
   onError?: (message: string, sessionId?: string) => void;
   onStderr?: (text: string, sessionId?: string) => void;

@@ -498,6 +498,49 @@ describe("UI surface presence", () => {
     assert.match(shortcuts, /"composer-mode-menu":/);
   });
 
+  it("signed-out gate shows the logo and opens the login page", () => {
+    const view = readSrc("widgets/auth/LoginGateView.tsx");
+    const hook = readSrc("widgets/auth/useLoginGateWidget.ts");
+    const widget = readSrc("widgets/auth/LoginGateWidget.tsx");
+    const app = readSrc("App.tsx");
+    const shortcuts = readAllUnoShortcuts();
+    // Logo is an imported asset, not an inline SVG fragment in business code.
+    assert.match(view, /import logoUrl from "@\/assets\/app-logo\.svg"/);
+    assert.match(view, /<img className="login-gate-logo" src=\{logoUrl\}/);
+    assert.doesNotMatch(view, /<svg/);
+    // Modal semantics + the two exits (Escape / backdrop both dismiss).
+    assert.match(view, /role="dialog"/);
+    assert.match(view, /aria-modal="true"/);
+    assert.match(view, /trapFocusTab/);
+    assert.match(view, /e\.key === "Escape"/);
+    // View stays stateless; the hook owns visibility and the login call.
+    assert.doesNotMatch(view, /useSessionStore/);
+    assert.match(hook, /s\.authed/);
+    assert.match(hook, /authLogin/);
+    // Unknown auth (null) must not flash the gate on a cold start.
+    assert.match(hook, /authed === false/);
+    assert.match(hook, /connectionMode === "live-bridge"/);
+    // Dismiss latch re-arms when a credential appears, so a later logout
+    // brings the gate back instead of leaving the app silently unusable.
+    assert.match(hook, /authed === true[\s\S]*setDismissed\(false\)/);
+    assert.match(widget, /useLoginGateWidget/);
+    assert.match(app, /<LoginGateWidget \/>/);
+    assert.match(shortcuts, /"login-gate":/);
+    assert.match(shortcuts, /"login-gate-logo":/);
+    assert.match(shortcuts, /"login-gate-actions":/);
+  });
+
+  it("login state polls every 3s while the bridge is live", () => {
+    const lifecycle = readSrc("widgets/shell/useShellSessionLifecycle.ts");
+    const poll = readSrc("lib/authPoll.ts");
+    assert.match(poll, /AUTH_POLL_MS = 3_000/);
+    assert.match(lifecycle, /startAuthPollLoop/);
+    assert.match(lifecycle, /shouldArmAuthPoll\(args\.connectionMode\)/);
+    // The poll must ride the cheap probe — check_environment spawns the CLI.
+    assert.match(readSrc("store/sessionStore.ts"), /checkAuth\(\)/);
+    assert.match(readSrc("bridge/liveBridge.ts"), /type: "check_auth"/);
+  });
+
   it("settings sticky apply, dirty helpers, no ticket ids, tokenized controls", () => {
     const settings = readSrc("widgets/SettingsPanelWidget.tsx");
     const security = readSrc("widgets/settings/SettingsSecuritySectionView.tsx");
@@ -515,15 +558,19 @@ describe("UI surface presence", () => {
     assert.match(settings, /stickySection=/);
     assert.match(settings, /SettingsAccountSectionView/);
     assert.match(settings, /loggedIn=\{loggedIn\}/);
-    assert.match(settings, /environment\?\.authed === true/);
+    // Login state comes from the polled store flag, not the environment probe,
+    // so a sign-out elsewhere flips the row within one 3s tick.
+    assert.match(settings, /const authed = useSessionStore\(\(s\) => s\.authed\)/);
+    assert.match(settings, /const loggedIn = authed === true/);
+    assert.doesNotMatch(settings, /environment\?\.authed/);
+    // Auth buttons go through the store actions (which re-probe), not runCli.
+    assert.match(settings, /onLogin=\{\(\) => void authLogin\(\)\}/);
+    assert.match(settings, /onLogout=\{\(\) => void authLogout\(\)\}/);
     // Login and Logout are mutually exclusive (never both in the same tree).
     assert.match(account, /loggedIn \? \(/);
-    assert.match(account, /auth_logout/);
-    assert.match(account, /auth_login/);
-    assert.doesNotMatch(
-      account,
-      /onRunCli\("auth_login"\)[\s\S]*onRunCli\("auth_logout"\)/,
-    );
+    assert.match(account, /onLogout/);
+    assert.match(account, /onLogin/);
+    assert.doesNotMatch(account, /onRunCli\("auth_/);
     assert.match(settings, /isSettingsDraftDirty|dirty/);
     assert.match(settings, /Discard unsaved|requestClose/);
     assert.doesNotMatch(settings, /J-06/);

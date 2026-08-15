@@ -64,6 +64,7 @@ export function useCommandPaletteWidget(
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
   const forkSession = useSessionStore((s) => s.forkSession);
   const runCli = useSessionStore((s) => s.runCli);
+  const authLogin = useSessionStore((s) => s.authLogin);
   const snapshot = useEnvironmentStore((s) => s.snapshot);
   const loadEnv = useEnvironmentStore((s) => s.load);
   const [query, setQuery] = useState("");
@@ -134,7 +135,9 @@ export function useCommandPaletteWidget(
       return;
     }
     if (item.runValue === "auth_login") {
-      void runCli("auth_login");
+      // Store action, not a bare runCli: login must re-probe on return so the
+      // sign-in gate and the Settings row settle without waiting for a tick.
+      void authLogin();
       return;
     }
     if (item.runValue === "open_environment") {

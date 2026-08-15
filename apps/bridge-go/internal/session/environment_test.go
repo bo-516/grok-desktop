@@ -72,3 +72,26 @@ func TestProbeAuthSourceNone(t *testing.T) {
 		t.Fatalf("authed=%v src=%s", authed, src)
 	}
 }
+
+// ProbeAuth answers `check_auth` on the desktop's 3s poll, so it must carry
+// every field the UI reads and must track the same sources ProbeAuthSource does.
+func TestProbeAuthCarriesFullPayload(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XAI_API_KEY", "")
+
+	out := ProbeAuth()
+	if out.Authed || out.AuthSource != "none" {
+		t.Fatalf("logged out: authed=%v src=%s", out.Authed, out.AuthSource)
+	}
+	if out.AuthPathChecked == "" {
+		t.Fatal("AuthPathChecked must be set even when logged out")
+	}
+
+	t.Setenv("XAI_API_KEY", "sk-test")
+	out = ProbeAuth()
+	if !out.Authed || out.AuthSource != "xai_api_key" {
+		t.Fatalf("logged in: authed=%v src=%s", out.Authed, out.AuthSource)
+	}
+}

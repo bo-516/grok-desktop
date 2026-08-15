@@ -34,6 +34,23 @@ export type EnvironmentInfo = {
   poolCapacity: number;
 };
 
+/**
+ * Auth-only probe result — the cheap subset of {@link EnvironmentInfo}.
+ *
+ * Answers `check_auth`, which reads the XAI_API_KEY env var and stats
+ * `~/.grok/auth.json` and never spawns the CLI. That is what makes it safe for
+ * the desktop's 3s login poll; `check_environment` runs `grok --version` and
+ * must not be called on that cadence.
+ */
+export type AuthProbe = {
+  /** True when a usable credential exists (env key or cached token file). */
+  authed: boolean;
+  /** Which credential won; `none` when logged out. */
+  authSource: EnvironmentInfo["authSource"];
+  /** Absolute path stat-ed for the cached token (shown in Settings). */
+  authPathChecked: string;
+};
+
 /** Generic CLI/channel RPC result for inspect/sessions/mcp/worktree. */
 export type CliChannelResult = {
   requestId: string;
@@ -66,6 +83,12 @@ export type ClientMsg =
   | { type: "close_session"; sessionId: string }
   | { type: "list_pool" }
   | { type: "check_environment" }
+  /**
+   * Cheap login-state probe for the desktop's 3s poll; answered with
+   * `auth_state`. Never spawns the CLI — send `check_environment` instead when
+   * the binary path / version / ok message also has to be refreshed.
+   */
+  | { type: "check_auth" }
   | { type: "list_workspace_entries"; requestId: string; query: string; cwd?: string }
   /** Write text under workspace cwd (F-NATIVE-06 apply accepted hunks). */
   | {
@@ -298,6 +321,8 @@ export type ServerMsg =
     }
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
+  /** Answer to `check_auth`: login state only, cheap enough to poll. */
+  | { type: "auth_state"; auth: AuthProbe }
   | { type: "stderr"; text: string; sessionId?: string }
   | { type: "error"; message: string; sessionId?: string }
   | { type: "info"; message: string; sessionId?: string }

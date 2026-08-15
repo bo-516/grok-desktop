@@ -6,7 +6,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { WebSocket } from "ws";
-import { checkEnvironment } from "./environment.js";
+import { checkEnvironment, probeAuthSource } from "./environment.js";
 import type { ClientMsg, ServerMsg } from "./protocol.js";
 import {
   readWorkspaceFileForEmbed,
@@ -82,6 +82,12 @@ export async function dispatchClientMsg(
   if (msg.type === "check_environment") {
     const env = await checkEnvironment(poolCapacity);
     send(ws, { type: "environment", env });
+    return;
+  }
+  // Login-state only: env var read + one stat, no `grok --version` spawn, so
+  // the desktop can run this every 3s without a process per tick.
+  if (msg.type === "check_auth") {
+    send(ws, { type: "auth_state", auth: probeAuthSource() });
     return;
   }
   if (msg.type === "list_pool") {

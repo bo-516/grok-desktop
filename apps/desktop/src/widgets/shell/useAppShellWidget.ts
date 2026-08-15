@@ -73,6 +73,8 @@ export function useAppShellWidget() {
   const clearRestartNotice = useSessionStore((s) => s.clearRestartNotice);
   const removeSession = useSessionStore((s) => s.removeSession);
   const runCli = useSessionStore((s) => s.runCli);
+  /** Login + immediate re-probe; the banner's Login button and the gate share it. */
+  const authLogin = useSessionStore((s) => s.authLogin);
   const sendPrompt = useSessionStore((s) => s.sendPrompt);
   const newSession = useSessionStore((s) => s.newSession);
   const promptQueue = useSessionStore((s) => s.promptQueue);
@@ -326,6 +328,7 @@ export function useAppShellWidget() {
     clearRestartNotice,
     removeSession,
     runCli,
+    authLogin,
     sendPrompt,
     promptQueue,
     live,

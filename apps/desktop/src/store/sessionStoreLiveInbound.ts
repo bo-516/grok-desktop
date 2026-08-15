@@ -71,6 +71,12 @@ export type LiveStoreSlice = {
   poolEntries: PoolEntry[];
   /** CLI / login probe; null means not received yet. */
   environment: EnvironmentInfo | null;
+  /**
+   * Login flag written by both the environment probe and the 3s `auth_state`
+   * poll; null until one of them answers. Optional so older call sites that
+   * build a slice literal still type-check.
+   */
+  authed?: boolean | null;
   /** Queued user prompts while streaming (session-scoped items). */
   promptQueue: PromptQueueItem[];
   /** SPAWN restart banner (J-06). */
