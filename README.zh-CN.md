@@ -18,7 +18,7 @@
 
 **先装 agent。** 这个应用是真实 `grok` CLI 的窗口，所以 CLI 必须在 PATH 上（或位于 `~/.grok/bin/grok`）并已 `grok login` —— 或者设好 `XAI_API_KEY`。没有它桥也能起来，但 UI 会显示鉴权横幅。
 
-**macOS**：构建产物只做了 ad-hoc 签名，没有公证，首次打开会被 Gatekeeper 拦下。清一次隔离属性即可：
+**macOS**：构建产物只做了 ad-hoc 签名，没有公证，首次打开会被 Gatekeeper 拦下。双击一次，然后到 **系统设置 → 隐私与安全性 → 仍要打开** 放行即可（Sequoia 之后「右键 → 打开」这个老办法已经不管用了）。之后每次打开都正常。想用一条命令解决也行：
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"

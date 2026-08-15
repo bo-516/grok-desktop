@@ -18,7 +18,7 @@ Every version: [Releases](https://github.com/bo-516/grok-desktop/releases).
 
 **First, install the agent.** The app is a window onto the real `grok` CLI, so it has to be on PATH (or at `~/.grok/bin/grok`) and signed in with `grok login` — or set `XAI_API_KEY`. Without it the bridge starts and the UI shows an auth banner.
 
-**macOS**: builds are ad-hoc signed, not notarized, so Gatekeeper blocks the first launch. Clear the quarantine flag once:
+**macOS**: builds are ad-hoc signed, not notarized, so Gatekeeper blocks the first launch. Double-click it once, then allow it under **System Settings → Privacy & Security → Open Anyway**. (Control-clicking the app no longer gets around this on Sequoia and later.) Every launch after that is normal. If you'd rather do it in one command:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
