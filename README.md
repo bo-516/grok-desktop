@@ -1,5 +1,7 @@
 [README](README.md) · [README (zh)](README.zh-CN.md)
 
+<img src="apps/shell/icons/appicon-256.png" width="104" alt="Grok Desktop">
+
 # grok-desktop
 
 A desktop client for [grok-build](https://docs.x.ai/build/overview). It speaks Agent Client Protocol (ACP) over stdio to a real `grok agent stdio` process — the agent loop stays in grok-build; this is the window onto it.

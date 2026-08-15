@@ -1,5 +1,7 @@
 [README](README.md) · [README (zh)](README.zh-CN.md)
 
+<img src="apps/shell/icons/appicon-256.png" width="104" alt="Grok Desktop">
+
 # grok-desktop
 
 [grok-build](https://docs.x.ai/build/overview) 的桌面客户端。通过 stdio 与真实的 `grok agent stdio` 进程讲 Agent Client Protocol（ACP）—— agent 循环留在 grok-build，这里只做它的窗口。
