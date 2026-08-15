@@ -72,6 +72,7 @@ func ReadGrokVersion(bin string, timeoutMs int) *string {
 	}
 	cmd := exec.Command(bin, "--version")
 	cmd.Env = os.Environ()
+	spawn.HideConsoleWindow(cmd)
 	done := make(chan string, 1)
 	go func() {
 		out, err := cmd.CombinedOutput()

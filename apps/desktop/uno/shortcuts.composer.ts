@@ -15,9 +15,11 @@ export const composerShortcuts: Record<string, string> = {
     /*
      * Card chrome: idle and focused look the same (no focus border tint).
      * Field listening / dragover stay on .composer-input-wrap for mode feedback.
+     * z-30 beats the live-turn strip (`.turn-status` z-10) so the command line
+     * and its upward @ / / menu paint above Thinking instead of under it.
      */
     composer:
-      "relative flex flex-col gap-2.5 min-w-0 max-w-full px-3.5 pt-3.5 pb-2.75 rounded-dock border border-transparent bg-composer shadow-composer transition-[box-shadow,background-color] duration-normal ease-soft",
+      "relative z-30 flex flex-col gap-2.5 min-w-0 max-w-full px-3.5 pt-3.5 pb-2.75 rounded-dock border border-transparent bg-composer shadow-composer transition-[box-shadow,background-color] duration-normal ease-soft",
     /*
      * Mid-turn follow-up panel (Codex / Claude): sibling ABOVE `.composer`,
      * never inside the input card. `mx-1.5` + dedicated queue fill/border
@@ -66,9 +68,11 @@ export const composerShortcuts: Record<string, string> = {
      *   filtered list mutates mid-keystroke
      * - scrollbar-gutter-stable keeps label ellipsis width fixed when the thumb
      *   appears (otherwise text reflows horizontally and looks like jitter)
+     * - z-30 matches other composer menus so the list wins inside the card
+     *   stacking context (mode / model menus use the same layer)
      */
     "composer-suggestions":
-      "absolute right-0 bottom-[calc(100%+8px)] left-0 flex max-h-80 flex-col overflow-x-hidden overflow-y-auto overflow-anchor-none scrollbar-gutter-stable border border-line-suggestion rounded-card bg-composer-suggestion shadow-composer-suggestions animate-overlay-in py-1",
+      "absolute right-0 bottom-[calc(100%+8px)] left-0 z-30 flex max-h-80 flex-col overflow-x-hidden overflow-y-auto overflow-anchor-none scrollbar-gutter-stable border border-line-suggestion rounded-card bg-composer-suggestion shadow-composer-suggestions animate-overlay-in py-1",
     /* Inner stack; shrink-0 so flex never crushes rows when the shell scrolls. */
     "composer-suggestions-content": "flex w-full shrink-0 flex-col",
     "composer-suggestion":

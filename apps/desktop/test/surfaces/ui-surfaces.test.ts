@@ -1713,6 +1713,13 @@ describe("UI surface presence", () => {
     assert.match(turnStatus, /\bisolate\b/);
     assert.doesNotMatch(turnStatus, /\bbg-inherit\b/);
     assert.doesNotMatch(turnStatus, /\bsticky\b/);
+    // Command line + @ / / menu must stack above the Thinking strip.
+    const composerCard =
+      shortcuts.match(/\n\s+composer:\s*\n\s+"([^"]+)"/)?.[1] ?? "";
+    const composerSuggestions =
+      shortcuts.match(/"composer-suggestions":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(composerCard, /\bz-30\b/);
+    assert.match(composerSuggestions, /\bz-30\b/);
     assert.match(mdInline, /\bbg-white-chip\b/);
     assert.match(mdThead, /\bbg-white-soft\b/);
     assert.match(mdThead, /border-b\b/);

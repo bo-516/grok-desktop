@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 )
 
 // Managed file names (prefix order matters — see T-ORD-02).
@@ -62,6 +64,7 @@ func ResolveProjectRoot(cwd string) (projectRoot string, gitRepo bool) {
 		abs = cwd
 	}
 	cmd := exec.Command("git", "-C", abs, "rev-parse", "--show-toplevel")
+	spawn.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err == nil {
 		top := strings.TrimSpace(string(out))

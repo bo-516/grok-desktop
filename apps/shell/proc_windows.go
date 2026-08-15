@@ -5,14 +5,24 @@ package main
 import (
 	"log"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
-// configureBridgeProcAttr is a no-op on Windows for now.
+// createNoWindow is CREATE_NO_WINDOW. syscall does not export it, and pulling
+// golang.org/x/sys in for one constant is not worth a direct dependency.
+const createNoWindow = 0x08000000
+
+// configureBridgeProcAttr keeps the bridge child's console off-screen. The shell
+// links with -H windowsgui and owns no console, so spawning a console binary
+// would otherwise park a black window next to the app window.
 // Future: assign the bridge to a Job Object with KILL_ON_JOB_CLOSE
 // (see plan §3.1) so MCP/agent grandchildren are reaped reliably.
 func configureBridgeProcAttr(cmd *exec.Cmd) {
-	// Intentionally empty until Job Object wiring lands with bridge-go.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow,
+	}
 }
 
 // processAlive is best-effort on Windows; always true so WaitUntilListening

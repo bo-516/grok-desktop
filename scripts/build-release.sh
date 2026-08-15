@@ -27,6 +27,11 @@ BUNDLE_ID="io.github.bo516.grokdesktop"
 TARGET="${1:-all}"
 VERSION="${VERSION:-$(node -p "require('$ROOT/package.json').version")}"
 
+# -trimpath keeps the builder's home directory out of shipped binaries;
+# -s -w drops the symbol table and DWARF from public artifacts.
+GOFLAGS_REL="-trimpath"
+LDFLAGS_REL="-s -w"
+
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 
 # --- frontend (platform independent, embedded into every shell binary) -------
@@ -46,14 +51,14 @@ build_mac() {
   log "macOS bridge (arm64 + amd64)"
   mkdir -p "$tmp"
   (cd "$ROOT/apps/bridge-go" &&
-    GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o "$tmp/bridge-arm64" ./cmd/bridge &&
-    GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o "$tmp/bridge-amd64" ./cmd/bridge)
+    GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $GOFLAGS_REL -ldflags "$LDFLAGS_REL" -o "$tmp/bridge-arm64" ./cmd/bridge &&
+    GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $GOFLAGS_REL -ldflags "$LDFLAGS_REL" -o "$tmp/bridge-amd64" ./cmd/bridge)
 
   log "macOS shell (arm64 + amd64)"
   # CGO is required for WKWebView; clang cross-compiles the amd64 slice on Apple silicon.
   (cd "$ROOT/apps/shell" &&
-    GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o "$tmp/shell-arm64" . 2>/dev/null &&
-    GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o "$tmp/shell-amd64" . 2>/dev/null)
+    GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $GOFLAGS_REL -ldflags "$LDFLAGS_REL" -o "$tmp/shell-arm64" . 2>/dev/null &&
+    GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $GOFLAGS_REL -ldflags "$LDFLAGS_REL" -o "$tmp/shell-amd64" . 2>/dev/null)
 
   log "assembling $APP_NAME.app"
   rm -rf "$app"
@@ -106,10 +111,15 @@ build_windows() {
   rm -rf "$dir"
   mkdir -p "$dir"
   # Wails loads WebView2 through go-winloader, so no cgo toolchain is needed.
+  # -H windowsgui puts the shell in the GUI subsystem: without it Windows opens
+  # a console window next to the app. The bridge stays a console binary and is
+  # spawned with CREATE_NO_WINDOW (apps/shell/proc_windows.go).
   (cd "$ROOT/apps/shell" &&
-    GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$dir/grok-desktop.exe" .)
+    GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $GOFLAGS_REL \
+      -ldflags "$LDFLAGS_REL -H windowsgui" -o "$dir/grok-desktop.exe" .)
   (cd "$ROOT/apps/bridge-go" &&
-    GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$dir/bridge-go.exe" ./cmd/bridge)
+    GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $GOFLAGS_REL \
+      -ldflags "$LDFLAGS_REL" -o "$dir/bridge-go.exe" ./cmd/bridge)
 
   cat >"$dir/README.txt" <<'TXT'
 Grok Desktop — Windows

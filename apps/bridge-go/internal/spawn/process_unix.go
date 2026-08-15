@@ -8,6 +8,10 @@ import (
 	"syscall"
 )
 
+// HideConsoleWindow is a no-op outside Windows; only that platform pops a
+// console window for child processes. See process_windows.go.
+func HideConsoleWindow(cmd *exec.Cmd) {}
+
 // configureProcessGroup puts the child in its own process group (setpgid).
 // Returns true when group kill via kill(-pid) is available.
 func configureProcessGroup(cmd *exec.Cmd) bool {

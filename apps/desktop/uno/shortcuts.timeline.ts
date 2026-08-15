@@ -132,6 +132,10 @@ export const timelineShortcuts: Record<string, string> = {
      * The fill must stay OPAQUE (bg-timeline, never inherit / white-*):
      * ShinyText uses a transparent glyph fill, and isolate keeps that
      * compositing against the pill. mb-2 separates it from the input card.
+     *
+     * z-10 stays *below* `.composer` (z-30): the strip is a sibling above
+     * the card in flow, but the command line's upward @ / / menu must
+     * cover it. Isolate is only for ShinyText compositing, not stacking rank.
      */
     "turn-status":
       "relative z-10 isolate mb-2 ml-0.5 flex w-fit max-w-full items-center gap-2 rounded-pill bg-timeline px-3 py-1.5 shadow-float animate-turn-status-in",

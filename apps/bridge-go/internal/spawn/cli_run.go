@@ -59,6 +59,7 @@ func RunGrokCli(args []string, cwd string, timeoutMs int) (CliRunResult, error) 
 		cmd.Dir = cwd
 	}
 	cmd.Env = os.Environ()
+	HideConsoleWindow(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

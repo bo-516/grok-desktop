@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 )
 
 // WorkspaceEntry is an @mention completion candidate.
@@ -225,6 +227,7 @@ func annotateIgnoredFlags(workspaceAbs string, entries []WorkspaceEntry) []Works
 func runGitCheckIgnore(workspaceAbs string, paths []string) (map[string]bool, bool) {
 	cmd := exec.Command("git", "check-ignore", "--stdin", "-z", "--no-index")
 	cmd.Dir = workspaceAbs
+	spawn.HideConsoleWindow(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, false

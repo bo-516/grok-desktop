@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
@@ -79,6 +80,8 @@ func (r *TerminalRegistry) Create(workspaceAbs string, params TerminalCreatePara
 	}
 	// Whitelist parent env (F-CFG-05) then merge agent overrides through the same filter.
 	cmd.Env = filterTerminalEnv(os.Environ(), params.Env)
+	// Agent-run commands are headless: never let one flash a console window.
+	spawn.HideConsoleWindow(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
