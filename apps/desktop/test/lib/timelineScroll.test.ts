@@ -5,8 +5,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  isEdgeNear,
   isScrollNearBottom,
+  scrollDeltaToAlignBottoms,
   scrollTopForBottom,
+  shouldRepinOnEnable,
   TIMELINE_STICK_THRESHOLD_PX,
 } from "@/lib/timelineScroll";
 
@@ -65,5 +68,26 @@ describe("timelineScroll", () => {
 
   it("exports a positive default threshold", () => {
     assert.ok(TIMELINE_STICK_THRESHOLD_PX > 0);
+  });
+
+  it("shouldRepinOnEnable only fires on the false→true edge", () => {
+    assert.equal(shouldRepinOnEnable(false, true), true);
+    assert.equal(shouldRepinOnEnable(true, true), false);
+    assert.equal(shouldRepinOnEnable(true, false), false);
+    assert.equal(shouldRepinOnEnable(false, false), false);
+  });
+
+  it("isEdgeNear pins when a thought tail sits on the rail fold", () => {
+    assert.equal(isEdgeNear(400, 400), true);
+    assert.equal(isEdgeNear(400, 400 - TIMELINE_STICK_THRESHOLD_PX), true);
+    assert.equal(isEdgeNear(400, 400 + TIMELINE_STICK_THRESHOLD_PX), true);
+    assert.equal(isEdgeNear(400, 400 - TIMELINE_STICK_THRESHOLD_PX - 1), false);
+    assert.equal(isEdgeNear(400, 400 + TIMELINE_STICK_THRESHOLD_PX + 1), false);
+  });
+
+  it("scrollDeltaToAlignBottoms is the signed tail gap", () => {
+    assert.equal(scrollDeltaToAlignBottoms(400, 480), 80);
+    assert.equal(scrollDeltaToAlignBottoms(400, 350), -50);
+    assert.equal(scrollDeltaToAlignBottoms(400, 400), 0);
   });
 });

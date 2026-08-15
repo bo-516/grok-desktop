@@ -41,3 +41,50 @@ export function scrollTopForBottom(
   }
   return Math.max(0, el.scrollHeight - el.clientHeight);
 }
+
+/**
+ * Whether a follow-scroll surface should force-pin on this enable edge.
+ * Used by the turn-rail so a new thought/tool does not re-pin someone who
+ * scrolled up, while a live rail that just opened still starts on the tail.
+ * @param wasEnabled Previous frame's follow flag.
+ * @param enabled Current follow flag.
+ * @returns true only on the false→true edge.
+ */
+export function shouldRepinOnEnable(
+  wasEnabled: boolean,
+  enabled: boolean,
+): boolean {
+  return enabled && !wasEnabled;
+}
+
+/**
+ * Whether two viewport edges are close enough to count as still pinned.
+ * Used to follow a thought tail (not the whole rail) so later tool rows
+ * below the thought do not steal the pin.
+ * @param portBottom Viewport bottom of the overflow container.
+ * @param itemBottom Viewport bottom of the followed element.
+ * @param thresholdPx Absolute slack; negatives clamp to 0.
+ * @returns true when |portBottom - itemBottom| ≤ threshold.
+ */
+export function isEdgeNear(
+  portBottom: number,
+  itemBottom: number,
+  thresholdPx: number = TIMELINE_STICK_THRESHOLD_PX,
+): boolean {
+  const threshold = Math.max(0, thresholdPx);
+  return Math.abs(portBottom - itemBottom) <= threshold;
+}
+
+/**
+ * scrollTop delta that places `itemBottom` on `portBottom`.
+ * Positive scrolls down (tail grew past the fold); negative scrolls up.
+ * @param portBottom Viewport bottom of the overflow container.
+ * @param itemBottom Viewport bottom of the followed element.
+ * @returns Signed delta to add to the port's current scrollTop.
+ */
+export function scrollDeltaToAlignBottoms(
+  portBottom: number,
+  itemBottom: number,
+): number {
+  return itemBottom - portBottom;
+}

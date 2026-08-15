@@ -86,7 +86,10 @@ export const timelineShortcuts: Record<string, string> = {
      * Agents inspect (`.agents-transcript`) lifts max-h + overflow so the
      * 300px drawer has one scroller — the timeline — not a mid-pane bar. */
     "turn-rail":
-      "flex flex-col gap-1 pl-3 pb-2 border-l border-l-rail-line w-full max-w-full min-h-0 max-h-[max(280px,min(50vh,560px))] overflow-y-auto overscroll-contain",
+      "flex flex-col pl-3 pb-2 border-l border-l-rail-line w-full max-w-full min-h-0 max-h-[max(280px,min(50vh,560px))] overflow-y-auto overscroll-contain",
+    /* Growing inner: ResizeObserver target for live stick-to-bottom. Gap
+     * lives here (not on the port) so the observer sees thought/tool growth. */
+    "turn-rail-body": "flex flex-col gap-1 w-full max-w-full min-w-0",
     "turn-step-row": "flex flex-col w-full max-w-full min-w-0",
     /* Shared step geometry for narration / thought / tool rows inside the rail.
      * items-center vertically aligns the 12px Lucide chevron with text-12px /

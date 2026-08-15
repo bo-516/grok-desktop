@@ -3,13 +3,15 @@
  * Defaults open on mount so expanding a Worked rail reveals segment bodies;
  * user can still collapse. Uses turn-step geometry (shell-toggle only on the
  * Codex-style turn rail header). Expand chrome is {@link CollapsibleStepView}.
+ * Expanded groups follow the last segment's growth inside the turn-rail.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { TimelineItem } from "@grok-desktop/acp-core";
 import { formatThoughtGroupLabel } from "@/lib/thoughtLabel";
 import type { ThoughtGroupUnit } from "@/lib/thoughtGrouping";
 import { CollapsibleStepView } from "@/widgets/shared";
+import { useFollowThoughtInRail } from "./useFollowThoughtInRail";
 
 type ThoughtItem = Extract<TimelineItem, { kind: "thought" }>;
 
@@ -20,6 +22,7 @@ type ThoughtGroupViewProps = {
 
 /**
  * Summary row for adjacent thoughts; expands to per-segment bodies.
+ * While open and the last segment is live, new text keeps the turn-rail on the tail.
  * @param props Group unit with items and totalMs; missing durations degrade the label.
  * @returns A turn-step toggle plus optional expanded segment list.
  */
@@ -28,6 +31,20 @@ export function ThoughtGroupView(props: ThoughtGroupViewProps) {
   /** Open by default when the parent Worked rail mounts this body. */
   const [isOpen, setIsOpen] = useState(true);
   const label = formatThoughtGroupLabel(unit.totalMs, unit.count);
+  /** Last segment in the group (the one that may still be streaming). */
+  const lastItem = unit.items[unit.items.length - 1];
+  /** Last segment text — grows while the group is still streaming. */
+  const lastText = lastItem?.text ?? "";
+  /** True when the last segment has not finalized (still receiving chunks). */
+  const lastLive = lastItem !== undefined && lastItem.completedAt === undefined;
+  /** Group body — follow-scroll target for the last segment's tail. */
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useFollowThoughtInRail({
+    open: isOpen,
+    enabled: lastLive,
+    contentKey: `${unit.items.length}:${lastText}`,
+    bodyRef,
+  });
 
   return (
     <CollapsibleStepView
@@ -35,7 +52,7 @@ export function ThoughtGroupView(props: ThoughtGroupViewProps) {
       onToggle={() => setIsOpen((open) => !open)}
       label={label}
       body={
-        <div className="thought-group-segments">
+        <div ref={bodyRef} className="thought-group-segments">
           {unit.items.map((item, index) => (
             <ThoughtSegmentBody key={item.id} item={item} index={index} />
           ))}

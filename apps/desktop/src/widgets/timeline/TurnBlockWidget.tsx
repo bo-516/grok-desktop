@@ -3,6 +3,7 @@
  * Owns isOpen / durationMs. History rails stay collapsed on open; only the live
  * streaming turn expands by default. Auto-collapses on live→done when the user
  * has not toggled (so reopening a session never re-expands finished work).
+ * Forwards `compact` to the rail so inspect does not run inner follow-scroll.
  */
 
 import cs from "classnames";
@@ -197,6 +198,7 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
                 sessionStatus={sessionStatus}
                 toolCalls={toolCalls}
                 live={live}
+                compact={compact}
               />
             }
             variant="shell-toggle"

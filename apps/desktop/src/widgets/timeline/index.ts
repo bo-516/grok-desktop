@@ -7,6 +7,8 @@ export { useTimelineWidget } from "./useTimelineWidget";
 export { useTimelineModel } from "./useTimelineModel";
 export type { TimelineWidgetModel } from "./useTimelineModel";
 export { useTimelineEntranceBaseline } from "./useTimelineEntranceBaseline";
+export { useTurnRailStickToBottom } from "./useTurnRailStickToBottom";
+export { useFollowThoughtInRail } from "./useFollowThoughtInRail";
 export { ThoughtWidget } from "./ThoughtWidget";
 export { ThoughtGroupView } from "./ThoughtGroupView";
 export { TurnBlockWidget } from "./TurnBlockWidget";

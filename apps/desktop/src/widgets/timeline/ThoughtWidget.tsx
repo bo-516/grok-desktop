@@ -6,6 +6,8 @@
  * Codex-style shell-toggle. Defaults open on mount (parent Worked body only
  * mounts when the rail is expanded or live); completed rows auto-collapse
  * unless the user already toggled expand. Chrome is {@link CollapsibleStepView}.
+ * Expanded streaming bodies follow new text inside the turn-rail
+ * ({@link useFollowThoughtInRail}) so the tail is not left below the fold.
  */
 
 import cs from "classnames";
@@ -17,6 +19,7 @@ import {
   shouldAutoCollapseThought,
 } from "@/lib/thoughtLabel";
 import { CollapsibleStepView } from "@/widgets/shared";
+import { useFollowThoughtInRail } from "./useFollowThoughtInRail";
 
 type ThoughtItem = Extract<TimelineItem, { kind: "thought" }>;
 
@@ -27,6 +30,7 @@ type ThoughtWidgetProps = {
 
 /**
  * Renders an expandable agent-reasoning segment without mixing reasoning into the final answer body.
+ * While open and live, new text keeps the turn-rail on the body's tail.
  * @param props Thought fragment and session status; missing timestamps safely degrade to a generic Thought label.
  * @returns A Thinking step row the user can expand or collapse.
  */
@@ -41,9 +45,17 @@ export function ThoughtWidget(props: ThoughtWidgetProps) {
   const userToggledRef = useRef(false);
   /** Previous completedAt so we only auto-collapse on the streaming → done edge. */
   const prevCompletedAtRef = useRef(item.completedAt);
+  /** Expanded body — follow-scroll target for streaming thought text. */
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const label = formatThoughtLabel(item, sessionStatus);
   const isDone = item.completedAt !== undefined;
   const isLive = !isDone && sessionStatus === "streaming";
+  useFollowThoughtInRail({
+    open: isOpen,
+    enabled: isLive,
+    contentKey: item.text ?? "",
+    bodyRef,
+  });
   const className = cs("item-thought", { "item-thought-open": isOpen });
   /**
    * Live rows read as a single shimmering word (Codex-style); finished rows are
@@ -80,7 +92,11 @@ export function ThoughtWidget(props: ThoughtWidgetProps) {
       }}
       label={labelNode}
       body={
-        item.text ? <div className="turn-step-body">{item.text}</div> : null
+        item.text ? (
+          <div ref={bodyRef} className="turn-step-body">
+            {item.text}
+          </div>
+        ) : null
       }
       variant="turn-step"
       active={!isDone}
