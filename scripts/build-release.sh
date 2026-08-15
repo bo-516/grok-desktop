@@ -10,6 +10,11 @@
 # The shell finds the bridge next to its own executable (Windows) or in
 # Contents/Resources (macOS) — see apps/shell/paths.go.
 #
+# Icons come from apps/shell/icons/: icon.icns is copied into the bundle, and
+# the Windows .exe icon rides in the committed apps/shell/rsrc_windows_amd64.syso
+# that `go build` links automatically. Both regenerate from appicon.svg via
+# scripts/build-icons.mjs.
+#
 # Linux is not built here: Wails needs cgo + webkit2gtk, which cannot cross-
 # compile from macOS. Build it on a Linux host with apps/shell/build/build.sh.
 set -euo pipefail
@@ -56,6 +61,7 @@ build_mac() {
   lipo -create -output "$macos/grok-desktop" "$tmp/shell-arm64" "$tmp/shell-amd64"
   lipo -create -output "$resources/bridge-go" "$tmp/bridge-arm64" "$tmp/bridge-amd64"
   chmod +x "$macos/grok-desktop" "$resources/bridge-go"
+  cp "$ROOT/apps/shell/icons/icon.icns" "$resources/icon.icns"
   rm -rf "$tmp"
 
   cat >"$app/Contents/Info.plist" <<PLIST
@@ -66,6 +72,7 @@ build_mac() {
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundleExecutable</key><string>grok-desktop</string>
+  <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>

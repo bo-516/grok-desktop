@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="512" y1="86" x2="512" y2="938" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#191A1C"/>
+      <stop offset="1" stop-color="#060607"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="512" y1="86" x2="512" y2="938" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="86" y="86" width="852" height="852" rx="196" fill="url(#tile)"/>
+  <rect x="90" y="90" width="844" height="844" rx="192" fill="none" stroke="url(#edge)" stroke-width="8"/>
+
+  <!-- Glyph box is 457x477 around (552.5, 527.5); park it on the tile centre and fatten it. -->
+  <g transform="translate(512 512) scale(1.12) translate(-552.5 -527.5)">
+    <g fill="none" stroke="#F5F6F7" stroke-width="132" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M390 700 L660 355"/>
+      <path d="M622 687 L715 569"/>
+    </g>
+    <g fill="#0A0B0C">
+      <circle cx="652" cy="404" r="24"/>
+      <circle cx="592" cy="404" r="24"/>
+    </g>
+  </g>
+</svg>
