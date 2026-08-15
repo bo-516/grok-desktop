@@ -2,9 +2,9 @@
 
 # grok-desktop
 
-> **Status: Work in progress (WIP)** — APIs, UI, and commands may change at any time; not recommended for production use.
+A desktop client for [grok-build](https://docs.x.ai/build/overview). It speaks Agent Client Protocol (ACP) over stdio to a real `grok agent stdio` process — the agent loop stays in grok-build; this is the window onto it.
 
-Desktop ACP client for [grok-build](https://docs.x.ai/build/overview) — **do not rewrite the agent loop**; speak Agent Client Protocol over stdio.
+> Hit a bug or want a feature? Please [open an issue](https://github.com/bo-516/grok-desktop/issues).
 
 | Doc | Topic |
 |---|---|
@@ -14,9 +14,9 @@ Desktop ACP client for [grok-build](https://docs.x.ai/build/overview) — **do n
 | [`docs/protocol-freeze-relay-2026-08-10.md`](docs/protocol-freeze-relay-2026-08-10.md) | Bridge ↔ UI WebSocket relay |
 | [`docs/qa/index.md`](docs/qa/index.md) | QA cases by surface |
 
-## Product rule: real grok-build only
+## Real grok-build only
 
-| Allowed | Forbidden (product / UI / acceptance) |
+| Allowed | Never |
 |---|---|
 | `grok agent stdio` via `npm run bridge` / `npm run m0:live` / `npm run demo:e2e` | Mock agent UI, offline fixture as “session”, silent fallback to mock |
 | Workspace demo under `demo/` | Pretending mock is a live agent |
@@ -99,16 +99,6 @@ npm run run:both
 - **Composer**: Enter to send, Shift+Enter for newline; Ask / Plan / Build; Thinking; `/model` `/effort` `/fork` `/rewind`; follow-up queue; context-usage ring; weekly remaining
 - **⌘K**: actions, settings, slash stubs, MCP servers, and skills (sessions stay in the rail)
 - Bridge down → offline banner; history still shown; **auto-reconnect every 3s** (footer Reconnect still works)
-
-### Dev: ai-inspector (⌘-click → Grok Build)
-
-Desktop **dev** mounts an intent inspector so you can pick a rendered element, describe the change, and hand off to **Grok Build** (and other agents) without leaving the UI.
-
-- **Hotkey**: `Alt+Shift+I` toggles picker mode
-- **Click**: hold ⌘ (macOS) / Ctrl (elsewhere) and click a component
-- **Enter** in the intent dialog defaults to **Grok Build**; handoff `cwd` is the monorepo root
-- Source `@` refs are monorepo-relative (`@apps/desktop/…`); screenshots / stills use **absolute** paths (configurable via `pathStyle` / `artifactPathStyle`)
-- Artifacts land under `apps/desktop/.intent-inspector/` (gitignored)
 
 ### Live e2e (stdio, tools, subagent)
 

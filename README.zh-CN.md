@@ -2,9 +2,9 @@
 
 # grok-desktop
 
-> **状态：开发中（WIP）** — API、界面和命令随时可能变，不建议用于生产。
+[grok-build](https://docs.x.ai/build/overview) 的桌面客户端。通过 stdio 与真实的 `grok agent stdio` 进程讲 Agent Client Protocol（ACP）—— agent 循环留在 grok-build，这里只做它的窗口。
 
-[grok-build](https://docs.x.ai/build/overview) 的桌面 ACP 客户端 — **不要重写 agent 循环**；通过 stdio 讲 Agent Client Protocol。
+> 遇到 bug 或想要新功能？欢迎[提 issue](https://github.com/bo-516/grok-desktop/issues)。
 
 | 文档 | 内容 |
 |---|---|
@@ -14,9 +14,9 @@
 | [`docs/protocol-freeze-relay-2026-08-10.md`](docs/protocol-freeze-relay-2026-08-10.md) | Bridge ↔ UI WebSocket 中继 |
 | [`docs/qa/index.md`](docs/qa/index.md) | 按界面拆分的 QA 用例 |
 
-## 产品硬约束：只连真实 grok-build
+## 只连真实 grok-build
 
-| 允许 | 禁止（产品 / UI / 验收） |
+| 允许 | 绝不 |
 |---|---|
 | `npm run bridge` / `npm run m0:live` / `npm run demo:e2e` 拉起 `grok agent stdio` | Mock agent UI、把离线 fixture 当「会话」、静默回退到 mock |
 | `demo/` 下的演示工作区 | 把 mock 假装成 live agent |
@@ -99,16 +99,6 @@ npm run run:both
 - **输入框**：Enter 发送，Shift+Enter 换行；Ask / Plan / Build；Thinking；`/model` `/effort` `/fork` `/rewind`；后续队列；上下文占用环；每周剩余额度
 - **⌘K**：动作、设置、slash 草稿、MCP 服务器、skills（会话仍在侧栏）
 - 桥断开 → 离线横幅；历史仍可看；**每 3 秒自动重连**（页脚 Reconnect 仍可用）
-
-### 开发：ai-inspector（⌘-click → Grok Build）
-
-桌面 **dev** 会挂上意图检查器，可点选界面元素、描述改动，并交给 **Grok Build**（以及其他 agent），无需离开 UI。
-
-- **快捷键**：`Alt+Shift+I` 切换拾取模式
-- **点击**：按住 ⌘（macOS）/ Ctrl（其他）再点组件
-- 意图对话框里 **Enter** 默认交给 **Grok Build**；handoff `cwd` 是 monorepo 根
-- 源码 `@` 引用是相对 monorepo 的（`@apps/desktop/…`）；截图 / 静帧用**绝对路径**（可用 `pathStyle` / `artifactPathStyle` 配置）
-- 产物落在 `apps/desktop/.intent-inspector/`（已 gitignore）
 
 ### Live e2e（stdio、工具、subagent）
 
