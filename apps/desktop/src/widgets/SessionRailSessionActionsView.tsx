@@ -1,12 +1,13 @@
 /**
  * Trailing action cluster for one session rail row.
  * A single parent (`sess-actions`) reserves a 56px track and renders
- * rename + pin + remove as one `sess-btns` group (three 16×28 slots,
- * zero gap). Time overlays the right 24px of that same track so
- * hover-reveal never shifts the title truncation point. Remove no longer
- * lives in a wider, right-aligned time column — the three glyphs share
- * one cadence. Pin stays painted when pinned; rename stays painted
- * while editing (row classes, not this view).
+ * rename + pin + remove as one `sess-btns` group (three 14×28 slots,
+ * 2px gaps) pushed to the track's right edge, so the trailing × lines up
+ * with the relative timestamp painted on the rows above. Time overlays the
+ * right 24px of that same track so hover-reveal never shifts the title
+ * truncation point. Remove no longer lives in a wider, right-aligned time
+ * column — the three glyphs share one cadence. Pin stays painted when
+ * pinned; rename stays painted while editing (row classes, not this view).
  */
 
 import cs from "classnames";

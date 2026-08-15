@@ -1195,6 +1195,12 @@ describe("UI surface presence", () => {
     );
     assert.match(shortcuts, /"sess-actions":/);
     assert.match(shortcuts, /"sess-btns":/);
+    // Cluster hugs the track's right edge so the trailing × keeps the same
+    // right edge as the row timestamp; 2px gaps keep the glyphs from welding.
+    const btnsShortcut = shortcuts.match(/"sess-btns":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(btnsShortcut, /justify-end/);
+    assert.match(btnsShortcut, /w-full/);
+    assert.match(btnsShortcut, /gap-\[2px\]/);
     assert.doesNotMatch(shortcuts, /"sess-status"/);
     assert.match(
       shortcuts,
@@ -1303,7 +1309,7 @@ describe("UI surface presence", () => {
     assert.match(titleInputShortcut, /border-none/);
     assert.match(titleInputShortcut, /h-\[20px\]/);
     assert.doesNotMatch(titleInputShortcut, /ring-2|shadow-\[/);
-    // Shared 16×28 slot so hover-reveal does not jitter. Values must be
+    // Shared 14×28 slot so hover-reveal does not jitter. Values must be
     // string literals (a shared const crashes Uno's jiti config reload).
     const renameShortcut =
       shortcuts.match(/"sess-rename":\s*"([^"]+)"/)?.[1] ?? "";
@@ -1311,7 +1317,7 @@ describe("UI surface presence", () => {
       shortcuts.match(/"sess-pin":\s*"([^"]+)"/)?.[1] ?? "";
     const removeShortcut =
       shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "";
-    assert.match(renameShortcut, /w-\[16px\] h-\[28px\]/);
+    assert.match(renameShortcut, /w-\[14px\] h-\[28px\]/);
     assert.equal(renameShortcut, pinShortcut);
     assert.equal(renameShortcut, removeShortcut);
     assert.doesNotMatch(shortcuts, /const sessActionBtn/);
@@ -1329,10 +1335,10 @@ describe("UI surface presence", () => {
     assert.match(shortcuts, /"sess-actions":[\s\S]*?w-\[56px\]/);
     assert.match(shortcuts, /"sess-time":[\s\S]*?w-\[24px\]/);
     assert.doesNotMatch(shortcuts, /"sess-meta"/);
-    // Close is a sibling 16×28 slot, not a right-aligned overlay in the time column.
+    // Close is a sibling 14×28 slot, not a right-aligned overlay in the time column.
     assert.match(removeShortcut, /p-0/);
     assert.match(removeShortcut, /justify-center/);
-    assert.match(removeShortcut, /w-\[16px\] h-\[28px\]/);
+    assert.match(removeShortcut, /w-\[14px\] h-\[28px\]/);
     assert.doesNotMatch(removeShortcut, /inset-0|absolute right-0/);
     // Hover-reveal pin / time / remove snap — no opacity transition.
     const timeShortcut = shortcuts.match(/"sess-time":\s*"([^"]+)"/)?.[1] ?? "";

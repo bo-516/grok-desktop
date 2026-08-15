@@ -217,9 +217,10 @@ export const sideNavShortcuts: Record<string, string> = {
     "px-2.5 pt-1.5 pb-2 text-11px font-normal tracking-wide text-fg-muted",
   /*
    * Session rows: title | trailing action parent (rename + pin + remove).
-   * One 56px `sess-actions` track owns the three 16×28 buttons (`sess-btns`,
-   * gap-0) plus a 24px time overlay on the right — hover-reveal does not
-   * shift the title truncation point. Height uses px (html font-size is
+   * One 56px `sess-actions` track owns the three 14×28 buttons (`sess-btns`,
+   * right-aligned, 2px gaps) plus a 24px time overlay on the right — hover-
+   * reveal does not shift the title truncation point, and the trailing ×
+   * shares the timestamp's right edge. Height uses px (html font-size is
    * 13px; rem h-* collapses). No leading status dot; live / waiting only
    * lift title color; selection is elevated pill + medium title.
    */
@@ -268,36 +269,43 @@ export const sideNavShortcuts: Record<string, string> = {
   "sess-title-input":
     "h-[20px] box-border border-none outline-none shadow-none appearance-none bg-transparent p-0 m-0 rounded-none select-text caret-fg focus-visible:outline-none",
   /*
-   * Parent track: 16+16+24 = 56px. `sess-btns` packs the three 16×28
-   * buttons from the left (gap-0); time overlays the right 24px so it
-   * never collides with a resting pinned pin (pin occupies 16–32).
+   * Parent track stays 56px so the resting time keeps its position. The
+   * three 14×28 buttons no longer pack from the left: `sess-btns` fills the
+   * track and right-aligns (`justify-end`), so the trailing remove glyph
+   * lands on the same right edge as the `13h` timestamp painted above it.
+   * Left-packing put the × ~8px inboard of that edge and read as a ragged
+   * second column. 14*3 + 2*2 gap = 46px, so the cluster still clears the
+   * time's 24px overlay box.
    */
   "sess-actions": "relative shrink-0 w-[56px] h-[28px]",
-  "sess-btns": "flex items-center gap-0 h-[28px]",
+  "sess-btns": "flex items-center justify-end gap-[2px] w-full h-[28px]",
   /*
-   * Rename / pin / remove share one 16×28 chrome string (keep them in
+   * Rename / pin / remove share one 14×28 chrome string (keep them in
    * lockstep). Width/height are px — html font-size is 13px, so rem
    * `w-4` / `h-7` collapse to 13×23 and leave a hole after the cluster.
-   * Hidden at rest; visible on row hover / focus. Pinned / editing
-   * visibility is forced by the row parent selectors so this base
-   * opacity-0 cannot win. No hover fill — one cluster, one cadence.
+   * The box is 14px wide (not 16) with a 2px gap so the glyphs breathe
+   * instead of reading as one welded strip; height stays 28px because it is
+   * invisible hit area, not chrome. Hidden at rest; visible on row hover /
+   * focus. Pinned / editing visibility is forced by the row parent selectors
+   * so this base opacity-0 cannot win. No hover fill — one cluster, one cadence.
    */
   "sess-rename":
-    "shrink-0 flex items-center justify-center w-[16px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+    "shrink-0 flex items-center justify-center w-[14px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
   "sess-rename-save": "text-fg",
-  "sess-rename-icon": "w-[14px] h-[14px] block shrink-0",
+  "sess-rename-icon": "w-[13px] h-[13px] block shrink-0",
   "sess-pin":
-    "shrink-0 flex items-center justify-center w-[16px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+    "shrink-0 flex items-center justify-center w-[14px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
   "sess-pin-active": "text-fg",
-  "sess-pin-icon": "w-[14px] h-[14px] block shrink-0",
+  "sess-pin-icon": "w-[13px] h-[13px] block shrink-0",
   "sess-remove":
-    "shrink-0 flex items-center justify-center w-[16px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
-  "sess-remove-icon": "w-[14px] h-[14px] block shrink-0",
+    "shrink-0 flex items-center justify-center w-[14px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+  "sess-remove-icon": "w-[13px] h-[13px] block shrink-0",
   /*
    * Resting time: right 24px of `sess-actions` (fits `45s` / `now` / `1d`
-   * / `1mo` at 10px tabular-nums). Hidden on hover / focus so remove
-   * (the third 16px slot, starting at x=32) can sit on the same cadence
-   * as rename and pin. pointer-events-none: it is display-only.
+   * / `1mo` at 10px tabular-nums). Hidden on hover / focus so remove — now
+   * the right-most slot of the same track — can take that edge. The 2px
+   * `pr-0.5` here is what the × glyph's own stroke inset lines up against.
+   * pointer-events-none: it is display-only.
    */
   "sess-time":
     "absolute right-0 top-0 flex items-center justify-end w-[24px] h-[28px] pr-0.5 text-10px leading-none text-fg-muted whitespace-nowrap tabular-nums text-right pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0",
