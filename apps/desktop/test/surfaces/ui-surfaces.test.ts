@@ -1082,13 +1082,19 @@ describe("UI surface presence", () => {
     );
     // Sticky folder hover must stay opaque (sidebar-hover), not white-faint —
     // translucent hover lets scrolled session titles bleed through the name.
+    // The fill rides a rounded ::before overlay; the header's own box stays
+    // square so the opaque mask has no corner notches to leak through.
     {
       const header =
         sideNavShortcuts.match(
           /"project-group-header":\s*"([^"]+)"/,
         )?.[1] ?? "";
-      assert.match(header, /hover:bg-sidebar-hover/);
+      assert.match(header, /hover:before:bg-sidebar-hover/);
       assert.doesNotMatch(header, /hover:bg-white-/);
+      assert.match(header, /before:\([^)]*rounded-8px/);
+      // Radius lives on the overlay only — the masking box itself is square.
+      const headerBox = header.replace(/before:\([^)]*\)/g, "");
+      assert.doesNotMatch(headerBox, /rounded-/);
     }
     const composer = readSrc("widgets/composer/ComposerWidget.tsx");
     assert.match(composer, /ProjectSwitcherWidget/);
@@ -1152,18 +1158,24 @@ describe("UI surface presence", () => {
     assert.match(looseGroup, /onCollapsePreview/);
     assert.match(looseGroup, /SessionRailGroupMoreView/);
     assert.match(looseGroup, /project-group-session-list-scroll/);
-    // Title | trailing actions (pin + meta). No leading status dot.
+    // Title | trailing action parent (rename + pin + remove). No leading status dot.
     const sessionRow = readSrc("widgets/SessionRailSessionRowView.tsx");
-    assert.match(sessionRow, /sess-actions/);
-    assert.match(sessionRow, /sess-meta/);
+    assert.match(sessionRow, /SessionRailSessionActionsView/);
     assert.doesNotMatch(sessionRow, /sess-status/);
-    assert.match(sessionRow, /sess-pin/);
     assert.match(sessionRow, /onTogglePin/);
     // Inline rename: double-click title + reserved control next to pin.
-    assert.match(sessionRow, /sess-rename/);
     assert.match(sessionRow, /onBeginRename/);
     assert.match(sessionRow, /onCommitRename/);
     assert.match(sessionRow, /SessionRailSessionTitleView/);
+    const sessionActions = readSrc(
+      "widgets/SessionRailSessionActionsView.tsx",
+    );
+    assert.match(sessionActions, /sess-actions/);
+    assert.match(sessionActions, /sess-btns/);
+    assert.doesNotMatch(sessionActions, /sess-meta/);
+    assert.match(sessionActions, /sess-pin/);
+    assert.match(sessionActions, /sess-rename/);
+    assert.match(sessionActions, /sess-remove/);
     const titleView = readSrc("widgets/SessionRailSessionTitleView.tsx");
     assert.match(titleView, /sess-title-input/);
     assert.match(titleView, /onDoubleClick/);
@@ -1182,6 +1194,7 @@ describe("UI surface presence", () => {
       /"sess-row":[\s\S]*?grid-cols-\[minmax\(0,1fr\)_auto\]/,
     );
     assert.match(shortcuts, /"sess-actions":/);
+    assert.match(shortcuts, /"sess-btns":/);
     assert.doesNotMatch(shortcuts, /"sess-status"/);
     assert.match(
       shortcuts,
@@ -1192,12 +1205,33 @@ describe("UI surface presence", () => {
     const groupNameShortcut =
       shortcuts.match(/"project-group-name":\s*"([^"]+)"/)?.[1] ?? "";
     assert.doesNotMatch(groupNameShortcut, /\bleading-/);
+    // Ellipsis is horizontal only — overflow-hidden shears "grok-desktop".
+    assert.match(groupNameShortcut, /\boverflow-x-hidden\b/);
+    assert.doesNotMatch(groupNameShortcut, /\boverflow-hidden\b/);
     const sessTitleShortcut =
       shortcuts.match(/"sess-title":\s*"([^"]+)"/)?.[1] ?? "";
     assert.match(sessTitleShortcut, /\btext-nav\b/);
     assert.doesNotMatch(sessTitleShortcut, /\bleading-/);
+    assert.match(sessTitleShortcut, /\boverflow-x-hidden\b/);
+    assert.doesNotMatch(sessTitleShortcut, /\boverflow-hidden\b/);
     const tokens = readSrc("styles/defineColor.css");
     assert.match(tokens, /--line-height-nav-item:\s*20px;/);
+    // Folder / loose-group rows: 36px in px. rem h-8 / min-h-8 collapse to
+    // 26px under html 13px and clip "grok-desktop" (this has regressed).
+    {
+      const folderHeader =
+        shortcuts.match(/"project-group-header":\s*"([^"]+)"/)?.[1] ?? "";
+      const folderMain =
+        shortcuts.match(/"project-group-main":\s*"([^"]+)"/)?.[1] ?? "";
+      const looseHeader =
+        shortcuts.match(/"loose-group-header":\s*"([^"]+)"/)?.[1] ?? "";
+      assert.match(folderHeader, /min-h-\[36px\]/);
+      assert.match(folderMain, /h-\[36px\]/);
+      assert.match(looseHeader, /min-h-\[36px\]/);
+      assert.doesNotMatch(folderHeader, /\bmin-h-8\b|\bh-8\b/);
+      assert.doesNotMatch(folderMain, /\bmin-h-8\b|\bh-8\b/);
+      assert.doesNotMatch(looseHeader, /\bmin-h-8\b|\bh-8\b/);
+    }
     assert.match(shortcuts, /"project-section-label":/);
     assert.match(shortcuts, /"project-group-sessions":/);
     assert.match(shortcuts, /"project-group-session-list":/);
@@ -1247,12 +1281,18 @@ describe("UI surface presence", () => {
       assert.match(railHook, /selectedWorkspace/);
       assert.match(rail, /selectedWorkspace/);
     }
-    // Folder count stays visible (no hover-hide); session pin + time/remove own their slots.
+    // Folder count stays visible (no hover-hide); session actions own one parent track.
+    // Px 18×18 + matching line-height so the digit is optically centered
+    // (rem h-4.5 + leading-none sat "1" high in the pill).
     const countShortcut = shortcuts.match(
       /"project-group-count":\s*"([^"]+)"/,
     );
     assert.ok(countShortcut?.[1], "project-group-count shortcut present");
     assert.doesNotMatch(countShortcut[1], /group-hover:opacity-0/);
+    assert.match(countShortcut[1], /h-\[18px\]/);
+    assert.match(countShortcut[1], /min-w-\[18px\]/);
+    assert.match(countShortcut[1], /leading-\[18px\]/);
+    assert.doesNotMatch(countShortcut[1], /\bh-4\.5\b|\bmin-w-4\.5\b|\bleading-none\b/);
     assert.match(shortcuts, /"sess-pin":/);
     assert.match(shortcuts, /"sess-pin-active":/);
     assert.match(shortcuts, /"sess-rename":/);
@@ -1263,8 +1303,18 @@ describe("UI surface presence", () => {
     assert.match(titleInputShortcut, /border-none/);
     assert.match(titleInputShortcut, /h-\[20px\]/);
     assert.doesNotMatch(titleInputShortcut, /ring-2|shadow-\[/);
-    // Reserved rename slot (same 16×28 as pin) so hover-reveal does not jitter.
-    assert.match(shortcuts, /"sess-rename":[\s\S]*?w-4 h-7/);
+    // Shared 16×28 slot so hover-reveal does not jitter. Values must be
+    // string literals (a shared const crashes Uno's jiti config reload).
+    const renameShortcut =
+      shortcuts.match(/"sess-rename":\s*"([^"]+)"/)?.[1] ?? "";
+    const pinShortcut =
+      shortcuts.match(/"sess-pin":\s*"([^"]+)"/)?.[1] ?? "";
+    const removeShortcut =
+      shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(renameShortcut, /w-\[16px\] h-\[28px\]/);
+    assert.equal(renameShortcut, pinShortcut);
+    assert.equal(renameShortcut, removeShortcut);
+    assert.doesNotMatch(shortcuts, /const sessActionBtn/);
     assert.match(
       shortcuts,
       /"sess-row-editing":[\s\S]*?\[&_\.sess-rename\]:\(opacity-100/,
@@ -1276,28 +1326,18 @@ describe("UI surface presence", () => {
       /"sess-row-pinned":[\s\S]*?\[&_\.sess-pin\]:\(opacity-100/,
     );
     assert.match(shortcuts, /"sess-time":[\s\S]*?group-hover:opacity-0/);
-    assert.match(shortcuts, /"sess-meta":[\s\S]*?w-\[24px\]/);
-    // Remove is a narrow right-aligned control, not a full-slot inset fill.
-    assert.match(
-      shortcuts,
-      /"sess-remove":[\s\S]*?absolute right-0[\s\S]*?w-5\.5/,
-    );
-    assert.doesNotMatch(
-      shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "",
-      /inset-0/,
-    );
-    // Close control must zero native button padding; ≥28px hit target is centered.
-    assert.match(shortcuts, /"sess-remove":[\s\S]*?p-0/);
-    assert.match(shortcuts, /"sess-remove":[\s\S]*?justify-center/);
-    assert.match(shortcuts, /"sess-pin":[\s\S]*?w-4 h-7/);
+    assert.match(shortcuts, /"sess-actions":[\s\S]*?w-\[56px\]/);
+    assert.match(shortcuts, /"sess-time":[\s\S]*?w-\[24px\]/);
+    assert.doesNotMatch(shortcuts, /"sess-meta"/);
+    // Close is a sibling 16×28 slot, not a right-aligned overlay in the time column.
+    assert.match(removeShortcut, /p-0/);
+    assert.match(removeShortcut, /justify-center/);
+    assert.match(removeShortcut, /w-\[16px\] h-\[28px\]/);
+    assert.doesNotMatch(removeShortcut, /inset-0|absolute right-0/);
     // Hover-reveal pin / time / remove snap — no opacity transition.
-    const pinShortcut = shortcuts.match(/"sess-pin":\s*"([^"]+)"/)?.[1] ?? "";
     const timeShortcut = shortcuts.match(/"sess-time":\s*"([^"]+)"/)?.[1] ?? "";
-    const removeShortcut =
-      shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "";
-    assert.doesNotMatch(pinShortcut, /transition-opacity|duration-reveal/);
-    assert.doesNotMatch(timeShortcut, /transition-opacity|duration-reveal/);
     assert.doesNotMatch(removeShortcut, /transition-opacity|duration-reveal/);
+    assert.doesNotMatch(timeShortcut, /transition-opacity|duration-reveal/);
   });
 
   it("tool card normalizes array content and plan empty is en-US", () => {
@@ -1990,9 +2030,10 @@ describe("UnoCSS transform utilities emit literal values", () => {
 
   it("rail folder and session titles use nav line-height (descenders fit)", async () => {
     const uno = await createGenerator(unoConfigModule);
-    const { css } = await uno.generate("project-group-name sess-title", {
-      preflights: false,
-    });
+    const { css } = await uno.generate(
+      "project-group-name project-group-header project-group-main loose-group-header sess-title sess-row",
+      { preflights: false },
+    );
     assert.match(
       css,
       /\.project-group-name\{[^}]*line-height:var\(--line-height-nav-item\)/,
@@ -2005,6 +2046,38 @@ describe("UnoCSS transform utilities emit literal values", () => {
       css,
       /\.project-group-name\{[^}]*line-height:(?:1(?:\.375)?|15\.6px)/,
     );
+    // Emitted box must be 36px, not rem 2em/h-8. "grok-desktop" was clipped
+    // when the folder row collapsed to 26px under html { font-size: 13px }.
+    // Uno may group .loose-group-header + .project-group-header (same body).
+    assert.match(css, /\.project-group-header[^{]*\{[^}]*min-height:36px/);
+    assert.match(css, /\.loose-group-header[^{]*\{[^}]*min-height:36px/);
+    assert.match(css, /\.project-group-main\{[^}]*height:36px/);
+    assert.match(css, /\.sess-row\{[^}]*height:36px/);
+    assert.match(css, /\.project-group-name\{[^}]*overflow-x:hidden/);
+    assert.match(css, /\.sess-title\{[^}]*overflow-x:hidden/);
+    assert.doesNotMatch(
+      css,
+      /\.project-group-name\{[^}]*overflow:hidden/,
+    );
+    assert.doesNotMatch(css, /\.sess-title\{[^}]*overflow:hidden/);
+  });
+
+  it("rail folder count badge is an 18px box with matching line-height", async () => {
+    const uno = await createGenerator(unoConfigModule);
+    const { css } = await uno.generate(
+      "project-group-count side-nav-nav-badge",
+      { preflights: false },
+    );
+    assert.match(css, /\.project-group-count\{[^}]*height:18px/);
+    assert.match(css, /\.project-group-count\{[^}]*min-width:18px/);
+    assert.match(css, /\.project-group-count\{[^}]*line-height:18px/);
+    assert.match(css, /\.project-group-count\{[^}]*font-size:10px/);
+    assert.doesNotMatch(
+      css,
+      /\.project-group-count\{[^}]*height:1\.125rem/,
+    );
+    assert.match(css, /\.side-nav-nav-badge\{[^}]*height:18px/);
+    assert.match(css, /\.side-nav-nav-badge\{[^}]*line-height:18px/);
   });
 
   it("named shortcuts that used to warn emit real CSS", async () => {

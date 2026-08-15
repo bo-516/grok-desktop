@@ -5,8 +5,9 @@
  * on header click. Expanded lists cap the viewport at 8 rows and scroll.
  * Folder name is sticky at the top of the rail scrollport (PROJECTS sits
  * outside the scroll area) while this group's sessions scroll — see
- * project-group-header in shortcuts.sidenav. Pin lives on individual session
- * rows, not on the folder header.
+ * project-group-header in shortcuts.sidenav (36px px row; rem h-8 clips
+ * "grok-desktop"). Pin lives on individual session rows, not on the
+ * folder header.
  *
  * Collapse and "Show more" / "Show less" are controlled from the parent
  * (rail prefs) so remounts do not re-expand projects the user already closed.

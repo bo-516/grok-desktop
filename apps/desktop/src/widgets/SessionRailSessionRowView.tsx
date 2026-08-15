@@ -3,14 +3,14 @@
  * Pin is per-session within its workspace folder only (not per folder, and
  * does not float the project group): hover reveals the pin control; a pinned
  * row keeps the pin visible and stays at the top of its project list via
- * prefs. Rename sits next to pin (same reserved width, hover-reveal) and
+ * prefs. Rename / pin / remove render from one parent cluster
+ * (`SessionRailSessionActionsView`) so the three glyphs share a cadence;
  * double-clicking the title swaps in a borderless input. Rows are
  * HTML5-draggable so the user can reorder within a project; drag order
  * outranks last-message recency auto-sort.
  */
 
 import cs from "classnames";
-import { Check, Pencil, Pin, X } from "lucide-react";
 import { memo, useRef, type DragEvent } from "react";
 import { ShinyText } from "@/components/react-bits";
 import { railSessionTitle } from "@/lib/sessionTitleEdit";
@@ -18,6 +18,7 @@ import {
   formatRelativeTime,
   type SessionRecord,
 } from "@/store/sessionCatalog";
+import { SessionRailSessionActionsView } from "./SessionRailSessionActionsView";
 import { SessionRailSessionTitleView } from "./SessionRailSessionTitleView";
 
 /** dataTransfer type so drops only accept session-rail rows. */
@@ -77,25 +78,16 @@ export type SessionRailSessionRowProps = {
 };
 
 /**
- * One session row: title + trailing actions (rename + pin + time / remove).
- * Nested under a project tree guide; selected state is a quiet elevated
- * fill + medium title (no border ring / left accent bar / status dot) so
- * it never competes with folder header chrome. Live / waiting still lift
- * title contrast via row classes.
- * Title and the pin/meta cluster are separate grid tracks so long titles
- * never overlap actions. Rename and pin sit tight against the meta slot
- * inside `sess-actions` with reserved widths so hover-reveal does not
- * shift the truncation point. Time and remove cross-fade in one
- * fixed-width slot so they never stack. Drag-and-drop reorders within
- * the parent project; a short drag does not fire select.
+ * Inner session row render function (memo-wrapped below).
+ * Title and the action cluster are separate grid tracks so long titles
+ * never overlap buttons. Trailing rename / pin / remove live in
+ * `SessionRailSessionActionsView` (one reserved 56px parent). Selected
+ * state is a quiet elevated fill + medium title. Drag-and-drop reorders
+ * within the parent project; a short drag does not fire select.
  * Wrapped in React.memo so catalog identity churn without prop changes
  * does not re-render every rail row.
  * @param props Session record, selection / live / pin / rename flags, handlers.
  * @returns Interactive row for the side-nav session list.
- */
-/**
- * Inner session row render function (memo-wrapped below).
- * @param props Row selection / live / pin / rename / reorder handlers.
  */
 function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
   const {
@@ -119,22 +111,14 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
   const titleLabel = railSessionTitle(rec);
   /** Handle so the Save control can read the input before blur unmounts it. */
   const titleInputRef = useRef<HTMLInputElement>(null);
-  /** Relative time already fits the meta slot (`45s` / `12m` / `1d`). */
+  /** Relative time already fits the 24px overlay (`45s` / `12m` / `1d`). */
   const fullTime = formatRelativeTime(rec.updatedAt);
   const timeLabel = isStreaming ? "…" : fullTime;
-  const pinLabel = pinned
-    ? `Unpin ${titleLabel}`
-    : `Pin ${titleLabel} to top`;
   /**
    * After a real drag, the browser still emits click — skip select once so
    * reordering does not also switch the active chat.
    */
   const skipClickRef = useRef(false);
-  /**
-   * Save uses mousedown (to read the input before blur). The trailing click
-   * would see `editing === false` after commit and reopen the field — skip it.
-   */
-  const skipRenameClickRef = useRef(false);
 
   /**
    * Start an in-rail session drag. Payload is the session id only; drop
@@ -247,102 +231,18 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
         onCommitRename={(nextTitle) => onCommitRename?.(nextTitle)}
         onCancelRename={() => onCancelRename?.()}
       />
-      {/* Rename + pin + time/remove share one trailing cluster so icons sit
-          tight against the meta slot (not a full grid gap away from the time). */}
-      <span className="sess-actions">
-        <button
-          type="button"
-          className={cs("sess-rename", {
-            "sess-rename-save": editing,
-          })}
-          title={editing ? "Save name" : `Rename ${titleLabel}`}
-          aria-label={editing ? "Save name" : `Rename ${titleLabel}`}
-          onMouseDown={(e) => {
-            // Save: keep the input focused until we read it (blur would
-            // unmount the field first and the click would reopen edit).
-            if (editing) {
-              e.preventDefault();
-              e.stopPropagation();
-              skipRenameClickRef.current = true;
-              onCommitRename?.(titleInputRef.current?.value ?? "");
-            }
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (skipRenameClickRef.current) {
-              skipRenameClickRef.current = false;
-              return;
-            }
-            if (e.detail > 0) {
-              e.currentTarget.blur();
-            }
-            if (!editing) {
-              onBeginRename?.();
-            }
-          }}
-        >
-          {editing ? (
-            <Check
-              className="sess-rename-icon"
-              strokeWidth={1.75}
-              aria-hidden="true"
-            />
-          ) : (
-            <Pencil
-              className="sess-rename-icon"
-              strokeWidth={1.75}
-              aria-hidden="true"
-            />
-          )}
-        </button>
-        <button
-          type="button"
-          className={cs("sess-pin", {
-            "sess-pin-active": pinned,
-          })}
-          title={pinLabel}
-          aria-label={pinLabel}
-          aria-pressed={pinned}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin();
-            // Mouse click leaves focus on the pin; group-focus-within would keep
-            // pin + remove visible after the pointer leaves. Keyboard (detail 0)
-            // keeps focus so the control stays discoverable while tabbing.
-            if (e.detail > 0) {
-              e.currentTarget.blur();
-            }
-          }}
-        >
-          <Pin
-            className="sess-pin-icon"
-            strokeWidth={1.75}
-            fill={pinned ? "currentColor" : "none"}
-            aria-hidden="true"
-          />
-        </button>
-        <span className="sess-meta">
-          <span className="sess-time" title={fullTime}>
-            {timeLabel}
-          </span>
-          <button
-            type="button"
-            className="sess-remove flex items-center justify-center"
-            title="Remove from list"
-            aria-label={`Remove ${titleLabel} from list`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-          >
-            <X
-              className="sess-remove-icon"
-              strokeWidth={2}
-              aria-hidden="true"
-            />
-          </button>
-        </span>
-      </span>
+      <SessionRailSessionActionsView
+        titleLabel={titleLabel}
+        editing={editing}
+        pinned={pinned}
+        timeLabel={timeLabel}
+        fullTime={fullTime}
+        titleInputRef={titleInputRef}
+        onBeginRename={onBeginRename}
+        onCommitRename={onCommitRename}
+        onTogglePin={onTogglePin}
+        onRemove={onRemove}
+      />
     </div>
   );
 }

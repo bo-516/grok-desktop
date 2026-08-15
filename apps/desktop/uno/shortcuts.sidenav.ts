@@ -1,6 +1,9 @@
 /**
  * Session rail / side-nav UnoCSS shortcuts: chrome, project tree, session rows.
  * Kept separate so appShortcuts stays under the 440-line hard cap.
+ * Shortcut values must be string literals — jiti evals this file as the
+ * Uno config graph, and a free identifier throws ReferenceError, after
+ * which the recovery loader keeps the last good (stale) CSS.
  */
 
 export const sideNavShortcuts: Record<string, string> = {
@@ -42,9 +45,11 @@ export const sideNavShortcuts: Record<string, string> = {
     "shrink-0 inline-flex items-center justify-center min-w-7 h-7 px-1.5 rounded-kbd bg-kbd text-fg-muted font-sans text-11px font-normal tracking-normal leading-none",
   "side-nav-kbd-btn":
     "border-none cursor-pointer min-w-7 h-7 hover:(text-fg bg-white-soft) focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] rounded-kbd)",
-  /* Count badge: cross-session streaming on trigger / Overview menu row */
+  /* Count badge: cross-session streaming on trigger / Overview menu row.
+   * Px box (html is 13px; rem h-4.5 collapses to ~15px and the digit sits
+   * high). Line-height matches height so "1" / "18" sit on the optical center. */
   "side-nav-nav-badge":
-    "shrink-0 inline-flex items-center justify-center min-w-4.5 h-4.5 px-1 rounded-pill bg-white-soft text-fg-muted text-10px font-medium tabular-nums",
+    "shrink-0 inline-flex items-center justify-center box-border min-w-[18px] h-[18px] px-[4px] rounded-pill bg-white-soft text-fg-muted text-[10px] font-medium tabular-nums leading-[18px]",
   /*
    * Workspace menu (user chip → Settings / Overview / …) opens upward over the
    * footer quota. z-10 keeps the whole chip+popover above the density track;
@@ -109,16 +114,30 @@ export const sideNavShortcuts: Record<string, string> = {
    * group's sessions move. Rest + hover fills MUST stay OPAQUE (bg-sidebar /
    * bg-sidebar-hover — never white-* translucent tokens): sessions scroll
    * under the sticky header, and a transparent hover would show titles
-   * bleeding through the folder name. Square corners (no rounded-*) so sticky
-   * paint never leaks text through a radius. Upward box-shadow paints over
-   * subpixel bleed at the scrollport top edge. gap-1.5 keeps the count badge
+   * bleeding through the folder name. The element's own box stays SQUARE (no
+   * rounded-* here) because that opaque box is the mask: a radius on it would
+   * let a row scrolling underneath show through the corner notches. The hover
+   * fill instead rides a `::before` overlay carrying rounded-8px (same radius
+   * as sess-row / project-group-main). z-[-1] keeps it above the header's own
+   * background but under the label — the header is a stacking context (sticky
+   * + z-10), so the negative layer cannot escape behind bg-sidebar.
+   * Upward box-shadow paints over
+   * subpixel bleed at the scrollport top edge — keep it at 1px, never taller
+   * than the gap between groups (a collapsed group is only pb-0.5 ≈ 1.6px).
+   * The band is opaque bg-sidebar drawn by the NEXT sticky header, and equal
+   * z-10 means it paints on top of the row above: an 8px band shaved ~6px off
+   * the bottom of a collapsed folder row, so its hover fill lost its lower
+   * edge and the centered label read as sitting low. gap-1.5 keeps the badge
    * clear of the truncated name; pr-1.5 mirrors the row's right inset so
    * 3-digit counts don't hug the rail.
+   * Height is px (html font-size is 13px; rem `min-h-8` / `h-8` collapse to
+   * 26px and clip Inter descenders on names like "grok-desktop"). Matches
+   * the 36px session pill so folder + chat rows share one cadence.
    */
   "project-group-header":
-    "sticky top-0 z-10 flex items-center gap-1.5 min-h-8 pr-1.5 bg-sidebar shadow-[0_-8px_0_0_var(--color-bg-sidebar)] transition-colors duration-fast ease-soft hover:bg-sidebar-hover",
+    "sticky top-0 z-10 flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover",
   "project-group-main":
-    "flex flex-1 items-center gap-1.5 min-w-0 h-8 pl-1 border-none rounded-8px bg-transparent text-left cursor-pointer focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-sidebar)])",
+    "flex flex-1 items-center gap-1.5 min-w-0 h-[36px] pl-1 border-none rounded-8px bg-transparent text-left cursor-pointer focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-sidebar)])",
   /* Rotate −90° when collapsed so the same ChevronDown points right. */
   "project-group-chevron":
     "w-3 h-3 shrink-0 block text-fg-faint transition-[color,transform] duration-fast ease-soft group-hover:text-fg-muted",
@@ -132,21 +151,27 @@ export const sideNavShortcuts: Record<string, string> = {
   "project-group-icon-idle": "opacity-0 scale-90 pointer-events-none",
   /* text-nav owns font-size + line-height (--line-height-nav-item). Do not
    * add leading-*: Uno emits text-nav after leading utilities, so a tighter
-   * token would win and overflow-hidden would clip descenders (g/y/p) again.
-   * Full primary ink for every folder name; active (project-group-active →
-   * font-medium) is the weight lift that marks the current project. */
+   * token would win and clip descenders (g/y/p) again. overflow-x-hidden
+   * (not overflow-hidden): ellipsis still truncates long names, but Inter
+   * ink that slightly exceeds the 20px line box ("grok-desktop") is not
+   * sheared. Full primary ink for every folder name; active
+   * (project-group-active → font-medium) is the weight lift that marks
+   * the current project. */
   "project-group-name":
-    "min-w-0 flex-1 pr-0.5 text-nav font-normal text-fg whitespace-nowrap overflow-hidden text-ellipsis transition-colors duration-fast ease-soft",
-  /* Count badge only — pin belongs on session rows, not the folder. */
+    "min-w-0 flex-1 pr-0.5 text-nav font-normal text-fg whitespace-nowrap overflow-x-hidden text-ellipsis transition-colors duration-fast ease-soft",
+  /* Count badge only — pin belongs on session rows, not the folder.
+   * Box is px (html is 13px; rem h-4.5 collapses to ~15px and the digit
+   * sits high in the pill). Line-height equals height so "1" / "18" sit
+   * on the optical center; do not use rem h-* or leading-none here. */
   "project-group-count":
-    "shrink-0 inline-flex items-center justify-center min-w-4.5 h-4.5 px-1.5 rounded-pill bg-white-soft text-fg-muted text-10px font-medium tabular-nums leading-none",
+    "shrink-0 inline-flex items-center justify-center box-border min-w-[18px] h-[18px] px-[6px] rounded-pill bg-white-soft text-fg-muted text-[10px] font-medium tabular-nums leading-[18px]",
   /* Nested list: left guide line under the folder glyph. */
   "project-group-sessions":
     "relative flex flex-col gap-1.5 ml-[18px] pl-2 before:(content-[''] absolute left-0 top-1 bottom-1 w-px bg-line-subtle)",
   /* Row stack inside a project / no-project group. 6px gap (px, not rem)
    * so titles do not stack like a compact file tree. More/less sit outside
    * so the chip stays under the viewport while long lists scroll. */
-  "project-group-session-list": "flex flex-col gap-[6px] min-h-0",
+  "project-group-session-list": "flex flex-col gap-[4px] min-h-0",
   /*
    * After "Show more": keep 8 session rows in view (36px row + 6px gap).
    * Extra rows scroll here. 25 packed 32px rows filled the rail.
@@ -155,17 +180,18 @@ export const sideNavShortcuts: Record<string, string> = {
     "max-h-[calc(36px*8+6px*7)] overflow-y-auto overscroll-contain",
   /*
    * "No project" section: sibling of the project tree, not a folder in it.
-   * Head reuses project-group-main / -chevron / -count for identical hit
-   * targets, but the label is section-cased (uppercase, muted) so it reads as
-   * a category next to PROJECTS instead of a workspace name. Sticky + opaque
-   * bg-sidebar for the same reason folder headers are: rows scroll under it.
+   * Head reuses project-group-main / -chevron / -count for identical 36px
+   * hit targets, but the label is section-cased (uppercase, muted) so it
+   * reads as a category next to PROJECTS instead of a workspace name.
+   * Sticky + opaque bg-sidebar for the same reason folder headers are:
+   * rows scroll under it. min-h is px (same rem-collapse trap as folders).
    * mt-1 with a hairline rule separates it from the last project group.
    */
   "loose-group": "flex flex-col gap-px pt-1.5 pb-1.5 border-t border-line-subtle",
   "loose-group-active": "[&_.loose-group-name]:text-fg",
   "loose-group-collapsed": "pb-0.5",
   "loose-group-header":
-    "sticky top-0 z-10 flex items-center gap-1.5 min-h-8 pr-1.5 bg-sidebar shadow-[0_-8px_0_0_var(--color-bg-sidebar)] transition-colors duration-fast ease-soft hover:bg-sidebar-hover",
+    "sticky top-0 z-10 flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover",
   /* Section-cased label: matches project-section-label ink/size, no px-2.5
    * (project-group-main already owns the row inset). No glyph — a 14px
    * stroke next to 10px tracked caps fights the quiet section read. */
@@ -190,16 +216,17 @@ export const sideNavShortcuts: Record<string, string> = {
   "time-group-label":
     "px-2.5 pt-1.5 pb-2 text-11px font-normal tracking-wide text-fg-muted",
   /*
-   * Session rows: title | trailing actions (rename + pin + time-or-remove).
-   * Rename, pin and meta share one flex cluster so icons sit tight against
-   * the time/remove slot — not a full grid-gap away. Height uses px (html
-   * font-size is 13px; rem h-* collapses). No leading status dot; live /
-   * waiting only lift title color; selection is elevated pill + medium title.
+   * Session rows: title | trailing action parent (rename + pin + remove).
+   * One 56px `sess-actions` track owns the three 16×28 buttons (`sess-btns`,
+   * gap-0) plus a 24px time overlay on the right — hover-reveal does not
+   * shift the title truncation point. Height uses px (html font-size is
+   * 13px; rem h-* collapses). No leading status dot; live / waiting only
+   * lift title color; selection is elevated pill + medium title.
    */
   /*
-   * pr-2.5 (not pr-1.5): keeps trailing meta (relative time / streaming "…" /
-   * remove) a touch clear of the pill's right edge. Scoped to the row only so
-   * folder headers, scroll inset, and count badges stay put.
+   * pr-2.5 (not pr-1.5): keeps the action track (relative time / streaming
+   * "…" / remove) a touch clear of the pill's right edge. Scoped to the row
+   * only so folder headers, scroll inset, and count badges stay put.
    */
   "sess-row":
     "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 w-full h-[36px] pl-2.5 pr-2.5 rounded-8px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) data-[dragging=true]:(opacity-45) data-[drag-over=true]:(bg-white-soft shadow-[inset_0_2px_0_0_var(--color-text-primary)])",
@@ -228,9 +255,11 @@ export const sideNavShortcuts: Record<string, string> = {
    */
   "sess-row-editing":
     "[&_.sess-rename]:(opacity-100 pointer-events-auto text-fg)",
-  /* Same text-nav line-height as folder names — see --line-height-nav-item. */
+  /* Same text-nav line-height as folder names — see --line-height-nav-item.
+   * overflow-x-hidden matches project-group-name so a session titled
+   * "grok-desktop" does not lose its p/g either. */
   "sess-title":
-    "block min-w-0 max-w-full whitespace-nowrap overflow-hidden text-ellipsis text-nav font-normal tracking-tight",
+    "block min-w-0 max-w-full whitespace-nowrap overflow-x-hidden text-ellipsis text-nav font-normal tracking-tight",
   /*
    * Inline rename field: same 20px text-nav box as `.sess-title` so swapping
    * span → input does not grow the 36px row. No border, no focus ring, no
@@ -238,51 +267,40 @@ export const sideNavShortcuts: Record<string, string> = {
    */
   "sess-title-input":
     "h-[20px] box-border border-none outline-none shadow-none appearance-none bg-transparent p-0 m-0 rounded-none select-text caret-fg focus-visible:outline-none",
-  /* Pin + rename + meta: zero internal gap so icons hug the time digits. */
-  "sess-actions": "shrink-0 flex items-center gap-0",
   /*
-   * Rename control: same reserved 16×28 slot as the pin so hover-reveal
-   * never shifts the title truncation point. Hidden at rest; visible on
-   * row hover / focus / while editing (see sess-row-editing).
+   * Parent track: 16+16+24 = 56px. `sess-btns` packs the three 16×28
+   * buttons from the left (gap-0); time overlays the right 24px so it
+   * never collides with a resting pinned pin (pin occupies 16–32).
+   */
+  "sess-actions": "relative shrink-0 w-[56px] h-[28px]",
+  "sess-btns": "flex items-center gap-0 h-[28px]",
+  /*
+   * Rename / pin / remove share one 16×28 chrome string (keep them in
+   * lockstep). Width/height are px — html font-size is 13px, so rem
+   * `w-4` / `h-7` collapse to 13×23 and leave a hole after the cluster.
+   * Hidden at rest; visible on row hover / focus. Pinned / editing
+   * visibility is forced by the row parent selectors so this base
+   * opacity-0 cannot win. No hover fill — one cluster, one cadence.
    */
   "sess-rename":
-    "shrink-0 flex items-center justify-center w-4 h-7 p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+    "shrink-0 flex items-center justify-center w-[16px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
   "sess-rename-save": "text-fg",
-  "sess-rename-icon": "w-3.5 h-3.5 block shrink-0",
-  /*
-   * Pin control: hidden at rest, snaps visible on row hover / focus (no
-   * opacity transition). Stays solid when pinned via `.sess-row-pinned
-   * .sess-pin` (see sess-row-pinned) so the base opacity-0 rule cannot win
-   * on cascade order. `sess-pin-active` marks the pressed state for a11y /
-   * icon fill; visibility is owned by the row. Narrower than a full 28px
-   * square so the glyph sits next to meta; height stays 28px for hit target.
-   * No hover fill / no outer padding.
-   */
+  "sess-rename-icon": "w-[14px] h-[14px] block shrink-0",
   "sess-pin":
-    "shrink-0 flex items-center justify-center w-4 h-7 p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+    "shrink-0 flex items-center justify-center w-[16px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
   "sess-pin-active": "text-fg",
-  "sess-pin-icon": "w-3.5 h-3.5 block shrink-0",
-  /*
-   * One fixed slot holds either the relative time (resting) or the remove
-   * control (hover / keyboard focus) — they swap in place with no opacity
-   * transition so the title truncation point never moves. Width fits
-   * `45s` / `12m` / `37m` at 10px; right edge of digits lines up with
-   * sibling rows (same meta width on every row).
-   */
-  "sess-meta":
-    "relative shrink-0 flex items-center justify-end w-[24px] h-7",
-  "sess-time":
-    "shrink-0 w-full pr-0.5 text-10px leading-none text-fg-muted whitespace-nowrap tabular-nums text-right group-hover:opacity-0 group-focus-within:opacity-0",
-  /*
-   * Remove is a narrow icon control, right-aligned inside the meta slot so
-   * its hover fill does not paint a full-width bar and its right edge still
-   * matches the time digits (`3h` / `37m`). Snaps with pin / time (no
-   * opacity transition). Not `inset-0` — that made the background as wide
-   * as the whole time column.
-   */
+  "sess-pin-icon": "w-[14px] h-[14px] block shrink-0",
   "sess-remove":
-    "absolute right-0 top-0 flex items-center justify-center w-5.5 h-7 p-0 m-0 border-none bg-transparent text-fg-muted rounded-6px opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:(text-fg bg-white-soft) focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)])",
-  "sess-remove-icon": "w-3.5 h-3.5 block shrink-0",
+    "shrink-0 flex items-center justify-center w-[16px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
+  "sess-remove-icon": "w-[14px] h-[14px] block shrink-0",
+  /*
+   * Resting time: right 24px of `sess-actions` (fits `45s` / `now` / `1d`
+   * / `1mo` at 10px tabular-nums). Hidden on hover / focus so remove
+   * (the third 16px slot, starting at x=32) can sit on the same cadence
+   * as rename and pin. pointer-events-none: it is display-only.
+   */
+  "sess-time":
+    "absolute right-0 top-0 flex items-center justify-end w-[24px] h-[28px] pr-0.5 text-10px leading-none text-fg-muted whitespace-nowrap tabular-nums text-right pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0",
   "side-nav-footer":
     "mt-auto px-3.5 pt-2.5 pb-1 border-t border-line-subtle flex flex-col gap-2.5",
   "side-nav-quota":

@@ -527,9 +527,11 @@
   --line-height-code-sm: 1.5;
   --font-size-nav-item: 13px;
   /*
-   * Must clear Inter's own hhea box (~1.21em) so overflow-hidden rail
-   * labels (folder names, session titles) do not clip descenders (g/y/p).
-   * 15.6px (1.2) was shorter than the glyph box and cut "grok-desktop".
+   * Must clear Inter's own hhea box (~1.21em) so rail labels (folder
+   * names, session titles) do not clip descenders (g/y/p). 15.6px (1.2)
+   * was shorter than the glyph box and cut "grok-desktop". Folder /
+   * session rows must stay 36px in px (see project-group-header /
+   * sess-row) — rem h-8 collapses under this 13px html size.
    */
   --line-height-nav-item: 20px;
   --font-size-body-md: 15px;
