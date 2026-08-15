@@ -2,3 +2,4 @@
 *.exe
 *.test
 /frontend/dist/
+/shell
