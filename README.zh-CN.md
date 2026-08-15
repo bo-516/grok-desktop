@@ -4,6 +4,26 @@
 
 [grok-build](https://docs.x.ai/build/overview) 的桌面客户端。通过 stdio 与真实的 `grok agent stdio` 进程讲 Agent Client Protocol（ACP）—— agent 循环留在 grok-build，这里只做它的窗口。
 
+## 下载
+
+| 平台 | 下载 | 然后 |
+|---|---|---|
+| **macOS** — Apple 芯片 + Intel | [**Grok-Desktop-macos-universal.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip) | 解压，把 **Grok Desktop.app** 拖进 `/Applications` |
+| **Windows** — x64 | [**Grok-Desktop-windows-amd64.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-windows-amd64.zip) | 解压，两个 `.exe` 放同一目录，运行 `grok-desktop.exe` |
+| **Linux** | 自行构建 | Wails 需要 cgo + webkit2gtk，见[打包发布](#打包发布) |
+
+全部版本：[Releases](https://github.com/bo-516/grok-desktop/releases)。
+
+**先装 agent。** 这个应用是真实 `grok` CLI 的窗口，所以 CLI 必须在 PATH 上（或位于 `~/.grok/bin/grok`）并已 `grok login` —— 或者设好 `XAI_API_KEY`。没有它桥也能起来，但 UI 会显示鉴权横幅。
+
+**macOS**：构建产物只做了 ad-hoc 签名，没有公证，首次打开会被 Gatekeeper 拦下。清一次隔离属性即可：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
+```
+
+**Windows 10** 还需要 [Edge WebView2 运行时](https://developer.microsoft.com/microsoft-edge/webview2/)；Windows 11 自带。
+
 > 遇到 bug 或想要新功能？欢迎[提 issue](https://github.com/bo-516/grok-desktop/issues)。
 
 | 文档 | 内容 |
@@ -114,6 +134,26 @@ M0_CWD="$(pwd)/demo" npm run m0:live
 ```
 
 `npm run m0` 只走 live（无 mock 回退）。`--mock` 仅用于隔离的协议实验，并会打印警告。
+
+## 打包发布
+
+```bash
+bash scripts/build-release.sh          # 两个目标 → release/
+bash scripts/build-release.sh mac      # 或：windows
+```
+
+产出 `release/Grok-Desktop-macos-universal.zip`（ad-hoc 签名的 `.app`，arm64 + x86_64）和 `release/Grok-Desktop-windows-amd64.zip`。
+
+每个包里都有**两个**二进制：Wails 壳（内嵌 Vite 构建产物）和它拉起来的 Go 桥子进程。壳在 macOS 上从 `Contents/Resources` 找桥，在 Windows 上从自己 `.exe` 的同级目录找 —— 见 [`apps/shell/paths.go`](apps/shell/paths.go)。
+
+Windows 可以在 macOS 上交叉编译：Wails 走 `go-winloader` 加载 WebView2，不需要 cgo 工具链。**Linux 不能交叉编译** —— 它的 webview 绑定要 cgo，还要 `libgtk-3-dev` 和 `libwebkit2gtk-4.1-dev`。在 Linux 机器上：
+
+```bash
+npm run build -w @grok-desktop/desktop
+bash apps/shell/build/sync-frontend.sh
+(cd apps/shell && CGO_ENABLED=1 go build -o bin/grok-desktop .)
+(cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge)
+```
 
 ## 测试
 

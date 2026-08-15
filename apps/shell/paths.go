@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -75,19 +76,44 @@ func NodeBridgeScript(repoRoot string) string {
 	return filepath.Join(repoRoot, "apps", "bridge", "src", "server.ts")
 }
 
+// exeSuffix is the platform executable extension for bridge binaries.
+// A var so tests can pin Windows naming on any host.
+var exeSuffix = defaultExeSuffix()
+
+func defaultExeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+// withExeSuffix expands each base path with the platform extension in front of
+// the bare name, so a packaged bridge-go.exe resolves on Windows. No-op when
+// the platform has no extension.
+func withExeSuffix(paths []string) []string {
+	if exeSuffix == "" {
+		return paths
+	}
+	out := make([]string, 0, len(paths)*2)
+	for _, p := range paths {
+		out = append(out, p+exeSuffix, p)
+	}
+	return out
+}
+
 // packagedBridgeCandidates are sibling / bundle-adjacent Go bridge names.
 // Used when repoRoot is empty (packaged install next to the shell).
 func packagedBridgeCandidates(exeDir string) []string {
 	if strings.TrimSpace(exeDir) == "" {
 		return nil
 	}
-	return []string{
+	return withExeSuffix([]string{
 		filepath.Join(exeDir, "bridge-go"),
 		filepath.Join(exeDir, "bridge"),
 		// macOS app bundle: Contents/MacOS/shell → Contents/Resources/bridge-go
 		filepath.Join(exeDir, "..", "Resources", "bridge-go"),
 		filepath.Join(exeDir, "Contents", "Resources", "bridge-go"),
-	}
+	})
 }
 
 // GoBridgeBinaryCandidates lists paths StartBridge will try, first existing wins.
@@ -95,12 +121,12 @@ func packagedBridgeCandidates(exeDir string) []string {
 // adjacent candidates only — never relative apps/bridge-go/... from cwd.
 func GoBridgeBinaryCandidates(repoRoot string) []string {
 	if strings.TrimSpace(repoRoot) != "" {
-		return []string{
+		return withExeSuffix([]string{
 			filepath.Join(repoRoot, "apps", "bridge-go", "bin", "bridge-go"),
 			filepath.Join(repoRoot, "apps", "bridge-go", "bin", "bridge"),
 			filepath.Join(repoRoot, "apps", "bridge-go", "bridge"),
 			filepath.Join(repoRoot, "bin", "bridge-go"),
-		}
+		})
 	}
 	exe, err := executablePath()
 	if err != nil || strings.TrimSpace(exe) == "" {

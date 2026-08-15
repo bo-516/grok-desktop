@@ -77,6 +77,38 @@ func TestFindGoBridgeBinary_SiblingAndResources(t *testing.T) {
 	}
 }
 
+func TestFindGoBridgeBinary_WindowsPrefersExe(t *testing.T) {
+	pinExeSuffix(t, ".exe")
+	dir := t.TempDir()
+	restoreExe(t, filepath.Join(dir, "grok-desktop.exe"))
+
+	cands := GoBridgeBinaryCandidates("")
+	if len(cands) == 0 || !strings.HasSuffix(cands[0], "bridge-go.exe") {
+		t.Fatalf("windows: first candidate must be bridge-go.exe, got %v", cands)
+	}
+
+	winBin := filepath.Join(dir, "bridge-go.exe")
+	if err := os.WriteFile(winBin, []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindGoBridgeBinary(""); got != winBin {
+		t.Fatalf("windows sibling: got %q want %q", got, winBin)
+	}
+
+	repo := t.TempDir()
+	repoBin := filepath.Join(repo, "apps", "bridge-go", "bin")
+	if err := os.MkdirAll(repoBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(repoBin, "bridge-go.exe")
+	if err := os.WriteFile(checkout, []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindGoBridgeBinary(repo); got != checkout {
+		t.Fatalf("windows checkout: got %q want %q", got, checkout)
+	}
+}
+
 func TestResolveBridgeLaunchCwd_BridgeCwdWins(t *testing.T) {
 	custom := t.TempDir()
 	t.Setenv("BRIDGE_CWD", custom)
@@ -113,6 +145,13 @@ func writeRepoMarker(t *testing.T) string {
 func emptyExe(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "not-a-repo", "grok-desktop")
+}
+
+func pinExeSuffix(t *testing.T, suffix string) {
+	t.Helper()
+	orig := exeSuffix
+	exeSuffix = suffix
+	t.Cleanup(func() { exeSuffix = orig })
 }
 
 func restoreExe(t *testing.T, path string) {

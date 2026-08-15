@@ -78,3 +78,6 @@ Desktop.ini
 .intent-inspector/
 apps/desktop/.intent-inspector/
 docs/
+
+# Release bundles
+release/

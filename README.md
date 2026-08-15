@@ -4,6 +4,26 @@
 
 A desktop client for [grok-build](https://docs.x.ai/build/overview). It speaks Agent Client Protocol (ACP) over stdio to a real `grok agent stdio` process — the agent loop stays in grok-build; this is the window onto it.
 
+## Download
+
+| Platform | Download | Then |
+|---|---|---|
+| **macOS** — Apple silicon + Intel | [**Grok-Desktop-macos-universal.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-macos-universal.zip) | Unzip, drag **Grok Desktop.app** to `/Applications` |
+| **Windows** — x64 | [**Grok-Desktop-windows-amd64.zip**](https://github.com/bo-516/grok-desktop/releases/latest/download/Grok-Desktop-windows-amd64.zip) | Unzip, keep both `.exe` files in one folder, run `grok-desktop.exe` |
+| **Linux** | build from source | Wails needs cgo + webkit2gtk — see [Build a release](#build-a-release) |
+
+Every version: [Releases](https://github.com/bo-516/grok-desktop/releases).
+
+**First, install the agent.** The app is a window onto the real `grok` CLI, so it has to be on PATH (or at `~/.grok/bin/grok`) and signed in with `grok login` — or set `XAI_API_KEY`. Without it the bridge starts and the UI shows an auth banner.
+
+**macOS**: builds are ad-hoc signed, not notarized, so Gatekeeper blocks the first launch. Clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Grok Desktop.app"
+```
+
+**Windows 10** also needs the [Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/); Windows 11 ships with it.
+
 > Hit a bug or want a feature? Please [open an issue](https://github.com/bo-516/grok-desktop/issues).
 
 | Doc | Topic |
@@ -114,6 +134,26 @@ M0_CWD="$(pwd)/demo" npm run m0:live
 ```
 
 `npm run m0` is live-only (no mock fallback). `--mock` exists only for isolated protocol experiments and prints a warning.
+
+## Build a release
+
+```bash
+bash scripts/build-release.sh          # both targets → release/
+bash scripts/build-release.sh mac      # or: windows
+```
+
+Produces `release/Grok-Desktop-macos-universal.zip` (ad-hoc signed `.app`, arm64 + x86_64) and `release/Grok-Desktop-windows-amd64.zip`.
+
+Every bundle carries **two** binaries: the Wails shell (with the Vite build embedded) and the Go bridge it spawns as a child process. The shell looks for the bridge in `Contents/Resources` on macOS and next to its own `.exe` on Windows — see [`apps/shell/paths.go`](apps/shell/paths.go).
+
+Windows cross-compiles from macOS: Wails reaches WebView2 through `go-winloader`, so no cgo toolchain is involved. **Linux cannot be cross-compiled** — its webview binding needs cgo plus `libgtk-3-dev` and `libwebkit2gtk-4.1-dev`. On a Linux host:
+
+```bash
+npm run build -w @grok-desktop/desktop
+bash apps/shell/build/sync-frontend.sh
+(cd apps/shell && CGO_ENABLED=1 go build -o bin/grok-desktop .)
+(cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge)
+```
 
 ## Tests
 
