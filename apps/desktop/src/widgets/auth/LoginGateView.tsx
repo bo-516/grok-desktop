@@ -1,11 +1,14 @@
 /**
- * Signed-out gate: app logo, one sign-in action, and the fallback hint.
- * Presentation only — the parent owns visibility, busy state, and callbacks.
- * While mounted it behaves like the app's other modals: focus lands inside,
- * Tab is trapped, Escape dismisses (the shell banner stays as the way back).
+ * Signed-out screen: app logo, one sign-in action, and the fallback hint.
+ * Presentation only — the parent owns visibility, busy state, and the callback.
+ * This is not a modal: while signed out it *is* the window, painted on the
+ * opaque app background, with no dismiss and no way past it. The shell behind
+ * stays mounted (it drives the 3s login poll) but the parent marks it inert,
+ * so nothing of the real UI is visible, clickable, or reachable by Tab.
  */
 
-import { useEffect, useLayoutEffect, useId, useRef, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { FadeContent } from "@/components/react-bits";
 import { focusInitialIn, restoreFocus, trapFocusTab } from "@/lib/focusTrap";
 import logoUrl from "@/assets/app-logo.svg";
@@ -21,124 +24,104 @@ export type LoginGateViewProps = {
   busy: boolean;
   /** Open the browser login page (runs `grok login` on the bridge host). */
   onLogin: () => void;
-  /** Dismiss without signing in (Escape, backdrop, or "Not now"). */
-  onDismiss: () => void;
 };
 
 /**
- * Modal sign-in surface; returns null when closed.
+ * Full-window sign-in surface; returns null when closed.
  * Hooks always run (open gated inside effects) so focus restore stays valid.
  * The logo is an `<img>` from the shared app-icon asset — the same mark the
  * dock/taskbar shows, so the gate reads as this app asking, not a web page.
- * @param props Open/busy flags, credential path, and the two handlers.
- * @returns Backdrop + panel, or null while signed in.
+ * @param props Open/busy flags and the login handler.
+ * @returns The signed-out screen, or null once a credential exists.
  */
 export function LoginGateView(props: LoginGateViewProps) {
-  const { open, busy, onLogin, onDismiss } = props;
-  const panelRef = useRef<HTMLDivElement>(null);
+  const { open, busy, onLogin } = props;
+  const screenRef = useRef<HTMLDivElement>(null);
   /** Element that held focus before the gate opened. */
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const reactId = useId();
   const titleId = `${reactId}-title`;
   const descId = `${reactId}-desc`;
 
-  // Enter: remember prior focus and land on the first control.
+  // Enter: remember prior focus and land on the sign-in button.
   // Exit: restore prior focus when the node is still connected.
   useLayoutEffect(() => {
     if (!open) {
       return;
     }
     previousFocusRef.current = document.activeElement as HTMLElement | null;
-    focusInitialIn(panelRef.current);
+    focusInitialIn(screenRef.current);
     return () => {
       restoreFocus(previousFocusRef.current);
       previousFocusRef.current = null;
     };
   }, [open]);
 
-  // Capture-phase Escape → dismiss (wins over side-panel Escape handlers).
-  // Tab cycles inside the dialog panel.
+  // Tab cycles inside the screen. Escape is deliberately not handled: there is
+  // nothing to dismiss to — signing in is the only way forward, quitting the
+  // window the only way out.
+  // The shell behind is inert, but its shortcuts are window listeners and fire
+  // regardless; swallowing modifier chords here stops ⌘K / ⌘N / ⌘, from opening
+  // chrome blind behind the gate and having it appear the moment you sign in.
   useEffect(() => {
     if (!open) {
       return;
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        onDismiss();
+      const screen = screenRef.current;
+      if (screen && trapFocusTab(e, screen)) {
         return;
       }
-      const panel = panelRef.current;
-      if (panel) {
-        trapFocusTab(e, panel);
+      if (e.metaKey || e.ctrlKey) {
+        e.stopImmediatePropagation();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onDismiss]);
+  }, [open]);
 
   if (!open) {
     return null;
   }
 
-  /**
-   * Backdrop click dismisses; clicks on the panel itself must not bubble.
-   * @param e Click on the dimmed overlay
-   */
-  const onBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) {
-      return;
-    }
-    onDismiss();
-  };
-
-  return (
+  // Portaled to <body>: App marks the shell `inert` while this is up, and a
+  // gate rendered inside that subtree would inherit the block on its own button.
+  const screen = (
     <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={onBackdropClick}
+      ref={screenRef}
+      className="login-gate-screen"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={descId}
+      tabIndex={-1}
     >
-      <FadeContent immediate durationMs={240}>
-        <div
-          ref={panelRef}
-          className="modal-panel login-gate"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={titleId}
-          aria-describedby={descId}
-          tabIndex={-1}
-          onClick={(e) => e.stopPropagation()}
+      <FadeContent immediate durationMs={240} className="login-gate">
+        <img className="login-gate-logo" src={logoUrl} alt="" />
+        <h1 id={titleId} className="login-gate-title">
+          Sign in to Grok
+        </h1>
+        <p id={descId} className="login-gate-copy">
+          Grok Desktop runs the local grok CLI, and that CLI has no credential
+          yet. Signing in opens your browser; this window unlocks on its own
+          once it succeeds.
+        </p>
+        <button
+          type="button"
+          className="btn btn-primary login-gate-primary"
+          disabled={busy}
+          onClick={onLogin}
         >
-          <img className="login-gate-logo" src={logoUrl} alt="" />
-          <h2 id={titleId} className="modal-title login-gate-title">
-            Sign in to Grok
-          </h2>
-          <p id={descId} className="login-gate-copy">
-            Grok Desktop runs the local grok CLI, and that CLI has no
-            credential yet. Signing in opens your browser; this window updates
-            on its own once it succeeds.
-          </p>
-          <div className="login-gate-actions">
-            <button
-              type="button"
-              className="btn btn-primary login-gate-primary"
-              disabled={busy}
-              onClick={onLogin}
-            >
-              {busy ? "Waiting for browser…" : "Open login page"}
-            </button>
-            <button type="button" className="btn-ghost" onClick={onDismiss}>
-              Not now
-            </button>
-          </div>
-          {/* One line, no path: the full auth.json location wrapped to four
-              lines here and buried the actions. It lives in Settings. */}
-          <p className="login-gate-hint">
-            Or set XAI_API_KEY before launching the app.
-          </p>
-        </div>
+          {busy ? "Waiting for browser…" : "Open login page"}
+        </button>
+        {/* One line, no path: the full auth.json location wrapped to four
+            lines here and buried the action. It lives in Settings. */}
+        <p className="login-gate-hint">
+          Or set XAI_API_KEY before launching the app.
+        </p>
       </FadeContent>
     </div>
   );
+
+  return createPortal(screen, document.body);
 }

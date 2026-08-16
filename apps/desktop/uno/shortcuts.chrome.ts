@@ -156,24 +156,27 @@ export const chromeShortcuts: Record<string, string> = {
     "confirm-detail": "m-0",
 
     /*
-     * Signed-out gate (LoginGateView). Centered column on the shared
-     * `modal-panel` surface: logo, title, copy, actions, fallback hint.
-     * gap-3 (not the panel's gap-4) — six stacked elements at 4 read as a
-     * form, and the logo already carries the top breathing room.
+     * Signed-out gate (LoginGateView). Not a modal: while the CLI has no
+     * credential this *is* the window, so it paints the opaque app background
+     * (never `bg-overlay`, which would leave the real UI legible underneath)
+     * above every other layer, lightbox included.
      */
-    "login-gate": "gap-3 items-center text-center pt-6 pb-5",
+    "login-gate-screen":
+      "fixed inset-0 z-120 flex items-center justify-center p-8 bg-app text-fg animate-overlay-in",
+    /* Centered column: logo, title, copy, one action, fallback hint. */
+    "login-gate":
+      "flex flex-col gap-3.5 items-center text-center w-[min(360px,86vw)]",
     /*
-     * 56px keeps the icon a mark, not a splash screen. The asset is the app
-     * tile (dark, self-contained), so it needs no ring or fill of its own —
-     * only the radius so its corners match the panel.
+     * 80px: bigger than the modal's 56px mark since the screen is otherwise
+     * empty, still short of a splash logo. The asset is the app tile (dark,
+     * self-contained), so it needs no ring or fill — only the matching radius.
      */
-    "login-gate-logo": "block w-14 h-14 rounded-14px select-none",
-    "login-gate-title": "flex-none text-center",
+    "login-gate-logo": "block w-20 h-20 rounded-20px select-none",
+    "login-gate-title":
+      "m-0 text-18px font-medium tracking-tight leading-snug text-fg",
     "login-gate-copy":
       "m-0 max-w-[34ch] text-13px leading-relaxed text-fg-secondary",
-    /* Primary first, dismiss under it — this is a gate, not a confirm. */
-    "login-gate-actions": "flex flex-col items-stretch gap-1.5 w-full pt-1",
-    "login-gate-primary": "w-full min-h-8 rounded-pill font-medium",
+    "login-gate-primary": "w-full min-h-9 rounded-pill font-medium mt-1",
     "login-gate-hint":
       "m-0 max-w-[38ch] text-11px leading-snug text-fg-muted [overflow-wrap:anywhere]",
 

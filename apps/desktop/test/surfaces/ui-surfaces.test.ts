@@ -498,21 +498,32 @@ describe("UI surface presence", () => {
     assert.match(shortcuts, /"composer-mode-menu":/);
   });
 
-  it("signed-out gate shows the logo and opens the login page", () => {
+  it("signed-out gate replaces the whole window with logo + login", () => {
     const view = readSrc("widgets/auth/LoginGateView.tsx");
     const hook = readSrc("widgets/auth/useLoginGateWidget.ts");
-    const widget = readSrc("widgets/auth/LoginGateWidget.tsx");
     const app = readSrc("App.tsx");
     const shortcuts = readAllUnoShortcuts();
     // Logo is an imported asset, not an inline SVG fragment in business code.
     assert.match(view, /import logoUrl from "@\/assets\/app-logo\.svg"/);
     assert.match(view, /<img className="login-gate-logo" src=\{logoUrl\}/);
     assert.doesNotMatch(view, /<svg/);
-    // Modal semantics + the two exits (Escape / backdrop both dismiss).
+    // Full-window screen on the opaque app background — not a dimmed modal:
+    // signed out, none of the real UI may be visible behind it.
+    assert.match(view, /className="login-gate-screen"/);
+    assert.match(shortcuts, /"login-gate-screen":\s*\n?\s*"fixed inset-0/);
+    assert.match(shortcuts, /"login-gate-screen":[\s\S]*?bg-app/);
+    assert.doesNotMatch(view, /modal-backdrop|modal-panel/);
+    // No exit: no dismiss handler, no Escape, no backdrop click, no "Not now".
+    assert.doesNotMatch(view, /onDismiss|Not now|e\.key === "Escape"/);
+    assert.doesNotMatch(hook, /dismissed/);
+    // Portaled out of the shell, which App marks inert while the gate is up.
+    assert.match(view, /createPortal\(screen, document\.body\)/);
+    assert.match(app, /inert=\{gate\.open\}/);
+    assert.match(app, /<LoginGateView\b/);
+    // Dialog semantics + Tab trap still hold the keyboard inside the gate.
     assert.match(view, /role="dialog"/);
     assert.match(view, /aria-modal="true"/);
     assert.match(view, /trapFocusTab/);
-    assert.match(view, /e\.key === "Escape"/);
     // View stays stateless; the hook owns visibility and the login call.
     assert.doesNotMatch(view, /useSessionStore/);
     assert.match(hook, /s\.authed/);
@@ -520,14 +531,8 @@ describe("UI surface presence", () => {
     // Unknown auth (null) must not flash the gate on a cold start.
     assert.match(hook, /authed === false/);
     assert.match(hook, /connectionMode === "live-bridge"/);
-    // Dismiss latch re-arms when a credential appears, so a later logout
-    // brings the gate back instead of leaving the app silently unusable.
-    assert.match(hook, /authed === true[\s\S]*setDismissed\(false\)/);
-    assert.match(widget, /useLoginGateWidget/);
-    assert.match(app, /<LoginGateWidget \/>/);
     assert.match(shortcuts, /"login-gate":/);
     assert.match(shortcuts, /"login-gate-logo":/);
-    assert.match(shortcuts, /"login-gate-actions":/);
   });
 
   it("login state polls every 3s while the bridge is live", () => {

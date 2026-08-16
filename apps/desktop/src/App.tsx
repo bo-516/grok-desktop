@@ -18,7 +18,7 @@ import { MultiSessionOverviewWidget } from "./widgets/MultiSessionOverviewWidget
 import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
 import { ContextDrawerWidget } from "@/widgets/contextRail";
 import { PreviewDrawerWidget } from "@/widgets/preview";
-import { LoginGateWidget } from "@/widgets/auth";
+import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
@@ -48,10 +48,14 @@ function contextDrawerRail(
  * Root shell: rails, top bar, timeline, composer, drawers, palette.
  * `data-sidebar` / `data-drawer` mirror the three-tier layout so tests
  * and the inspector can see dock vs overlay without reading class soup.
+ * Signed out, the login screen covers all of it and the shell goes `inert`:
+ * it stays mounted only because it owns the connection and the 3s login poll
+ * that will close the gate — nothing of it is visible or reachable.
  * @returns Full app chrome wired via useAppShellWidget + live session store.
  */
 export function App() {
   const shell = useAppShellWidget();
+  const gate = useLoginGateWidget();
   const deletePrompt =
     shell.confirm?.kind === "session_delete"
       ? buildConfirmPrompt("session_delete", { label: shell.confirm.title })
@@ -64,6 +68,7 @@ export function App() {
       className="app-shell"
       data-sidebar={shell.sidebarDocked ? "docked" : "overlay"}
       data-drawer={shell.drawerEffectiveLayout}
+      inert={gate.open}
     >
       <SessionRailWidget
         open={shell.railOpen}
@@ -158,8 +163,13 @@ export function App() {
       </div>
 
       {shell.session.pendingPermission ? <PermissionModalView /> : null}
-      {/* Signed-out gate — self-hiding; owns its own open state. */}
-      <LoginGateWidget />
+      {/* Signed-out gate — portaled to <body>, so the `inert` shell above it
+          cannot swallow the one control the user still needs. */}
+      <LoginGateView
+        open={gate.open}
+        busy={gate.busy}
+        onLogin={gate.onLogin}
+      />
       <CommandPaletteWidget
         open={shell.paletteOpen}
         onClose={() => shell.setPaletteOpen(false)}
