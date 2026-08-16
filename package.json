@@ -1,7 +1,7 @@
 {
   "name": "grok-desktop",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop ACP client for grok-build (M0/M1 MVP)",
   "workspaces": [
     "packages/*",
