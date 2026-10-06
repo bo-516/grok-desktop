@@ -19,6 +19,8 @@ import {
 } from "react";
 import type { AvailableModel } from "@grok-desktop/acp-core";
 import { useSessionStore } from "../../store/sessionStore";
+import { useModelCatalogStore } from "../../store/modelCatalogStore";
+import { resolveComposerModelSources } from "@/lib/modelCatalog";
 import { useComposerCompletion } from "./useComposerCompletion";
 import { tryComposerMentionKey } from "./composerMentionKeys";
 import { useComposerAttachments } from "./useComposerAttachments";
@@ -62,12 +64,38 @@ export function useComposerWidget() {
   const availableModels = useSessionStore(
     (state) => state.session.availableModels ?? EMPTY_AVAILABLE_MODELS,
   );
+  const cachedModel = useModelCatalogStore((state) => state.model);
+  const cachedModels = useModelCatalogStore((state) => state.availableModels);
+  const cachedConfig = useModelCatalogStore((state) => state.configOptions);
+  /**
+   * Drafts have no handshake catalog. Use the window cache until the painted
+   * session reports its own models. A session list wins over the cache.
+   */
+  const composerSources = useMemo(
+    () =>
+      resolveComposerModelSources({
+        sessionModel: model,
+        sessionModels: availableModels,
+        sessionConfig: configOptions,
+        cachedModel,
+        cachedModels,
+        cachedConfig,
+      }),
+    [
+      availableModels,
+      cachedConfig,
+      cachedModel,
+      cachedModels,
+      configOptions,
+      model,
+    ],
+  );
   /** Live occupancy + last-turn billed usage for the context ring. */
   const tokenUsage = useSessionStore((state) => state.session.tokenUsage);
   /** Prebuilt ring view-model; null when the pref is off or occupancy is unknown. */
   const contextUsageDisplay = useContextUsageDisplay(
-    model,
-    availableModels,
+    composerSources.model,
+    composerSources.availableModels,
     tokenUsage,
   );
   const bridgeInfo = useSessionStore((state) => state.bridgeInfo);
@@ -101,9 +129,9 @@ export function useComposerWidget() {
   const bar = useComposerBarControls({
     mode,
     pendingMode,
-    model,
-    configOptions,
-    availableModels,
+    model: composerSources.model,
+    configOptions: composerSources.configOptions,
+    availableModels: composerSources.availableModels,
     setMode,
     setModel,
   });
@@ -124,7 +152,7 @@ export function useComposerWidget() {
   const completion = useComposerCompletion({
     commands: slash.commands,
     models: bar.models,
-    availableModels,
+    availableModels: composerSources.availableModels,
     currentModel: bar.model,
     listWorkspaceEntries,
     workspace,

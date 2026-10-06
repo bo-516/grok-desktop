@@ -65,8 +65,10 @@ export function normalizeAvailableCommands(value: unknown): AvailableCommand[] {
 /**
  * Convert an untrusted agent model array into a stable picker catalog.
  * Supports `{ id|modelId|value, name|label }` objects and bare model id strings.
+ * Copies `_meta.reasoningEfforts` and `_meta.reasoningEffort` (current selection).
  * @param value Any `availableModels` value from initialize, session/new, or session/load.
  * @returns Deduped models with non-empty ids only; corrupt entries are dropped.
+ *          A missing effort ladder or current effort is omitted, not invented.
  */
 export function normalizeAvailableModels(value: unknown): AvailableModel[] {
   const rawModels = Array.isArray(value) ? value : [];
@@ -111,12 +113,25 @@ export function normalizeAvailableModels(value: unknown): AvailableModel[] {
         record.reasoning_efforts ??
         record.reasoningEfforts,
     );
+    /**
+     * Current selection, not the row marked default. Missing stays unset so
+     * the composer can fall through to the list default instead of inventing one.
+     */
+    const reasoningEffort = readOptionalString(
+      meta?.reasoningEffort ??
+        meta?.reasoning_effort ??
+        record.reasoningEffort ??
+        record.reasoning_effort,
+    );
     const model: AvailableModel = name ? { id, name } : { id };
     if (totalContextTokens !== undefined) {
       model.totalContextTokens = totalContextTokens;
     }
     if (reasoningEfforts) {
       model.reasoningEfforts = reasoningEfforts;
+    }
+    if (reasoningEffort) {
+      model.reasoningEffort = reasoningEffort;
     }
     models.push(model);
   }
@@ -172,6 +187,19 @@ function readReasoningEfforts(
     out.push(row);
   }
   return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Read a trimmed non-empty string from an untrusted protocol field.
+ * @param value Any JSON value; non-strings and blanks are absent.
+ * @returns Trimmed string, or undefined when the agent did not send one.
+ */
+function readOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 /**
@@ -340,15 +368,16 @@ export function resolveAvailableModels(
   current: SessionState["availableModels"] | undefined,
   fromInit: NonNullable<SessionState["availableModels"]>,
 ): NonNullable<SessionState["availableModels"]> {
-  const picked =
-    loaded.length > 0
-      ? loaded
-      : current && current.length > 0
-        ? current
-        : fromInit;
-  return (
-    mergeAvailableModelsPreferContext(picked, fromInit) ?? picked
-  );
+  // Loaded list, then the in-flight list, then initialize. Empty arrays fall through.
+  let picked: NonNullable<SessionState["availableModels"]>;
+  if (loaded.length > 0) {
+    picked = loaded;
+  } else if (current && current.length > 0) {
+    picked = current;
+  } else {
+    picked = fromInit;
+  }
+  return mergeAvailableModelsPreferContext(picked, fromInit) ?? picked;
 }
 
 /**

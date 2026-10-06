@@ -54,14 +54,14 @@ type PooledRuntime struct {
 	Cancel            func()
 	RespondPermission func(optionID string) error
 	// Mid-session ACP ops (nil when the agent/runtime does not expose them).
-	SetModel     func(modelID string) error
-	SetMode      func(modeID string) error
-	Compact      func(instruction string) error
-	TokenUsage   func() (any, error)
+	SetModel   func(modelID string) error
+	SetMode    func(modeID string) error
+	Compact    func(instruction string) error
+	TokenUsage func() (any, error)
 	// Billing fetches account weekly remaining via `_x.ai/billing`.
 	Billing     func() (any, error)
 	ForkSession func(sourceCwd, newCwd string) (any, error)
-	Dispose      func()
+	Dispose     func()
 }
 
 // PoolEntry is the UI rail summary for one resident process.
@@ -217,6 +217,43 @@ func (p *RuntimePool) DisposeAll() {
 	for _, rt := range rts {
 		rt.Dispose()
 	}
+}
+
+// PendingSpawns is the number of BeginSpawn reservations not yet Inserted.
+// A catalog read waits while this is non-zero so an in-flight handshake can
+// supply models instead of starting a second grok. Zero means no handshake
+// is in flight; an empty pool can probe immediately.
+func (p *RuntimePool) PendingSpawns() int {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pendingSpawns
+}
+
+// SessionStates copies each resident snapshot.
+// GetSessionState runs outside the pool lock so a client callback that
+// re-enters the pool cannot deadlock. A nil pool or a runtime without a
+// getter is skipped. The slice is a snapshot, not a live view.
+func (p *RuntimePool) SessionStates() []acp.SessionState {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	rts := make([]*PooledRuntime, 0, len(p.m))
+	for _, rt := range p.m {
+		rts = append(rts, rt)
+	}
+	p.mu.Unlock()
+	out := make([]acp.SessionState, 0, len(rts))
+	for _, rt := range rts {
+		if rt.GetSessionState == nil {
+			continue
+		}
+		out = append(out, rt.GetSessionState())
+	}
+	return out
 }
 
 // List returns pool summary sorted by lastUsed ascending (LRU first).

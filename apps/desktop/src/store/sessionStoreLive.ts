@@ -39,6 +39,7 @@ import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
 import { syncCatalogFromBridge } from "./sessionStoreSync";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
 import { rememberSlashCatalog } from "@/lib/slashCatalog";
+import { rememberModelCatalog } from "@/store/modelCatalogStore";
 import {
   persistNormalizedCatalog,
   resolveResumeCanvasStatus,
@@ -170,6 +171,13 @@ export async function startLiveBridgeSession(
          */
         onState: (session, meta) => {
           rememberSlashCatalog(session.availableCommands);
+          // Remember even when the canvas is a draft and will not paint this
+          // session. New chat must still see the catalog.
+          rememberModelCatalog({
+            model: session.model,
+            availableModels: session.availableModels,
+            configOptions: session.configOptions,
+          });
           applyLiveInboundSession(set, get, session, meta);
           const b = get().live;
           if (b && Object.keys(get().pendingSessions ?? {}).length > 0) {
@@ -181,6 +189,11 @@ export async function startLiveBridgeSession(
             return;
           }
           rememberSlashCatalog(session.availableCommands);
+          rememberModelCatalog({
+            model: session.model,
+            availableModels: session.availableModels,
+            configOptions: session.configOptions,
+          });
           applyLiveInboundSession(set, get, session);
           const b = get().live;
           if (b && Object.keys(get().pendingSessions ?? {}).length > 0) {

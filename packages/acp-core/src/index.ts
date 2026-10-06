@@ -8,6 +8,7 @@ export * from "./codec.js";
 export * from "./timeline.js";
 export * from "./sessionLifecycle.js";
 export * from "./sessionMetadata.js";
+export * from "./sessionConfigOptions.js";
 export * from "./transport.js";
 export * from "./client.js";
 export * from "./mockAgent.js";

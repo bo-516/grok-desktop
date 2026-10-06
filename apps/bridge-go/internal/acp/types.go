@@ -49,11 +49,15 @@ type ReasoningEffort struct {
 // (F-CTX-01 composer context ring). Omitted when the agent did not declare it.
 // ReasoningEfforts is that model's advertised effort ladder; omitted when the
 // agent did not declare one.
+// ReasoningEffort is the agent's current selection (`_meta.reasoningEffort`),
+// distinct from the ladder row marked default (the recommended level). Omitted
+// when the agent did not report a current effort — do not invent one.
 type AvailableModel struct {
 	ID                 string            `json:"id"`
 	Name               string            `json:"name,omitempty"`
 	TotalContextTokens int               `json:"totalContextTokens,omitempty"`
 	ReasoningEfforts   []ReasoningEffort `json:"reasoningEfforts,omitempty"`
+	ReasoningEffort    string            `json:"reasoningEffort,omitempty"`
 }
 
 // SessionState is the minimal snapshot held by the Go bridge.

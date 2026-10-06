@@ -208,6 +208,30 @@ export class RuntimePool {
   }
 
   /**
+   * Resident snapshots for the initialize-only catalog read.
+   * A runtime without models still counts as resident so the caller can wait
+   * for the handshake instead of spawning a second grok.
+   * @returns One state per resident, in map order.
+   */
+  sessionStates(): SessionState[] {
+    const out: SessionState[] = [];
+    for (const rt of this.map.values()) {
+      out.push(rt.getSessionState());
+    }
+    return out;
+  }
+
+  /**
+   * Spawns reserved but not yet inserted.
+   * A catalog read waits while this is non-zero. Zero with an empty map means
+   * probe immediately.
+   * @returns In-flight BeginSpawn count.
+   */
+  pendingSpawnCount(): number {
+    return this.pendingSpawns;
+  }
+
+  /**
    * List pool summary (LRU: least recently used first).
    */
   list(): PoolEntry[] {

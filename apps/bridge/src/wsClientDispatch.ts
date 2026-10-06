@@ -22,6 +22,7 @@ import {
   startOrResume,
   type SessionLifecycleDeps,
 } from "./wsSessionLifecycle.js";
+import { readModelCatalog } from "./modelCatalog.js";
 import {
   handleCli,
   handleSetMode,
@@ -88,6 +89,35 @@ export async function dispatchClientMsg(
   // the desktop can run this every 3s without a process per tick.
   if (msg.type === "check_auth") {
     send(ws, { type: "auth_state", auth: probeAuthSource() });
+    return;
+  }
+  // Off the await chain: initialize can take tens of seconds and must not
+  // stall later frames on this socket. Failure stays on model_catalog.
+  if (msg.type === "read_model_catalog") {
+    const requestId = msg.requestId;
+    const cwd = msg.cwd
+      ? path.resolve(msg.cwd)
+      : state.defaultListCwd || defaultCwd;
+    void readModelCatalog(pool, cwd)
+      .then((snap) => {
+        send(ws, {
+          type: "model_catalog",
+          requestId,
+          ok: true,
+          model: snap.model,
+          availableModels: snap.availableModels,
+          configOptions: snap.configOptions,
+        });
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        send(ws, {
+          type: "model_catalog",
+          requestId,
+          ok: false,
+          error: message,
+        });
+      });
     return;
   }
   if (msg.type === "list_pool") {

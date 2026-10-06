@@ -72,10 +72,15 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     const initialModel =
       args.model || loadPreferredModel() || args.availableModels[0]?.id || "";
     return resolveThinkingEffort(
-      undefined,
-      resolveThinkingOptions(undefined, initialModel, args.availableModels),
+      args.configOptions,
+      resolveThinkingOptions(
+        args.configOptions,
+        initialModel,
+        args.availableModels,
+      ),
       loadThinkingEffortRaw(),
       initialModel,
+      args.availableModels,
     );
   });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -113,9 +118,10 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
         thinkingOptions,
         loadThinkingEffortRaw() ?? prev,
         effectiveModel,
+        availableModels,
       ),
     );
-  }, [configOptions, effectiveModel, thinkingOptions]);
+  }, [availableModels, configOptions, effectiveModel, thinkingOptions]);
 
   /**
    * Select a mode explicitly from the popover (or ⇧Tab cycle).
