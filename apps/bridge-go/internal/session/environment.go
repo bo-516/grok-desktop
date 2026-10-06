@@ -3,14 +3,35 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 )
+
+// minGrokVersion is the lowest grok CLI CheckEnvironment will mark ok.
+// Floor matches the removed Node bridge: major.minor.patch 0.9.0.
+const minGrokVersion = "0.9.0"
+
+// semverPattern finds the first major.minor.patch in a version line.
+// Extra text such as "grok 1.0.0 (abc)" is ignored after the triple.
+var semverPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+
+// versionSupport is the outcome of comparing one grok --version line to a floor.
+type versionSupport struct {
+	// OK is true only when both sides parsed and the CLI is at or above the floor.
+	OK bool
+	// Message is the UI string. Failure text matches the old Node checker byte for byte.
+	Message string
+	// Parsed is "major.minor.patch" when parsing succeeded, otherwise empty.
+	Parsed string
+}
 
 // EnvironmentInfo is the CLI / login probe result (secrets never included).
 type EnvironmentInfo struct {
@@ -120,9 +141,81 @@ func ReadGrokVersion(bin string, timeoutMs int) *string {
 	}
 }
 
-// CheckEnvironment aggregates CLI + login probe results.
-// Version support check is T3 on Go bridge — we skip hard version gates and
-// only require binary found + auth present for ok=true.
+// parseSemver returns the first major.minor.patch in raw.
+// Empty raw or no triple returns nil. Non-digit captures cannot occur
+// because the pattern is `\d+`.
+func parseSemver(raw string) *[3]int {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	m := semverPattern.FindStringSubmatch(raw)
+	if m == nil {
+		return nil
+	}
+	var out [3]int
+	for i := 0; i < 3; i++ {
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			return nil
+		}
+		out[i] = n
+	}
+	return &out
+}
+
+// compareSemver returns -1 when a<b, 0 when equal, 1 when a>b.
+// Comparison is numeric per component, not lexical. a and b must be non-nil;
+// a nil argument is a caller bug and panics.
+func compareSemver(a, b *[3]int) int {
+	for i := 0; i < 3; i++ {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func formatSemver(v *[3]int) string {
+	return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
+}
+
+// grokVersionSupported reports whether versionRaw meets min.
+// versionRaw nil is shown as "null". A non-nil empty string is shown empty.
+// min that itself has no major.minor.patch yields the unable-to-parse message.
+// Returns OK false with the upgrade sentence when the CLI is below min.
+func grokVersionSupported(versionRaw *string, min string) versionSupport {
+	raw := ""
+	display := "null"
+	if versionRaw != nil {
+		raw = *versionRaw
+		display = *versionRaw
+	}
+	parsed := parseSemver(raw)
+	minParsed := parseSemver(min)
+	if parsed == nil || minParsed == nil {
+		return versionSupport{
+			OK:      false,
+			Message: fmt.Sprintf("Unable to parse grok version (%s); need ≥ %s", display, min),
+		}
+	}
+	pretty := formatSemver(parsed)
+	if compareSemver(parsed, minParsed) < 0 {
+		return versionSupport{
+			OK:      false,
+			Message: fmt.Sprintf("grok %s is below the minimum supported version %s. Please upgrade the CLI.", pretty, min),
+			Parsed:  pretty,
+		}
+	}
+	return versionSupport{OK: true, Message: "grok " + pretty + " ok", Parsed: pretty}
+}
+
+// CheckEnvironment aggregates CLI, version floor, and login probe results.
+// Order matches the removed Node checker: missing binary, then version floor,
+// then login. A logged-in user with grok < 0.9.0 or an unparseable version
+// still gets ok=false. poolCapacity < 1 reads BRIDGE_POOL_CAPACITY.
 func CheckEnvironment(poolCapacity int) EnvironmentInfo {
 	if poolCapacity < 1 {
 		poolCapacity = PoolCapacityFromEnv()
@@ -138,6 +231,14 @@ func CheckEnvironment(poolCapacity int) EnvironmentInfo {
 	}
 	grokPath := bin
 	version := ReadGrokVersion(bin, 3000)
+	support := grokVersionSupported(version, minGrokVersion)
+	if !support.OK {
+		return EnvironmentInfo{
+			GrokPath: &grokPath, Version: version, Authed: authed, AuthSource: authSource,
+			AuthPathChecked: authPath, OK: false,
+			Message: support.Message, PoolCapacity: poolCapacity,
+		}
+	}
 	if !authed {
 		return EnvironmentInfo{
 			GrokPath: &grokPath, Version: version, Authed: false, AuthSource: "none",

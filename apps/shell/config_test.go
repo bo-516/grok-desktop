@@ -29,20 +29,26 @@ func TestResolveBridgeImpl_ConfigFile(t *testing.T) {
 }
 
 // TestResolveBridgeImpl_EnvWins over config file value.
+// "go" in the env still selects Go when the file says node.
+// "node" in the env is an error even when the file says go.
 func TestResolveBridgeImpl_EnvWins(t *testing.T) {
-	impl, err := ResolveBridgeImpl("node", Config{BridgeImpl: BridgeImplGo})
-	if err != nil {
-		t.Fatal(err)
+	if _, err := ResolveBridgeImpl("node", Config{BridgeImpl: BridgeImplGo}); err == nil || err.Error() != nodeBridgeRemoved {
+		t.Fatalf("env node: %v", err)
 	}
-	if impl != BridgeImplNode {
-		t.Fatalf("env should win: want node, got %q", impl)
-	}
-	impl, err = ResolveBridgeImpl("go", Config{BridgeImpl: BridgeImplNode})
+	impl, err := ResolveBridgeImpl("go", Config{BridgeImpl: "node"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if impl != BridgeImplGo {
 		t.Fatalf("env should win: want go, got %q", impl)
+	}
+}
+
+// TestParseBridgeImpl_NodeRemoved pins the user-facing sentence.
+func TestParseBridgeImpl_NodeRemoved(t *testing.T) {
+	_, err := ParseBridgeImpl("node")
+	if err == nil || err.Error() != nodeBridgeRemoved {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -95,15 +101,23 @@ func TestLoadConfigFile_NestedAndFlat(t *testing.T) {
 	}
 
 	nested := filepath.Join(dir, "nested.json")
-	if err := os.WriteFile(nested, []byte(`{"bridge":{"impl":"node"}}`), 0o644); err != nil {
+	if err := os.WriteFile(nested, []byte(`{"bridge":{"impl":"go"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = LoadConfigFile(nested)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BridgeImpl != BridgeImplNode {
-		t.Fatalf("nested: want node, got %q", cfg.BridgeImpl)
+	if cfg.BridgeImpl != BridgeImplGo {
+		t.Fatalf("nested: want go, got %q", cfg.BridgeImpl)
+	}
+
+	removed := filepath.Join(dir, "node.json")
+	if err := os.WriteFile(removed, []byte(`{"bridge.impl":"node"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfigFile(removed); err == nil || err.Error() != nodeBridgeRemoved {
+		t.Fatalf("flat node: %v", err)
 	}
 }
 

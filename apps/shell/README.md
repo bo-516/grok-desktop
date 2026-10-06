@@ -1,8 +1,8 @@
 # apps/shell — Wails v3 thin desktop shell
 
-Thin host process for **Grok Desktop**. Spawns the bridge as a **separate child process**, embeds the Vite-built React UI, injects a per-start bridge WebSocket URL, and kills the bridge process group on exit.
+Thin host process for **Grok Desktop**. Spawns bridge-go as a **separate child process**, embeds the Vite-built React UI, injects a per-start bridge WebSocket URL, and kills the bridge process group on exit.
 
-**Does not** contain ACP reduce / business logic. Protocol: [`docs/protocol-freeze-relay-2026-08-10.md`](../../docs/protocol-freeze-relay-2026-08-10.md). Design: [`docs/plan-wails3-dual-bridge-2026-08-10.md`](../../docs/plan-wails3-dual-bridge-2026-08-10.md) §4.
+**Does not** contain ACP reduce / business logic.
 
 ## Version pin
 
@@ -17,8 +17,8 @@ Thin host process for **Grok Desktop**. Spawns the bridge as a **separate child 
 ```
 apps/shell/
   main.go              # Wails app + lifecycle
-  bridge_launcher.go   # spawn node|go bridge, process-group kill
-  config.go            # bridge.impl + GROK_DESKTOP_BRIDGE
+  bridge_launcher.go   # spawn bridge-go, process-group kill
+  config.go            # bridge.impl (go only) + GROK_DESKTOP_BRIDGE
   port_token.go        # free port + random token
   paths.go             # monorepo root / tsx / bridge-go discovery
   embed.go             # go:embed frontend/dist
@@ -29,9 +29,9 @@ apps/shell/
 
 ## Bridge selection (cold switch only)
 
-1. Env **`GROK_DESKTOP_BRIDGE=node|go`** (wins when set)
-2. User config file `bridge.impl` / nested `bridge.impl`
-3. Default: **`go`** (Node only when env/config says `node`)
+1. Env **`GROK_DESKTOP_BRIDGE`** (wins when set). Empty or `go` starts bridge-go. `node` exits 1 with `node bridge was removed; unset GROK_DESKTOP_BRIDGE or set it to go`.
+2. User config file `bridge.impl` / nested `bridge.impl` — same values
+3. Default: **`go`**
 
 Config file path:
 
@@ -62,24 +62,18 @@ Black WebView? Check `ui-*.log` first (boot missing ⇒ JS never ran; `react.bou
 Example:
 
 ```json
-{
-  "bridge": { "impl": "node" }
-}
-```
-
-or flat:
-
-```json
 { "bridge.impl": "go" }
 ```
 
-Go bridge is the product default. If `go` is selected (including default) and no binary is found under:
+`{"bridge":{"impl":"node"}}` and `{"bridge.impl":"node"}` fail at startup. The shell does not rewrite the file.
+
+Go bridge is the only implementation. If no binary is found under:
 
 - `apps/bridge-go/bin/bridge`
 - `apps/bridge-go/bridge`
 - `bin/bridge-go`
 
-the shell **errors clearly** (no silent fallback to mock or node).
+the shell **errors clearly** (no silent fallback). The error includes `(cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge)`.
 
 ## What the shell passes to the bridge
 
@@ -119,23 +113,18 @@ Binary: **`apps/shell/bin/grok-desktop`**
 
 ## Run
 
-From the monorepo (shell discovers repo root via `apps/bridge/src/server.ts`):
+From the monorepo (shell discovers repo root via `apps/bridge-go/cmd/bridge/main.go`):
 
 ```bash
 # Default: Go bridge (needs apps/bridge-go/bin/bridge-go)
 ./apps/shell/bin/grok-desktop
 
-# Force Go
+# Explicit Go
 GROK_DESKTOP_BRIDGE=go ./apps/shell/bin/grok-desktop
-
-# Force Node (tsx + workspace deps)
-GROK_DESKTOP_BRIDGE=node ./apps/shell/bin/grok-desktop
 
 # Optional workspace root for agent sessions
 BRIDGE_CWD=/path/to/project ./apps/shell/bin/grok-desktop
 ```
-
-Node bridge spawn uses monorepo `node_modules/.bin/tsx` (or PATH `tsx` / `npx tsx`) to run `apps/bridge/src/server.ts`.
 
 ## Tests
 
@@ -144,12 +133,12 @@ cd apps/shell
 go test ./...
 ```
 
-Covers config resolution (node vs go, env override), free port + token generation, env override for bridge spawn, inject JS escaping.
+Covers config resolution (`go` default, `node` rejected), free port + token generation, env override for bridge spawn, inject JS escaping.
 
 ## Packaging notes
 
 - `go:embed` cannot reach outside `apps/shell/`; always sync `apps/desktop/dist` → `apps/shell/frontend/dist` before `go build`.
-- Bridge remains an external process in packaged builds so Node/Go A/B stays fair and browser-debug of the UI stays possible.
+- Bridge remains an external process in packaged builds so the UI can still be browser-debugged.
 - On exit (window close / SIGINT / SIGTERM / `OnShutdown`): SIGTERM process group, then SIGKILL after grace (Unix `Setpgid`).
 
 ## Env blockers / requirements
@@ -157,6 +146,6 @@ Covers config resolution (node vs go, env override), free port + token generatio
 | Need | Why |
 |---|---|
 | CGO + macOS SDK | Wails WKWebView |
-| `tsx` / monorepo `npm install` | Node bridge script |
+| Go 1.25+ | bridge-go and the shell binary |
 | Real `grok` CLI on PATH | Bridge product path (not mock) |
 | Frontend dist present | Embed fails without `index.html` |

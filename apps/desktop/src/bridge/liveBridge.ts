@@ -1,5 +1,5 @@
 /**
- * Browser client for the local Node bridge (real grok agent stdio).
+ * Browser client for the local Go bridge (real grok agent stdio).
  * Multi-session: prompt/cancel/permission carry sessionId; pool and env-probe callbacks.
  * CLI channel + set_model/set_mode/restart/compact. Workspace FS helpers live in liveBridgeFs.
  *

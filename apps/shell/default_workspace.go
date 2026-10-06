@@ -8,7 +8,7 @@ import (
 
 // ProductWorkspaceFolder is the leaf under the user's Documents directory
 // used as the default agent workspace in production. Keep in sync with
-// apps/bridge/src/defaultWorkspace.ts and bridge-go session.ProductWorkspaceFolder.
+// bridge-go session.ProductWorkspaceFolder.
 const ProductWorkspaceFolder = "Grok"
 
 // UserDocumentsDir is the OS user Documents folder.

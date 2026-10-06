@@ -51,7 +51,7 @@
 
 | 允许 | 绝不 |
 |---|---|
-| `npm run bridge` / `npm run m0:live` / `npm run demo:e2e` 拉起 `grok agent stdio` | Mock agent UI、把离线 fixture 当「会话」、静默回退到 mock |
+| `npm run bridge` / `npm run m0:live` 拉起 `grok agent stdio` | Mock agent UI、把离线 fixture 当「会话」、静默回退到 mock |
 | `demo/` 下的演示工作区 | 把 mock 假装成 live agent |
 
 单元测试可以用进程内 ACP mock，仅隔离 codec / timeline，不得接到产品路径。
@@ -60,12 +60,11 @@
 
 ```
 packages/acp-core/   纯协议编解码、时间线 reduce、AcpClient
-apps/bridge/         Node RuntimePool：真实 `grok agent stdio` + WebSocket
-apps/bridge-go/      Go 桥（有二进制时为产品默认）
+apps/bridge-go/      Go 桥：真实 `grok agent stdio` + WebSocket
 apps/desktop/        Vite + React 壳（只走 live-bridge）
 apps/shell/          Wails v3 宿主 — 自己拉桥进程，嵌入 UI
 apps/m0/             CLI 握手（默认只走 live）
-demo/                `demo:e2e` / `m0:live` 的受限沙箱
+demo/                `m0:live` 的受限沙箱
 ```
 
 ## 环境
@@ -74,8 +73,8 @@ demo/                `demo:e2e` / `m0:live` 的受限沙箱
 - **产品路径必须有**：PATH 上的 `grok`（或 `~/.grok/bin/grok`），并完成 `grok login` / 鉴权
   - 鉴权：`grok login`（写入 `~/.grok/auth.json`）**或** 环境变量 `XAI_API_KEY`
   - 桥回报缺凭证时，UI 会显示鉴权横幅
-- **可选，用于 Go 桥 / 桌面窗口**：Go 1.25+
-  - `cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge`
+- **跑桥 / 桌面窗口必须有**：Go 1.25+
+  - `npm run bridge` 会在 `apps/bridge-go/bin/bridge-go` 缺失或过期时编译它
   - Wails 壳见 [`apps/shell/README.md`](apps/shell/README.md)
 
 ## 安装
@@ -89,7 +88,7 @@ npm install
 界面三列：**会话栏 · 时间线 · Plan / Agents**。输入框在转录区下方。
 
 ```bash
-# 终端 A — 真实 grok-build（优先 go-bridge；没有二进制再用 Node）
+# 终端 A — Go 桥（需要时编译 apps/bridge-go/bin/bridge-go）
 # 默认工作区 = 本仓库。可用 BRIDGE_CWD=… 覆盖
 npm run bridge
 
@@ -103,23 +102,22 @@ npm run dev
 
 ```bash
 npm run run:both
-# 用 Node 桥而不是 Go：npm run run:node-both
-# 交互菜单（web / desktop / both × Go / Node）：npm run run:dev
+# 交互菜单（web / desktop / both）：npm run run:dev
 ```
 
 | 命令 | 作用 |
 |---|---|
-| `npm run bridge` | 存在 `apps/bridge-go/bin/bridge-go` 则走 Go，否则 Node |
+| `npm run bridge` | 按需编译后运行 `apps/bridge-go/bin/bridge-go` |
 | `npm run dev` | Vite Web UI，端口 `:8172` |
-| `npm run run:both` | Go：Vite Web + Wails 桌面（两套隔离的桥） |
-| `npm run run:go-web` / `run:node-web` | 一个 Web UI + 对应的桥 |
-| `npm run run:go-desktop` / `run:node-desktop` | Wails 窗口（壳自己拉桥） |
+| `npm run run:both` | Vite Web + Wails 桌面（两套隔离的 Go 桥） |
+| `npm run run:go-web` | 一个 Web UI + Go 桥 |
+| `npm run run:go-desktop` | Wails 窗口（壳自己拉 Go 桥） |
 
 ### 工作区
 
 - **开发（本仓库，未设 `BRIDGE_CWD`）**：monorepo 根目录，聊天和代码在一起
 - **打包 / 附近没有源码树**：macOS、Windows、Linux 均为 `Documents/Grok`
-- **`demo/`**：只给 `demo:e2e` / `m0:live` 用的受限沙箱 — 不是默认聊天 cwd
+- **`demo/`**：只给 `m0:live` 用的受限沙箱 — 不是默认聊天 cwd
 
 ### 当前能力
 
@@ -132,13 +130,6 @@ npm run run:both
 - **输入框**：Enter 发送，Shift+Enter 换行；Ask / Plan / Build；Thinking；`/model` `/effort` `/fork` `/rewind`；后续队列；上下文占用环；每周剩余额度
 - **⌘K**：动作、设置、slash 草稿、MCP 服务器、skills（会话仍在侧栏）
 - 桥断开 → 离线横幅；历史仍可看；**每 3 秒自动重连**（页脚 Reconnect 仍可用）
-
-### Live e2e（stdio、工具、subagent）
-
-```bash
-npm run demo:e2e
-# 日志：demo/e2e-last-run.log
-```
 
 ### M0 握手（live）
 

@@ -111,7 +111,7 @@ export type BridgeServerMsg =
       cwd: string;
       port: number;
       poolCapacity?: number;
-      impl?: "node" | "go";
+      impl?: "go";
       version?: string;
     }
   | { type: "state"; session: SessionState }
@@ -226,7 +226,7 @@ export type LiveBridgeHandlers = {
   onHello?: (
     cwd: string,
     poolCapacity?: number,
-    meta?: { impl?: "node" | "go"; version?: string },
+    meta?: { impl?: "go"; version?: string },
   ) => void;
   onClose?: () => void;
   onRestartRequired?: (payload: {

@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +94,79 @@ func TestProbeAuthCarriesFullPayload(t *testing.T) {
 	out = ProbeAuth()
 	if !out.Authed || out.AuthSource != "xai_api_key" {
 		t.Fatalf("logged in: authed=%v src=%s", out.Authed, out.AuthSource)
+	}
+}
+
+// writeFakeGrok writes an executable stand-in for `grok --version`.
+// script is a full shell program. GROK_BIN must point at the returned path
+// or CheckEnvironment will find a real CLI instead.
+func writeFakeGrok(t *testing.T, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "grok")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestGrokVersionSupportedMessages(t *testing.T) {
+	old := "grok 0.8.9"
+	got := grokVersionSupported(&old, minGrokVersion)
+	if got.OK || got.Message != "grok 0.8.9 is below the minimum supported version 0.9.0. Please upgrade the CLI." {
+		t.Fatalf("old: %+v", got)
+	}
+	okLine := "grok 1.0.0 (abc)"
+	got = grokVersionSupported(&okLine, minGrokVersion)
+	if !got.OK || got.Parsed != "1.0.0" {
+		t.Fatalf("parsed: %+v", got)
+	}
+	got = grokVersionSupported(nil, minGrokVersion)
+	if got.Message != "Unable to parse grok version (null); need ≥ 0.9.0" {
+		t.Fatalf("null: %q", got.Message)
+	}
+}
+
+func TestCheckEnvironmentRejectsOldVersionEvenWhenAuthed(t *testing.T) {
+	bin := writeFakeGrok(t, "#!/bin/sh\nprintf '%s\\n' 'grok 0.8.9'\n")
+	t.Setenv("GROK_BIN", bin)
+	t.Setenv("XAI_API_KEY", "sk-test")
+	info := CheckEnvironment(8)
+	if info.OK {
+		t.Fatal("old version must not be ok")
+	}
+	if !strings.Contains(info.Message, "below the minimum") {
+		t.Fatalf("message %q", info.Message)
+	}
+	if !info.Authed || info.AuthSource != "xai_api_key" {
+		t.Fatalf("login must not hide the version failure: authed=%v src=%s", info.Authed, info.AuthSource)
+	}
+}
+
+func TestCheckEnvironmentAcceptsParsedVersionWhenAuthed(t *testing.T) {
+	bin := writeFakeGrok(t, "#!/bin/sh\nprintf '%s\\n' 'grok 1.0.0 (abc)'\n")
+	t.Setenv("GROK_BIN", bin)
+	t.Setenv("XAI_API_KEY", "sk-test")
+	info := CheckEnvironment(8)
+	if !info.OK {
+		t.Fatalf("want ok, message %q", info.Message)
+	}
+	if info.Version == nil || *info.Version != "grok 1.0.0 (abc)" {
+		t.Fatalf("version %+v", info.Version)
+	}
+}
+
+func TestCheckEnvironmentRejectsUnparsedVersion(t *testing.T) {
+	bin := writeFakeGrok(t, "#!/bin/sh\nexit 1\n")
+	t.Setenv("GROK_BIN", bin)
+	t.Setenv("XAI_API_KEY", "sk-test")
+	info := CheckEnvironment(8)
+	if info.OK {
+		t.Fatal("unparsed version must not be ok")
+	}
+	if info.Message != "Unable to parse grok version (null); need ≥ 0.9.0" {
+		t.Fatalf("message %q", info.Message)
+	}
+	if !info.Authed {
+		t.Fatal("auth probe still reports the API key")
 	}
 }

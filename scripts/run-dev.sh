@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# One-shot launcher: bridge (node|go) + UI (web|desktop).
+# One-shot launcher: Go bridge + UI (web|desktop).
 #
 # Usage:
 #   ./scripts/run-dev.sh                 # interactive menu
+#   ./scripts/run-dev.sh bridge          # Go bridge only (foreground)
 #   ./scripts/run-dev.sh go-web          # 1) Go bridge + Vite web
-#   ./scripts/run-dev.sh node-web        # 2) Node bridge + Vite web
-#   ./scripts/run-dev.sh go-desktop      # 3) Go bridge + Wails shell
-#   ./scripts/run-dev.sh node-desktop    # 4) Node bridge + Wails shell
-#   ./scripts/run-dev.sh go-both         # 5) Go: Vite web + Wails desktop
-#   ./scripts/run-dev.sh node-both       # 6) Node: Vite web + Wails desktop
-#   ./scripts/run-dev.sh 1|2|3|4|5|6    # same as above
+#   ./scripts/run-dev.sh go-desktop      # 2) Go bridge + Wails shell
+#   ./scripts/run-dev.sh go-both         # 3) Go: Vite web + Wails desktop
+#   ./scripts/run-dev.sh 1|2|3           # same as web / desktop / both
+#
+# node-web, node-desktop, node-both, and menu numbers 4–6 exit 1.
+# The Node bridge process has been removed.
 #
 # Env overrides:
 #   BRIDGE_CWD          workspace for agent (default: <repo> in this script)
@@ -17,7 +18,7 @@
 #   VITE_PORT           Vite port (default: 8172)
 #   SKIP_BUILD=1        do not rebuild stale go/shell/desktop artifacts
 #
-# Desktop modes (go-desktop / node-desktop) auto-increment:
+# Desktop mode auto-increments:
 #   apps/desktop src → Vite dist → shell/frontend/dist → go:embed shell bin
 # so TS/UI edits are not silently stuck on an old embedded bundle.
 
@@ -27,13 +28,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # Dev default: the checkout itself. Production packaged runs use <Documents>/Grok
-# (see apps/bridge/src/defaultWorkspace.ts). demo/ stays for demo:e2e / m0:live.
+# (see apps/bridge-go/internal/session/default_workspace.go). demo/ stays for m0:live.
 BRIDGE_CWD="${BRIDGE_CWD:-$ROOT}"
 VITE_PORT="${VITE_PORT:-8172}"
-NODE_BRIDGE_SRC="$ROOT/apps/bridge/src/server.ts"
 GO_BRIDGE_BIN="$ROOT/apps/bridge-go/bin/bridge-go"
 SHELL_BIN="$ROOT/apps/shell/bin/grok-desktop"
-TSX_BIN="$ROOT/node_modules/.bin/tsx"
 
 # PIDs we own. Desktop-only uses exec (no SHELL_PID). Both-mode tracks both UIs.
 # Desktop shell always owns its own bridge (separate port/token from the web bridge).
@@ -71,10 +70,9 @@ trap cleanup EXIT INT TERM
 # shellcheck source=scripts/run-dev-build.sh
 . "$ROOT/scripts/run-dev-build.sh"
 
-# Start Node or Go bridge; set BRIDGE_WS_URL globally after ready.
-# $1 = node|go
+# Start the Go bridge; set BRIDGE_WS_URL globally after ready.
+# Missing `go` or a failed build exits 1. There is no Node fallback.
 start_bridge() {
-  local impl="$1"
   local port token ready_line log_file
   port="$(pick_port)"
   token="$(openssl rand -hex 16 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(16))')"
@@ -86,26 +84,15 @@ start_bridge() {
   export BRIDGE_CWD
   export BRIDGE_ALLOWED_ORIGINS="http://localhost:${VITE_PORT},http://127.0.0.1:${VITE_PORT},http://localhost:5173,http://127.0.0.1:5173,null,file://"
 
-  if [[ "$impl" == "go" ]]; then
-    ensure_go_bridge
-    log "starting Go bridge on :$port …"
-    # setsid so cleanup can kill the whole group (agent children).
-    if command -v setsid >/dev/null 2>&1; then
-      setsid "$GO_BRIDGE_BIN" >"$log_file" 2>&1 &
-    else
-      "$GO_BRIDGE_BIN" >"$log_file" 2>&1 &
-    fi
-    BRIDGE_PID=$!
+  ensure_go_bridge
+  log "starting Go bridge on :$port …"
+  # setsid so cleanup can kill the whole group (agent children).
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$GO_BRIDGE_BIN" >"$log_file" 2>&1 &
   else
-    ensure_tsx
-    log "starting Node bridge on :$port …"
-    if command -v setsid >/dev/null 2>&1; then
-      setsid "$TSX_BIN" "$NODE_BRIDGE_SRC" >"$log_file" 2>&1 &
-    else
-      "$TSX_BIN" "$NODE_BRIDGE_SRC" >"$log_file" 2>&1 &
-    fi
-    BRIDGE_PID=$!
+    "$GO_BRIDGE_BIN" >"$log_file" 2>&1 &
   fi
+  BRIDGE_PID=$!
 
   # Wait for machine-readable ready line (token/port).
   local i
@@ -152,7 +139,7 @@ PY
 
   BRIDGE_WS_URL="ws://127.0.0.1:${port}?token=${token}"
   export BRIDGE_WS_URL
-  log "bridge ready impl=$impl ws=$BRIDGE_WS_URL"
+  log "bridge ready impl=go ws=$BRIDGE_WS_URL"
   log "bridge log: $log_file"
 }
 
@@ -172,18 +159,17 @@ start_web() {
   log "web PID=$WEB_PID — open http://127.0.0.1:${VITE_PORT}"
 }
 
-# Start the Wails shell. $1 = node|go.
+# Start the Wails shell. It spawns its own bridge-go (random port/token).
 # Desktop-only: exec (replace this script). Both-mode: DESKTOP_BG=1 backgrounds
-# into SHELL_PID so Vite can run alongside; the shell still owns its own bridge.
+# into SHELL_PID so Vite can run alongside.
+# Forces GROK_DESKTOP_BRIDGE=go so a leftover `=node` in the environment
+# does not fail this launcher. A direct shell start still rejects `node`.
 start_desktop() {
-  local impl="$1"
   ensure_shell
-  if [[ "$impl" == "go" ]]; then
-    ensure_go_bridge
-  fi
-  log "starting Wails shell with GROK_DESKTOP_BRIDGE=$impl …"
+  ensure_go_bridge
+  log "starting Wails shell with GROK_DESKTOP_BRIDGE=go …"
   log "  (shell spawns its own bridge with random port/token)"
-  export GROK_DESKTOP_BRIDGE="$impl"
+  export GROK_DESKTOP_BRIDGE=go
   export BRIDGE_CWD
   # Shell discovers monorepo from cwd / executable path.
   if [[ "${DESKTOP_BG:-0}" == "1" ]]; then
@@ -212,15 +198,20 @@ wait_ui_children() {
 }
 
 # Shared web+desktop stack: Vite (script-owned bridge) + Wails (its own bridge).
-# $1 = node|go. Two bridges on purpose — desktop always injects its own WS URL.
+# Two bridges on purpose — desktop always injects its own WS URL.
 start_both() {
-  local impl="$1"
-  start_bridge "$impl"
+  start_bridge
   start_web
   DESKTOP_BG=1
-  start_desktop "$impl"
+  start_desktop
   log "both running — web http://127.0.0.1:${VITE_PORT} + Wails desktop"
   wait_ui_children
+}
+
+# Foreground Go bridge. exec replaces this script so the ready line stays attached.
+run_bridge_only() {
+  ensure_go_bridge
+  exec "$GO_BRIDGE_BIN"
 }
 
 print_menu() {
@@ -228,25 +219,28 @@ print_menu() {
 
   Grok Desktop — run combinations
 
-    1) bridge (go)   + web     (Vite browser)
-    2) bridge (node) + web     (Vite browser)
-    3) bridge (go)   + desktop (Wails shell)
-    4) bridge (node) + desktop (Wails shell)
-    5) bridge (go)   + both    (Vite + Wails)
-    6) bridge (node) + both    (Vite + Wails)
+    1) bridge + web      (Vite browser)
+    2) bridge + desktop  (Wails shell)
+    3) bridge + both     (Vite + Wails)
     q) quit
 
 EOF
 }
 
+# node_removed_sentence is printed for leftover Node launcher names.
+node_removed_sentence() {
+  echo "node bridge was removed; use: go-web | go-desktop | go-both"
+}
+
 resolve_choice() {
   case "${1:-}" in
     1 | go-web | go_web | goweb) echo go-web ;;
-    2 | node-web | node_web | nodeweb) echo node-web ;;
-    3 | go-desktop | go_desktop | godesktop) echo go-desktop ;;
-    4 | node-desktop | node_desktop | nodedesktop) echo node-desktop ;;
-    5 | go-both | go_both | goboth | both | all) echo go-both ;;
-    6 | node-both | node_both | nodeboth) echo node-both ;;
+    2 | go-desktop | go_desktop | godesktop) echo go-desktop ;;
+    3 | go-both | go_both | goboth | both | all) echo go-both ;;
+    bridge) echo bridge ;;
+    node-web | node_web | nodeweb | node-desktop | node_desktop | nodedesktop | node-both | node_both | nodeboth | 4 | 5 | 6)
+      echo removed
+      ;;
     q | quit | exit) echo quit ;;
     *) echo "" ;;
   esac
@@ -255,33 +249,29 @@ resolve_choice() {
 run_mode() {
   case "$1" in
     go-web)
-      start_bridge go
-      start_web
-      wait "$WEB_PID"
-      ;;
-    node-web)
-      start_bridge node
+      start_bridge
       start_web
       wait "$WEB_PID"
       ;;
     go-desktop)
-      start_desktop go
-      ;;
-    node-desktop)
-      start_desktop node
+      start_desktop
       ;;
     go-both)
-      start_both go
+      start_both
       ;;
-    node-both)
-      start_both node
+    bridge)
+      run_bridge_only
+      ;;
+    removed)
+      err "$(node_removed_sentence)"
+      exit 1
       ;;
     quit)
       exit 0
       ;;
     *)
       err "unknown mode: $1"
-      err "use: go-web | node-web | go-desktop | node-desktop | go-both | node-both | 1-6"
+      err "use: bridge | go-web | go-desktop | go-both | 1-3"
       exit 1
       ;;
   esac
@@ -301,14 +291,14 @@ main() {
   fi
 
   if [[ ! -t 0 ]]; then
-    err "no TTY and no mode argument — pass e.g. go-web"
+    err "no TTY and no mode argument — pass e.g. go-web or bridge"
     print_menu
     exit 1
   fi
 
   print_menu
   while true; do
-    read -r -p "Select [1-6/q]: " choice
+    read -r -p "Select [1-3/q]: " choice
     mode="$(resolve_choice "$choice")"
     if [[ -z "$mode" ]]; then
       err "invalid choice: $choice"

@@ -119,10 +119,9 @@ export default tseslint.config(
     },
   },
 
-  // ── Node apps (bridge / m0 / acp-core) ──────────────────────────
+  // ── Node apps (m0 / acp-core) ──────────────────────────────────
   {
     files: [
-      "apps/bridge/**/*.{ts,tsx}",
       "apps/m0/**/*.{ts,tsx}",
       "packages/acp-core/**/*.{ts,tsx}",
     ],

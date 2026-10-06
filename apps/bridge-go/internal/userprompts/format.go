@@ -1,7 +1,7 @@
 // Package userprompts implements managed user-prompt markdown serialize/parse
 // and on-disk store for the three scopes (global / project / projectLocal).
-// Format contract matches apps/bridge/src/userPromptsFormat.ts byte-for-byte
-// (shared golden fixtures under apps/bridge/test/fixtures/prompts-golden/).
+// Format contract is the frozen managed-markdown v1 used on disk.
+// Golden fixtures live in apps/bridge-go/testdata/prompts-golden/.
 package userprompts
 
 import (
@@ -61,7 +61,7 @@ var validCategories = map[string]bool{
 }
 
 // NormalizeEntryText trims, collapses whitespace, strips controls, validates.
-// Returns the normalized text or an error reason matching the Node bridge.
+// Returns the normalized text, or an error whose text the CLI channel shows the UI.
 func NormalizeEntryText(raw string) (string, error) {
 	text := raw
 	// Collapse newlines / CR / tabs to a single space.

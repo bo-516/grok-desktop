@@ -64,11 +64,11 @@ func DefaultAllowedOrigins() string {
 	return strings.Join(parts, ",")
 }
 
-// StartBridge spawns the selected bridge as a child process with its own process group
+// StartBridge spawns bridge-go as a child process with its own process group
 // (Unix Setpgid) so Stop can kill the whole tree.
-// Empty RepoRoot is packaged mode: locate Go bridge next to the executable and
-// use Cwd (or ResolveBridgeLaunchCwd) as cmd.Dir. Node + empty repo is an
-// explicit source-checkout error, not a tsx lookup failure.
+// Empty RepoRoot is packaged mode: locate the Go binary next to the executable
+// and use Cwd (or ResolveBridgeLaunchCwd) as cmd.Dir.
+// Impl "node" returns nodeBridgeRemoved and does not exec. Empty Impl is Go.
 // Returns a running BridgeProcess or an error (e.g. go binary missing).
 func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 	if p.Host == "" {
@@ -96,30 +96,18 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 	var cmd *exec.Cmd
 	switch p.Impl {
 	case BridgeImplGo, "":
-		// Empty impl is Go — product default. Node is explicit-only.
-		// Checkout: monorepo bin/. Packaged (empty repoRoot): exe-adjacent.
+		// Empty impl is Go — the only bridge. Checkout: monorepo bin/.
+		// Packaged (empty repoRoot): exe-adjacent.
 		bin := FindGoBridgeBinary(p.RepoRoot)
 		if bin == "" {
 			return nil, fmt.Errorf(
-				"go bridge selected but binary not found (looked under %v); build with: (cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge) — or set GROK_DESKTOP_BRIDGE=node",
+				"go bridge selected but binary not found (looked under %v); build with: (cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge)",
 				GoBridgeBinaryCandidates(p.RepoRoot),
 			)
 		}
 		cmd = exec.Command(bin)
-	case BridgeImplNode:
-		if strings.TrimSpace(p.RepoRoot) == "" {
-			return nil, fmt.Errorf("Node bridge requires a source checkout — packaged builds use the Go bridge")
-		}
-		script := NodeBridgeScript(p.RepoRoot)
-		if st, err := os.Stat(script); err != nil || st.IsDir() {
-			return nil, fmt.Errorf("node bridge script missing: %s", script)
-		}
-		tsx, prefix, err := ResolveTsx(p.RepoRoot)
-		if err != nil {
-			return nil, err
-		}
-		args := append(append([]string{}, prefix...), script)
-		cmd = exec.Command(tsx, args...)
+	case "node":
+		return nil, fmt.Errorf("%s", nodeBridgeRemoved)
 	default:
 		return nil, fmt.Errorf("unknown bridge impl %q", p.Impl)
 	}
@@ -129,7 +117,7 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 	cmd.Stdout = p.Stdout
 	cmd.Stderr = p.Stderr
 	cmd.Env = bridgeEnv(os.Environ(), p)
-	// Own process group (Unix Setpgid) so we can kill the tree (tsx → node → grok).
+	// Own process group (Unix Setpgid) so we can kill the tree (bridge-go → grok).
 	configureBridgeProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -148,7 +136,7 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 }
 
 // WaitUntilListening polls host:port until TCP connect succeeds, the child dies,
-// or timeout elapses. timeout should be generous for cold Node/tsx startup.
+// or timeout elapses. timeout should be generous for a cold bridge-go start.
 // Returns an error when the process exits early or the deadline is hit.
 func (b *BridgeProcess) WaitUntilListening(host string, port int, timeout time.Duration) error {
 	if b == nil || b.cmd == nil || b.cmd.Process == nil {

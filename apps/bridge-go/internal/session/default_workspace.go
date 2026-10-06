@@ -11,8 +11,9 @@ import (
 const ProductWorkspaceFolder = "Grok"
 
 // repoMarker is the monorepo file that identifies a grok-desktop checkout.
-// Same relative path the Node bridge and the Wails shell walk for.
-const repoMarker = "apps/bridge/src/server.ts"
+// Same relative path the Wails shell walks in apps/shell/paths.go.
+// Missing this file means packaged mode (Documents/Grok), not a failed start.
+const repoMarker = "apps/bridge-go/cmd/bridge/main.go"
 
 // FindRepoRoot walks upward from start looking for the grok-desktop monorepo.
 // start empty uses the process working directory. Returns "" when no checkout
