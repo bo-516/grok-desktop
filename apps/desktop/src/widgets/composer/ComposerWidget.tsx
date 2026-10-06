@@ -151,7 +151,6 @@ export function ComposerWidget() {
               <ProjectSwitcherWidget />
               <ComposerModeControlView
                 mode={widget.mode}
-                pendingMode={widget.pendingMode}
                 options={widget.modeOptions}
                 open={widget.modeMenuOpen}
                 onToggle={widget.toggleModeMenu}

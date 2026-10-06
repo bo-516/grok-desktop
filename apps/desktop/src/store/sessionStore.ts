@@ -26,14 +26,14 @@ import {
 import { rolesFromCatalog } from "./sessionRoles";
 import { provenanceFromCatalog } from "./sessionProvenance";
 import { INITIAL_SESSION } from "./sessionStoreSupport";
-import {
-  armPendingModeTimeout,
-  clearPendingModeTimer,
-} from "./pendingMode";
 import { registerSessionDiagnostics } from "./sessionDiagnostics";
 import type { SessionStore } from "./sessionStoreTypes";
 import {
+  abandonModeSwitch,
+  beginModeSwitch,
   cancelTurnAction,
+} from "./sessionStoreModeHold";
+import {
   dequeuePromptAction,
   enqueuePromptAction,
   respondPermissionAction,
@@ -99,6 +99,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   /** True only while first send of a New chat draft is forceNew-creating. */
   creatingSession: false,
   pendingMode: null,
+  /** Mode to restore if the in-flight switch fails. Null when none is in flight. */
+  confirmedMode: null,
+  /** Painted prompt waiting for session/set_mode. Null when nothing is held. */
+  heldPrompt: null,
+  /** Session the in-flight set_mode targeted. Null until that RPC is sent. */
+  modeRpcSessionId: null,
   /** Non-null only while an uncached session waits for disk hydrate or session/load. */
   restoringSessionId: null,
   promptQueue: [],
@@ -133,8 +139,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   clearRestartNotice: () => set({ restartNotice: null }),
 
   clearPendingMode: () => {
-    clearPendingModeTimer();
-    set({ pendingMode: null });
+    abandonModeSwitch(set, get);
   },
 
   enqueuePrompt: (text) => enqueuePromptAction(set, get, text),
@@ -144,38 +149,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   sendQueuedPromptNow: (id) => sendQueuedNowAction(set, get, id),
 
   setMode: (mode: AgentMode) => {
-    const current = get().session.mode;
-    if (current === mode && get().pendingMode === null) {
-      return;
-    }
-    // Do not optimistically claim the new mode — show pending until confirm/timeout.
-    set({ pendingMode: mode });
-    const live = get().live;
-    const sid =
-      get().session.id || get().activeSessionId || get().viewingSessionId;
-    if (live && get().connectionMode === "live-bridge" && sid) {
-      live.setMode(mode, sid);
-    }
-    // If agent never emits current_mode_update, settle optimistically after timeout.
-    const modeSessionId =
-      get().session.id || get().activeSessionId || get().viewingSessionId;
-    armPendingModeTimeout(() => {
-      const pending = get().pendingMode;
-      if (pending === null) {
-        return;
-      }
-      // Only stamp mode on the canvas that requested the switch.
-      const currentId =
-        get().session.id || get().activeSessionId || get().viewingSessionId;
-      if (modeSessionId && currentId && modeSessionId !== currentId) {
-        set({ pendingMode: null });
-        return;
-      }
-      set((s) => ({
-        pendingMode: null,
-        session: { ...s.session, mode: pending },
-      }));
-    });
+    beginModeSwitch(set, get, mode);
   },
 
   setModel: (model) => {
@@ -252,7 +226,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   renameSession: (id, title) => renameSessionAction(set, get, id, title),
   sendPrompt: async (draft, blocks) =>
     sendPromptAction(set, get, draft, blocks),
-  cancelTurn: () => cancelTurnAction(get),
+  cancelTurn: () => {
+    cancelTurnAction(set, get);
+  },
   respondPermission: (optionId) => respondPermissionAction(get, optionId),
   disconnect: () => disconnectAction(set, get),
 }));

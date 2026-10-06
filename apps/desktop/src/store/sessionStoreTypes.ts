@@ -20,6 +20,7 @@ import type { SessionProvenanceIndex } from "./sessionProvenance";
 import type { StartOpts } from "./sessionStoreSupport";
 import type { PromptQueueItem } from "@/lib/promptQueue";
 import type { WeeklyUsageOutcome } from "@/lib/weeklyUsagePoll";
+import type { HeldPrompt } from "./sessionStoreModeHoldCanvas";
 
 export type { AuthProbe, ConnectionMode, EnvironmentInfo, PoolEntry };
 export type { ContentBlock, SessionState, SessionRecord };
@@ -107,11 +108,27 @@ export type SessionStore = {
    */
   creatingSession: boolean;
   /**
-   * Mode the user requested that is not yet confirmed by the agent.
-   * Non-null while a mode switch is in flight; UI keeps the short target mode
-   * label + busy chrome, cleared on current_mode_update match or timeout.
+   * Mode the user requested that session/set_mode has not finished applying.
+   * The chip already shows this mode. Cleared when the bridge reports
+   * `mode set to <id>`, or when the switch times out / is abandoned.
+   * Null means the wire matches the chip.
    */
   pendingMode: AgentMode | null;
+  /**
+   * Last mode grok-build had confirmed when the current switch started.
+   * Failure reverts session.mode here. Null when no switch is in flight.
+   */
+  confirmedMode: AgentMode | null;
+  /**
+   * Prompt painted on the timeline but not yet sent because a mode switch
+   * is still in flight. Null when nothing is waiting on session/set_mode.
+   */
+  heldPrompt: HeldPrompt | null;
+  /**
+   * Session id the in-flight session/set_mode targeted.
+   * Null on a New chat draft until the first send creates a session.
+   */
+  modeRpcSessionId: string | null;
   /**
    * Session whose history is being restored with nothing cached to show yet.
    * Set when the seed timeline is empty (disk-sync stubs). Cleared by the
@@ -163,12 +180,15 @@ export type SessionStore = {
   cancelTurn: () => void;
   respondPermission: (optionId: string) => void;
   /**
-   * Request a mode switch: sets pendingMode, calls bridge; does not claim success
-   * until session.mode matches or the pending timeout settles optimistically.
+   * Request a mode switch. Writes session.mode immediately so the chip updates,
+   * then asks the bridge. A prompt sent before `mode set to <id>` is held.
    * @param mode Target agent mode.
    */
   setMode: (mode: AgentMode) => void;
-  /** Clear pendingMode (timeout settle or external cancel). */
+  /**
+   * Drop an in-flight mode switch for the canvas being left.
+   * Reverts the chip and discards a held prompt so it is not sent later.
+   */
   clearPendingMode: () => void;
   /**
    * Select model: calls bridge session/set_model when live; optimistic local update.

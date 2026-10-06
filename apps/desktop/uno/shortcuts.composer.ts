@@ -241,14 +241,12 @@ export const composerShortcuts: Record<string, string> = {
     "composer-mode": "relative shrink-0",
     "composer-mode-trigger":
       "flex items-center gap-1.25 h-7.5 px-2.25 border-none rounded-8px bg-white-faint text-fg-secondary text-12px font-normal transition-colors duration-fast ease-soft hover:enabled:(bg-white-soft text-fg) disabled:(opacity-70 cursor-wait)",
-    "composer-mode-trigger-pending": "text-fg-muted",
     "composer-mode-build": "text-fg-secondary",
     "composer-mode-plan":
       "text-fg-secondary bg-[color-mix(in_oklch,var(--color-accent)_14%,transparent)]",
     "composer-mode-ask": "text-fg-muted",
     "composer-mode-label": "whitespace-nowrap",
     "composer-mode-chevron": "text-10px opacity-70",
-    "composer-mode-spinner": "text-fg-muted",
     "composer-mode-menu":
       "absolute left-0 bottom-[calc(100%+8px)] z-30 min-w-56 w-max max-w-72 rounded-shell border border-line-subtle bg-high shadow-popover p-1.5 flex flex-col gap-0.5 animate-modal-in",
     "composer-mode-option":
