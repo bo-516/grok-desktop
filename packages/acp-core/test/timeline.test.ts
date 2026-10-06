@@ -522,6 +522,11 @@ describe("timeline / tool patch-merge", () => {
     });
     assert.equal(state.configOptions?.length, 1);
     assert.equal(state.timeline.length, 0);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "config_option_update",
+      configOptions: [],
+    });
+    assert.equal(state.configOptions?.length, 1);
   });
 
   it("normalizes real command metadata before it reaches the composer", () => {

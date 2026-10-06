@@ -17,6 +17,10 @@ type initMeta struct {
 // extractInitializeMetadata reads model, model catalog, and slash commands from
 // initialize. Supports standard top-level fields and grok-build `_meta` shapes.
 // Empty top-level arrays do not hide `_meta.availableCommands`.
+// currentModelId is the field grok-build actually sends. model / currentModel /
+// modelId are older aliases. The first catalog id is only a fallback when no
+// current id is present — using it earlier shows the wrong model whenever the
+// current id is not models[0].
 func extractInitializeMetadata(init map[string]any) initMeta {
 	meta, _ := init["_meta"].(map[string]any)
 	modelState, _ := meta["modelState"].(map[string]any)
@@ -25,12 +29,14 @@ func extractInitializeMetadata(init map[string]any) initMeta {
 
 	model := ""
 	if modelState != nil {
-		if m, ok := modelState["model"].(string); ok {
-			model = m
-		} else if m, ok := modelState["currentModel"].(string); ok {
-			model = m
-		} else if m, ok := modelState["modelId"].(string); ok {
-			model = m
+		if m, ok := modelState["currentModelId"].(string); ok && strings.TrimSpace(m) != "" {
+			model = strings.TrimSpace(m)
+		} else if m, ok := modelState["model"].(string); ok && strings.TrimSpace(m) != "" {
+			model = strings.TrimSpace(m)
+		} else if m, ok := modelState["currentModel"].(string); ok && strings.TrimSpace(m) != "" {
+			model = strings.TrimSpace(m)
+		} else if m, ok := modelState["modelId"].(string); ok && strings.TrimSpace(m) != "" {
+			model = strings.TrimSpace(m)
 		}
 	}
 	if model == "" && len(models) > 0 {
@@ -166,10 +172,15 @@ func normalizeAvailableModels(raw any) []AvailableModel {
 		// snake_case / top-level aliases. Desktop `/effort` and the Thinking menu
 		// read only this field, so dropping it leaves both surfaces empty.
 		rawEfforts := firstNonNil(rec["reasoningEfforts"], rec["reasoning_efforts"])
+		rawCurrent := firstNonNil(rec["reasoningEffort"], rec["reasoning_effort"])
 		if meta, ok := rec["_meta"].(map[string]any); ok {
 			rawEfforts = firstNonNil(meta["reasoningEfforts"], meta["reasoning_efforts"], rawEfforts)
+			// Current selection lives beside the ladder. A missing value must
+			// stay empty so the composer can fall through to the list default.
+			rawCurrent = firstNonNil(meta["reasoningEffort"], meta["reasoning_effort"], rawCurrent)
 		}
 		m.ReasoningEfforts = readReasoningEfforts(rawEfforts)
+		m.ReasoningEffort = readOptionalString(rawCurrent)
 		models = append(models, m)
 	}
 	return models
@@ -214,6 +225,17 @@ func readReasoningEfforts(raw any) []ReasoningEffort {
 		out = append(out, row)
 	}
 	return out
+}
+
+// readOptionalString returns a trimmed string, or "" when raw is not a string
+// or is blank. Callers treat "" as "agent did not say" and must not substitute
+// a default.
+func readOptionalString(raw any) string {
+	s, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 // readPositiveInt reads a finite integer ≥ 1 from JSON number or numeric string.
@@ -294,7 +316,9 @@ func PromoteLiveStreamingStatus(st *SessionState) {
 // applyLifecycleUpdate patches Go-held SessionState from a raw session/update.
 // Timeline is never reduced here. A non-empty available_commands_update is
 // stored so later empty full-state frames still carry the grok-build slash
-// catalog that the composer `/` menu reads.
+// catalog that the composer `/` menu reads. config_option_update is stored the
+// same way: an empty list must not wipe model / reasoning_effort selects the
+// composer prefers over the catalog.
 func applyLifecycleUpdate(st *SessionState, update map[string]any) {
 	if st == nil || update == nil {
 		return
@@ -319,6 +343,10 @@ func applyLifecycleUpdate(st *SessionState, update map[string]any) {
 		if len(cmds) > 0 {
 			st.AvailableCommands = cmds
 		}
+	case "config_option_update":
+		if opts := nonEmptyConfigOptions(update["configOptions"]); opts != nil {
+			st.ConfigOptions = opts
+		}
 	}
 }
 
@@ -327,47 +355,6 @@ func preferCommands(a, b []any) []any {
 		return a
 	}
 	return b
-}
-
-// preferAvailableModels picks the first non-empty catalog (primary, then
-// current, then init) and fills TotalContextTokens from later lists when a
-// thin session/new|load row dropped the window. Without this the composer
-// tip stays on "No turns yet" even though initialize already knew the size.
-// primary is session/new|load models (may be empty); current is the in-memory
-// snapshot; fromInit is initialize `_meta` (source of missing window sizes).
-func preferAvailableModels(primary, current, fromInit []AvailableModel) []AvailableModel {
-	picked := primary
-	if len(picked) == 0 {
-		picked = current
-	}
-	if len(picked) == 0 {
-		picked = fromInit
-	}
-	if len(picked) == 0 {
-		return picked
-	}
-	byID := make(map[string]AvailableModel, len(fromInit)+len(current))
-	for _, m := range fromInit {
-		byID[m.ID] = m
-	}
-	for _, m := range current {
-		if m.TotalContextTokens > 0 {
-			byID[m.ID] = m
-		} else if _, ok := byID[m.ID]; !ok {
-			byID[m.ID] = m
-		}
-	}
-	out := make([]AvailableModel, len(picked))
-	copy(out, picked)
-	for i := range out {
-		if out[i].TotalContextTokens > 0 {
-			continue
-		}
-		if other, ok := byID[out[i].ID]; ok && other.TotalContextTokens > 0 {
-			out[i].TotalContextTokens = other.TotalContextTokens
-		}
-	}
-	return out
 }
 
 // firstNonEmptyArray returns the first candidate that is a non-empty slice.

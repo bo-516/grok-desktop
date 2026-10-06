@@ -84,9 +84,10 @@ export function isEmptySessionField(value: unknown): boolean {
 }
 
 /**
- * Prefer primary model list structure; fill totalContextTokens and
- * reasoningEfforts from secondary when primary rows lost those fields
- * (thin bridge snapshots).
+ * Prefer primary model list structure; fill totalContextTokens,
+ * reasoningEfforts, and reasoningEffort from secondary when primary rows lost
+ * those fields (thin bridge snapshots). A row that already has a window size
+ * still receives a missing ladder or current effort.
  * @param primary Bridge/inbound catalog (structure preferred when non-empty).
  * @param secondary Client/bucket catalog (source of missing window / effort).
  * @returns Merged list, or whichever side is non-empty; undefined if both empty.
@@ -107,7 +108,8 @@ export function mergeAvailableModelsPreferContext(
       typeof m.totalContextTokens === "number" && m.totalContextTokens > 0
     );
     const needsEffort = !m.reasoningEfforts?.length;
-    if (!needsTokens && !needsEffort) {
+    const needsCurrent = !m.reasoningEffort;
+    if (!needsTokens && !needsEffort && !needsCurrent) {
       return m;
     }
     const other = byId.get(m.id);
@@ -124,6 +126,9 @@ export function mergeAvailableModelsPreferContext(
     }
     if (needsEffort && other.reasoningEfforts?.length) {
       next = { ...next, reasoningEfforts: other.reasoningEfforts };
+    }
+    if (needsCurrent && other.reasoningEffort) {
+      next = { ...next, reasoningEffort: other.reasoningEffort };
     }
     return next;
   });

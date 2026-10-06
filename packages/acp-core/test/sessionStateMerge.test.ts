@@ -376,4 +376,13 @@ describe("mergeAvailableModelsPreferContext (acp-core)", () => {
     );
     assert.equal(merged?.[0]?.totalContextTokens, 131072);
   });
+
+  it("fills reasoningEffort even when primary already has a window size", () => {
+    const merged = mergeAvailableModelsPreferContext(
+      [{ id: "grok-4.7", totalContextTokens: 500000 }],
+      [{ id: "grok-4.7", reasoningEffort: "xhigh", totalContextTokens: 1 }],
+    );
+    assert.equal(merged?.[0]?.totalContextTokens, 500000);
+    assert.equal(merged?.[0]?.reasoningEffort, "xhigh");
+  });
 });

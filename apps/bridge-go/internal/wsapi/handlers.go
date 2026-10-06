@@ -214,6 +214,12 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		}
 		return session.RestartSession(h.lifecycleDeps(), sessionID, spawnConfig, approve)
 
+	// Initialize-only model catalog. Reuses a pooled session when one already
+	// has models; otherwise spawns a short-lived grok and does not session/new.
+	case "read_model_catalog":
+		h.readModelCatalog(ws, msg)
+		return nil
+
 	// CLI channel: one-shot grok + disk helpers (see cli.go / cli_commands.go).
 	case "cli":
 		return h.handleCli(ws, msg)

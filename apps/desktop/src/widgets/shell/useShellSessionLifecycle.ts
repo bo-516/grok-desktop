@@ -12,6 +12,7 @@ import {
   startBridgeReconnectLoop,
 } from "../../lib/bridgeReconnect";
 import { setAttentionBadge } from "../../lib/dockBadge";
+import { rememberModelCatalog } from "../../store/modelCatalogStore";
 import { useSessionStore } from "../../store/sessionStore";
 
 /**
@@ -38,6 +39,8 @@ export function useShellSessionLifecycle(args: {
   const ensureConnected = useSessionStore((s) => s.ensureConnected);
   const refreshEnvironment = useSessionStore((s) => s.refreshEnvironment);
   const refreshAuth = useSessionStore((s) => s.refreshAuth);
+  const authed = useSessionStore((s) => s.authed);
+  const live = useSessionStore((s) => s.live);
   const autoStarted = useRef(false);
 
   useEffect(() => {
@@ -63,6 +66,36 @@ export function useShellSessionLifecycle(args: {
       refreshEnvironment();
     }
   }, [args.connectionMode, refreshEnvironment]);
+
+  // Once per live socket, after login: initialize-only catalog. Does not call
+  // session/new, so a New chat does not grow a ghost session. Logged-out
+  // initialize often omits models, so wait until authed is true.
+  useEffect(() => {
+    if (args.connectionMode !== "live-bridge" || authed !== true) {
+      return;
+    }
+    if (!live?.readModelCatalog) {
+      return;
+    }
+    const cwd = useSessionStore.getState().session.workspace || undefined;
+    let cancelled = false;
+    void live
+      .readModelCatalog(cwd)
+      .then((reply) => {
+        if (cancelled || !reply.ok) {
+          return;
+        }
+        rememberModelCatalog({
+          model: reply.model,
+          availableModels: reply.availableModels,
+          configOptions: reply.configOptions,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [args.connectionMode, authed, live]);
 
   // Bridge up: re-probe login every 3s. `grok login` completes in a browser
   // and `grok logout` can be run in any terminal — neither notifies us, so the

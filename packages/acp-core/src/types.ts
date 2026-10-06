@@ -490,6 +490,12 @@ export type AvailableModel = {
    * Omitted when the agent did not declare a per-model menu.
    */
   reasoningEfforts?: AvailableReasoningEffort[];
+  /**
+   * Agent's current effort (`_meta.reasoningEffort`), distinct from the ladder
+   * row marked `default` (the recommended level). Omitted when the agent did
+   * not report one — do not invent a selection.
+   */
+  reasoningEffort?: string;
 };
 
 export type InitializeResult = {

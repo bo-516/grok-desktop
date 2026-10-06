@@ -29,6 +29,125 @@ func TestExtractInitializeMetadataReadsMetaCommands(t *testing.T) {
 	}
 }
 
+func TestExtractInitializeMetadataPrefersCurrentModelIdOverFirstRow(t *testing.T) {
+	meta := extractInitializeMetadata(map[string]any{
+		"_meta": map[string]any{
+			"modelState": map[string]any{
+				"currentModelId": "grok-4.7",
+				"availableModels": []any{
+					map[string]any{
+						"modelId": "grok-4.5",
+						"name":    "Grok 4.5",
+						"_meta": map[string]any{
+							"reasoningEffort": "high",
+						},
+					},
+					map[string]any{
+						"modelId": "grok-4.7",
+						"name":    "Grok 4.7",
+						"_meta": map[string]any{
+							"reasoningEffort": "xhigh",
+							"reasoningEfforts": []any{
+								map[string]any{"id": "high", "label": "High", "default": true},
+								map[string]any{"id": "xhigh", "label": "Extra High"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if meta.Model != "grok-4.7" {
+		t.Fatalf("model=%q, want currentModelId not models[0]", meta.Model)
+	}
+	if len(meta.AvailableModels) != 2 {
+		t.Fatalf("models=%d", len(meta.AvailableModels))
+	}
+	if meta.AvailableModels[1].ReasoningEffort != "xhigh" {
+		t.Fatalf("effort=%q", meta.AvailableModels[1].ReasoningEffort)
+	}
+	if len(meta.AvailableModels[1].ReasoningEfforts) != 2 {
+		t.Fatalf("ladder=%d", len(meta.AvailableModels[1].ReasoningEfforts))
+	}
+}
+
+func TestExtractConfigOptionsPrefersResultBody(t *testing.T) {
+	got := extractConfigOptions(map[string]any{
+		"configOptions": []any{
+			map[string]any{"id": "model", "currentValue": "grok-4.7"},
+		},
+		"_meta": map[string]any{
+			"configOptions": []any{
+				map[string]any{"id": "model", "currentValue": "other"},
+			},
+		},
+	})
+	arr, _ := got.([]any)
+	if len(arr) != 1 {
+		t.Fatalf("options=%#v", got)
+	}
+	rec, _ := arr[0].(map[string]any)
+	if rec["currentValue"] != "grok-4.7" {
+		t.Fatalf("current=%#v", rec)
+	}
+}
+
+func TestPreferConfigOptionsSkipsEmpty(t *testing.T) {
+	fallback := []any{map[string]any{"id": "reasoning_effort", "currentValue": "xhigh"}}
+	got := preferConfigOptions([]any{}, fallback)
+	arr, _ := got.([]any)
+	if len(arr) != 1 {
+		t.Fatalf("empty preferred wiped fallback: %#v", got)
+	}
+	if preferConfigOptions(nil, nil) != nil {
+		t.Fatal("both empty must stay nil")
+	}
+}
+
+func TestApplyLifecycleUpdateKeepsConfigOptions(t *testing.T) {
+	st := EmptySession("s1", "/w", "grok-4.7", "build")
+	applyLifecycleUpdate(&st, map[string]any{
+		"sessionUpdate": "config_option_update",
+		"configOptions": []any{
+			map[string]any{"id": "reasoning_effort", "currentValue": "xhigh"},
+		},
+	})
+	arr, _ := st.ConfigOptions.([]any)
+	if len(arr) != 1 {
+		t.Fatalf("options=%#v", st.ConfigOptions)
+	}
+	applyLifecycleUpdate(&st, map[string]any{
+		"sessionUpdate": "config_option_update",
+		"configOptions": []any{},
+	})
+	arr, _ = st.ConfigOptions.([]any)
+	if len(arr) != 1 {
+		t.Fatalf("empty update wiped config: %#v", st.ConfigOptions)
+	}
+}
+
+func TestPreferAvailableModelsFillsEffortsWhenTokensPresent(t *testing.T) {
+	got := preferAvailableModels(
+		[]AvailableModel{{
+			ID:                 "grok-4.7",
+			Name:               "Grok 4.7",
+			TotalContextTokens: 500000,
+		}},
+		nil,
+		[]AvailableModel{{
+			ID:               "grok-4.7",
+			ReasoningEffort:  "xhigh",
+			ReasoningEfforts: []ReasoningEffort{{ID: "xhigh", Label: "Extra High"}},
+		}},
+	)
+	if len(got) != 1 {
+		t.Fatalf("len=%d", len(got))
+	}
+	if got[0].TotalContextTokens != 500000 || got[0].ReasoningEffort != "xhigh" || len(got[0].ReasoningEfforts) != 1 {
+		t.Fatalf("got=%#v", got[0])
+	}
+}
+
 func TestExtractInitializeMetadataIgnoresEmptyTopLevelCommands(t *testing.T) {
 	meta := extractInitializeMetadata(map[string]any{
 		"availableCommands": []any{},

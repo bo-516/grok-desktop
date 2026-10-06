@@ -70,6 +70,17 @@ describe("normalizeAvailableModels", () => {
     ]);
   });
 
+  it("preserves _meta.reasoningEffort as the current selection", () => {
+    const models = normalizeAvailableModels([
+      {
+        modelId: "grok-4.7",
+        name: "Grok 4.7",
+        _meta: { reasoningEffort: " xhigh " },
+      },
+    ]);
+    assert.equal(models[0]?.reasoningEffort, "xhigh");
+  });
+
   it("returns empty for non-arrays", () => {
     assert.deepEqual(normalizeAvailableModels(undefined), []);
     assert.deepEqual(normalizeAvailableModels("grok"), []);
@@ -104,6 +115,21 @@ describe("extractInitializeSessionMetadata", () => {
     assert.equal(meta.model, "grok-4");
     assert.equal(meta.availableModels.length, 2);
     assert.equal(meta.availableModels[1]?.id, "grok-4.5");
+  });
+
+  it("does not fall back to models[0] when currentModelId is a later row", () => {
+    const meta = extractInitializeSessionMetadata({
+      _meta: {
+        modelState: {
+          currentModelId: "grok-4.7",
+          availableModels: [
+            { modelId: "grok-4.5", name: "Grok 4.5" },
+            { modelId: "grok-4.7", name: "Grok 4.7" },
+          ],
+        },
+      },
+    });
+    assert.equal(meta.model, "grok-4.7");
   });
 
   it("reads real grok-build slash catalog from _meta.availableCommands", () => {

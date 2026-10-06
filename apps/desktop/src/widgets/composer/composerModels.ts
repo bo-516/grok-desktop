@@ -17,6 +17,7 @@ export type {
   ThinkingOption,
 } from "./composerThinking";
 export {
+  currentEffortFromCatalog,
   currentEffortFromConfig,
   DEFAULT_THINKING_EFFORT,
   DEFAULT_THINKING_OPTIONS,
@@ -206,11 +207,12 @@ export function resolveModelOptions(
 /**
  * Default model + thinking for "Reset to defaults".
  * Model comes from the agent (config current, else first catalog entry, else session model).
- * Effort prefers agent currentValue when present and valid; else the
- * advertised list default. No catalog / config → effort is "".
+ * Effort: no local pref (reset passes null) → config currentValue → the
+ * matching model's reasoningEffort → advertised list default. No catalog /
+ * config → effort is "".
  * @param agentDefaultModel Agent-preferred id; empty string leaves model unset for the caller to skip.
  * @param configOptions Optional agent config snapshot for effort currentValue / allowed list.
- * @param availableModels Optional catalog; effort rows come only from this / config.
+ * @param availableModels Optional catalog; effort rows and the current effort come only from this / config.
  */
 export function defaultComposerControls(
   agentDefaultModel = "",
@@ -232,6 +234,7 @@ export function defaultComposerControls(
       options,
       null,
       agentDefaultModel,
+      availableModels,
     ),
   };
 }

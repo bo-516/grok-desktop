@@ -6,6 +6,7 @@
 import type {
   ContentBlock,
   PermissionRequest,
+  AvailableModel,
   SessionState,
   SessionStatus,
   SessionUpdate,
@@ -121,6 +122,12 @@ export type ClientMsg =
       maxBytes?: number;
     }
   | { type: "ping" }
+  /**
+   * Initialize-only model catalog. Does not call session/new.
+   * Answered with `model_catalog`. A resident pool catalog is reused so a
+   * second grok is not spawned while a handshake is already in flight.
+   */
+  | { type: "read_model_catalog"; requestId: string; cwd?: string }
   /**
    * On-demand full SessionState snapshot (reconnect / multi-window).
    * Hot-path streaming uses session_update relay instead.
@@ -307,7 +314,7 @@ export type ServerMsg =
       /** Reduced full snapshot (Node path). */
       session?: SessionState;
       /** Raw ordered updates from the load window (Go path). */
-      updates?: { update: SessionUpdate; eventId?: string }[];
+      updates?: Array<{ update: SessionUpdate; eventId?: string }>;
       /** Authoritative post-load status (Go path required; Node usually idle). */
       status: SessionStatus;
       model?: string;
@@ -370,4 +377,18 @@ export type ServerMsg =
       reason: string;
       setting: string;
     }
-  | { type: "pong" };
+  | { type: "pong" }
+  /**
+   * Answer to `read_model_catalog`. availableModels uses the ACP catalog shape
+   * (id, name, reasoningEfforts, reasoningEffort). configOptions is empty when
+   * the snapshot came from initialize alone. ok false carries error and no catalog.
+   */
+  | {
+      type: "model_catalog";
+      requestId: string;
+      ok: boolean;
+      model?: string;
+      availableModels?: AvailableModel[];
+      configOptions?: unknown[];
+      error?: string;
+    };
