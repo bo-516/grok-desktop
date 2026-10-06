@@ -1,6 +1,8 @@
 /**
- * Stateless Composer mode control: trigger chip + radiogroup popover + pending.
- * Parent owns open state, mode, pendingMode, and select/cycle handlers.
+ * Stateless Composer mode control: trigger chip + radiogroup popover.
+ * Parent owns open state, the painted mode, and select/cycle handlers.
+ * The chip shows the mode the user picked immediately. Waiting for
+ * grok-build's session/set_mode does not disable the chip or show a spinner.
  * Missing onSelect leaves mode stuck; missing onClose leaves the popover open.
  */
 
@@ -10,10 +12,8 @@ import type { AgentMode } from "@grok-desktop/acp-core";
 import { modeLabel, type AgentModeOption } from "./composerModes";
 
 export type ComposerModeControlViewProps = {
-  /** Confirmed session mode (not the in-flight target). */
+  /** Painted session mode (already updated when the user picks). */
   mode: AgentMode | string;
-  /** Non-null while a mode switch is in flight — short target label + spinner + aria-busy. */
-  pendingMode: AgentMode | null;
   /** Catalog of modes with descriptions. */
   options: readonly AgentModeOption[];
   /** Whether the popover is open. */
@@ -30,22 +30,13 @@ export type ComposerModeControlViewProps = {
 
 /**
  * Renders mode trigger + exclusive select list with side-effect copy.
- * @param props Mode state and handlers; pendingMode drives busy chrome.
+ * @param props Mode state and handlers.
  * @returns Composer mode control fragment.
  */
 export function ComposerModeControlView(props: ComposerModeControlViewProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const { open, onClose, pendingMode, mode } = props;
-  const pending = pendingMode !== null;
-  /**
-   * Optimistic target while a switch is in flight so the chip keeps a short
-   * Ask/Plan/Build label (avoids "Switching to …" expanding then shrinking).
-   */
-  const displayMode: AgentMode | string = pendingMode ?? mode;
-  const label = modeLabel(displayMode);
-  const triggerTitle = pending
-    ? `Switching to ${label}…`
-    : "Agent mode — click to choose · ⇧Tab to cycle";
+  const { open, onClose, mode } = props;
+  const label = modeLabel(mode);
 
   useEffect(() => {
     if (!open) {
@@ -76,31 +67,21 @@ export function ComposerModeControlView(props: ComposerModeControlViewProps) {
       <button
         type="button"
         className={cs("composer-mode-trigger", {
-          "composer-mode-trigger-pending": pending,
-          "composer-mode-build": !pending && displayMode === "build",
-          "composer-mode-plan": !pending && displayMode === "plan",
-          "composer-mode-ask": !pending && displayMode === "ask",
+          "composer-mode-build": mode === "build",
+          "composer-mode-plan": mode === "plan",
+          "composer-mode-ask": mode === "ask",
         })}
-        title={triggerTitle}
+        title="Agent mode — click to choose · ⇧Tab to cycle"
         aria-haspopup="listbox"
         aria-expanded={props.open}
-        aria-busy={pending}
-        aria-label={pending ? `Switching to ${label}` : undefined}
-        disabled={pending}
         onClick={props.onToggle}
       >
         <span className="composer-mode-label">{label}</span>
-        {!pending ? (
-          <span className="composer-mode-chevron" aria-hidden="true">
-            ▾
-          </span>
-        ) : (
-          <span className="composer-mode-spinner" aria-hidden="true">
-            …
-          </span>
-        )}
+        <span className="composer-mode-chevron" aria-hidden="true">
+          ▾
+        </span>
       </button>
-      {props.open && !pending ? (
+      {props.open ? (
         <div
           className="composer-mode-menu"
           role="radiogroup"

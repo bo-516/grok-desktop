@@ -2,15 +2,12 @@
  * Live bridge connect/start (multi-session): pool state, env probe, canvas follows viewing.
  * Real grok-build bridge only; no mock path.
  * Inbound paint/persist lives in sessionStoreLiveInbound.
+ * session/start after the socket is up lives in sessionStoreLiveStart.
  * Pool poll / pending flush / sessions_list sync are sibling modules.
  */
 
 import { markDisconnected } from "@grok-desktop/acp-core";
-import {
-  connectLiveBridge,
-  defaultBridgeUrl,
-  type StartOpts as BridgeStartOpts,
-} from "../bridge/liveBridge";
+import { connectLiveBridge, defaultBridgeUrl } from "../bridge/liveBridge";
 import {
   normalizeCatalog,
   upsertFromLiveState,
@@ -22,6 +19,10 @@ import {
 } from "./sessionStoreLiveInbound";
 import { applyLiveInboundSession } from "./sessionStoreLiveApply";
 import { applyAuthProbe, authedFromEnvironment } from "./sessionStoreAuth";
+import {
+  noteModeReadyInfo,
+  noteModeRestartRequired,
+} from "./sessionStoreModeHold";
 import { forgetAllTurnEdges } from "./sessionTurnEdge";
 import {
   applyPoolBusyToSession,
@@ -35,14 +36,12 @@ import {
   flushPendingSessionsToCatalog,
   schedulePendingSessionsSync as schedulePendingSyncImpl,
 } from "./sessionStorePending";
-import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
 import { syncCatalogFromBridge } from "./sessionStoreSync";
-import { sessionHasConversationContent } from "@/lib/sessionContent";
+import { beginLiveSessionStart } from "./sessionStoreLiveStart";
 import { rememberSlashCatalog } from "@/lib/slashCatalog";
 import { rememberModelCatalog } from "@/store/modelCatalogStore";
 import {
   persistNormalizedCatalog,
-  resolveResumeCanvasStatus,
   resolveResumeTarget,
   type StartOpts,
 } from "./sessionStoreSupport";
@@ -117,6 +116,7 @@ export function schedulePendingSessionsSync(
  * @param get Zustand get.
  * @param opts Start options including optional post-await `guard` (T3)
  *   and `connectOnly` for automatic reconnect without session/new.
+ *   A real session/start is handed to beginLiveSessionStart.
  */
 export async function startLiveBridgeSession(
   set: SetState,
@@ -238,6 +238,8 @@ export async function startLiveBridgeSession(
           // `session <id> ready` (+ optional models=…). Recovery/ops info with
           // a sessionId must not become sticky local mid-forceNew.
           admitForceNewSessionFromInfo(set, get, sessionId, message);
+          // `mode set to plan` means session/set_mode returned. Release a held prompt.
+          noteModeReadyInfo(set, get, message, sessionId);
         },
         onError: (message) => {
           set({
@@ -250,6 +252,7 @@ export async function startLiveBridgeSession(
             restartNotice: `${payload.setting}: ${payload.reason}`,
             bridgeInfo: payload.reason,
           });
+          noteModeRestartRequired(set, get, payload.setting, payload.reason);
         },
         onHello: (cwdHello, poolCapacity, meta) => {
           const cap =
@@ -347,96 +350,12 @@ export async function startLiveBridgeSession(
     return;
   }
 
-  // Cold resume: paint disk history before spawning grok-build so Restoring
-  // is not gated on initialize / MCP / session/load replay.
-  if (resumeId && !forceNew) {
-    const viewing = get().session;
-    const needsHistory =
-      viewing.id === resumeId &&
-      !sessionHasConversationContent(viewing.timeline);
-    if (needsHistory) {
-      await hydrateViewingSessionFromDisk(set as never, get as never, {
-        sessionId: resumeId,
-        cwd: cwd || viewing.workspace || undefined,
-        guard: stillCurrent,
-        live,
-      });
-      if (!stillCurrent()) {
-        return;
-      }
-    }
-  }
-
-  const paintedAfterHydrate = get().session;
-  const keepDiskBody =
-    Boolean(resumeId) &&
-    paintedAfterHydrate.id === resumeId &&
-    sessionHasConversationContent(paintedAfterHydrate.timeline);
-  if (seed && resumeId && !keepDiskBody) {
-    const poolStatus = get().poolEntries.find(
-      (entry) => entry.sessionId === resumeId && entry.live,
-    )?.status;
-    const status = resolveResumeCanvasStatus(seed.status, poolStatus);
-    set({
-      session: {
-        ...seed,
-        status,
-        pendingPermission:
-          status === "waiting_permission"
-            ? seed.pendingPermission
-            : undefined,
-      },
-      viewingSessionId: resumeId,
-      activeSessionId: resumeId,
-    });
-  } else if (resumeId) {
-    set({ viewingSessionId: resumeId, activeSessionId: resumeId });
-  }
-
-  const painted = get().session;
-  const seedForStart =
-    !forceNew &&
-    resumeId &&
-    painted.id === resumeId &&
-    sessionHasConversationContent(painted.timeline)
-      ? painted
-      : seed;
-  const startOpts: BridgeStartOpts = {
-    alwaysApprove,
+  await beginLiveSessionStart(set, get, live, {
+    resumeId,
+    seed,
     cwd,
-    resumeId: forceNew ? undefined : resumeId,
-    seed: forceNew ? undefined : seedForStart,
     forceNew,
-  };
-  const started = live.start(startOpts);
-  if (!started) {
-    stopPoolPoll();
-    if (!stillCurrent()) {
-      throw new Error("bridge WebSocket not open");
-    }
-    set({
-      connectionMode: "disconnected",
-      lastError: "WebSocket not connected",
-      bridgeInfo: "Cannot write to bridge — run npm run bridge and retry",
-    });
-    throw new Error("bridge WebSocket not open");
-  }
-
-  if (!stillCurrent()) {
-    return;
-  }
-
-  let liveInfo = "live · connected";
-  if (resumeId && !forceNew) {
-    liveInfo = "live · resumed";
-  } else if (forceNew) {
-    liveInfo = "live · new session";
-  }
-  set({
-    connectionMode: "live-bridge",
-    bridgeInfo: liveInfo,
-    viewingSessionId: forceNew
-      ? get().viewingSessionId
-      : resumeId ?? get().viewingSessionId,
+    alwaysApprove,
+    stillCurrent,
   });
 }

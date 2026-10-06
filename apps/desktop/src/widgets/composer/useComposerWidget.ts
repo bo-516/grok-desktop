@@ -55,7 +55,6 @@ export function useComposerWidget() {
   const connectionMode = useSessionStore((state) => state.connectionMode);
   const model = useSessionStore((state) => state.session.model);
   const mode = useSessionStore((state) => state.session.mode);
-  const pendingMode = useSessionStore((state) => state.pendingMode);
   const setMode = useSessionStore((state) => state.setMode);
   const setModel = useSessionStore((state) => state.setModel);
   const configOptions = useSessionStore(
@@ -128,7 +127,6 @@ export function useComposerWidget() {
   const { notice, showNotice, clearNotice } = useComposerNotice();
   const bar = useComposerBarControls({
     mode,
-    pendingMode,
     model: composerSources.model,
     configOptions: composerSources.configOptions,
     availableModels: composerSources.availableModels,
@@ -183,6 +181,7 @@ export function useComposerWidget() {
     setDraftWithCaret: completion.setDraftWithCaret,
     showNotice,
     textareaRef,
+    getDraft: () => completion.draft,
   });
 
   const viewingSubagent = useSessionStore((state) => state.viewingSubagent);
@@ -283,8 +282,8 @@ export function useComposerWidget() {
    * Backspace / Delete, Esc interrupt, and Enter send.
    * Enter / Tab on a `/model` / `/effort` argument row applies chrome immediately
    * (via pickSuggestion); `@` / skill / command-name rows still insert.
-   * ⇧Tab always cycles Build → Plan → Ask (from pendingMode when in flight) so
-   * the three modes can be flipped without waiting for agent confirmation; plain
+   * ⇧Tab always cycles Build → Plan → Ask from the chip's current mode so
+   * the three modes can be flipped without waiting for grok-build; plain
    * Tab still accepts the active completion row when the menu is open.
    * While an IME is composing, all shortcuts are suppressed so Enter confirms
    * the candidate instead of sending.
@@ -407,7 +406,6 @@ export function useComposerWidget() {
     modeOptions: bar.modeOptions,
     notice,
     openFilePicker: media.openFilePicker,
-    pendingMode,
     removeAttachment: media.removeAttachment,
     stopDictation: dictation.stopDictation,
     toggleDictation: dictation.toggleDictation,

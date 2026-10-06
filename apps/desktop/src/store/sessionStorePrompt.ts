@@ -23,8 +23,9 @@ import {
 import {
   appendUserPrompt,
   type ContentBlock,
-  type TimelineItem,
 } from "@grok-desktop/acp-core";
+import { rollbackOptimisticLocalUser } from "./sessionStoreModeHoldCanvas";
+import { deferPromptForPendingMode } from "./sessionStoreModeHold";
 
 /** Guard concurrent sendPromptAction on the same idle canvas (double Enter). */
 let sendInFlight = false;
@@ -107,55 +108,6 @@ export function dequeuePromptAction(
   }
   set({ promptQueue: rest });
   return head;
-}
-
-/**
- * True when a timeline row is an unconfirmed optimistic local user bubble.
- * @param item Timeline entry.
- * @returns Whether rollback may remove this row after a failed send.
- */
-function isOptimisticLocalUser(item: TimelineItem): boolean {
-  return (
-    item.kind === "user" &&
-    !item.agentConfirmed &&
-    (item.origin === "local" || Boolean(item.clientPromptId))
-  );
-}
-
-/**
- * Remove the newest unconfirmed local user row after a hard send failure.
- * Restores idle status so the composer send button returns; leaves any earlier
- * confirmed history intact.
- * @param set Zustand set.
- * @param get Zustand get.
- */
-export function rollbackOptimisticLocalUser(
-  set: SessionStoreSet,
-  get: SessionStoreGet,
-): void {
-  const session = get().session;
-  let idx = -1;
-  for (let i = session.timeline.length - 1; i >= 0; i -= 1) {
-    const item = session.timeline[i];
-    if (item && isOptimisticLocalUser(item)) {
-      idx = i;
-      break;
-    }
-  }
-  if (idx < 0) {
-    return;
-  }
-  const timeline = [
-    ...session.timeline.slice(0, idx),
-    ...session.timeline.slice(idx + 1),
-  ];
-  set({
-    session: {
-      ...session,
-      timeline,
-      status: "idle",
-    },
-  });
 }
 
 /**
@@ -340,7 +292,7 @@ async function sendPromptActionBody(
 
   // Show the user message before any connect / forceNew await (snappy UX).
   paintOptimisticUserPrompt(set, get, text, hasBlocks ? blocks : undefined);
-  let painted = true;
+  const painted = true;
 
   if (connectionMode !== "live-bridge" || !live) {
     // New chat draft: never resume catalog[0] — always forceNew on first send.
@@ -409,6 +361,21 @@ async function sendPromptActionBody(
     return false;
   }
 
+  // Mode switch still inside grok-build: the bubble is already painted.
+  // Hold the real prompt until the bridge reports `mode set to <id>`.
+  // Do not seed the reduce bucket yet — flush does that when the RPC returns.
+  if (
+    deferPromptForPendingMode(
+      set,
+      get,
+      text,
+      hasBlocks ? blocks : undefined,
+      sid,
+    )
+  ) {
+    return true;
+  }
+
   // Seed the live reduce bucket with the optimistic canvas (including image
   // ContentBlocks) so agent `user_message_chunk` text echoes absorb into that
   // row instead of opening a text-only bubble that wipes message-list thumbs.
@@ -433,18 +400,6 @@ async function sendPromptActionBody(
     return false;
   }
   return true;
-}
-
-/**
- * Cancel the in-flight turn on the live bridge when connected.
- * @param get Zustand get.
- */
-export function cancelTurnAction(get: SessionStoreGet): void {
-  const { connectionMode, live, session, viewingSessionId, activeSessionId } =
-    get();
-  if (connectionMode === "live-bridge" && live) {
-    live.cancel(session.id || viewingSessionId || activeSessionId || undefined);
-  }
 }
 
 /**

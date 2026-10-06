@@ -14,7 +14,7 @@ import {
   healSessionTimeline,
   persistNormalizedCatalog,
 } from "./sessionStoreSupport";
-import { clearPendingModeTimer } from "./pendingMode";
+import { pinModeHoldOnCanvas, type HeldPrompt } from "./sessionStoreModeHoldCanvas";
 import {
   mergeCanvasInbound,
   preserveLocalUserMedia,
@@ -92,10 +92,12 @@ export type LiveStoreSlice = {
    */
   creatingSession?: boolean;
   /**
-   * In-flight mode switch target; cleared when inbound session.mode matches.
+   * In-flight mode switch target. Inbound frames must not paint over it.
    * Optional so older call sites still type-check.
    */
   pendingMode?: AgentMode | null;
+  /** Prompt painted locally while session/set_mode is still running. */
+  heldPrompt?: HeldPrompt | null;
   /**
    * Uncached session waiting for session/load replay to land.
    * Optional so older call sites still type-check.
@@ -375,22 +377,15 @@ export function applyInboundSession(
     creatingSession: Boolean(get().creatingSession),
     inbound: healed,
   });
-  // Mode requests belong to the painted chat; a background session
-  // using the same mode must not acknowledge the foreground request.
-  const pendingMode = get().pendingMode ?? null;
-  const modeConfirmed =
-    follow && pendingMode !== null && healed.mode === pendingMode;
-  if (modeConfirmed) {
-    clearPendingModeTimer();
-  }
   // Only a canvas-owned snapshot may promote activeSessionId. Keeping
   // background ids out prevents alternating streams from taking turns
   // satisfying the active fallback and repainting the selected chat.
   const nextActive = follow && healed.id ? healed.id : active;
   // Go empty hydrate / short partial reduce must not blank a catalog-seeded
   // canvas; forceNew still keeps optimistic local user bubbles only.
+  // pinModeHoldOnCanvas keeps the chip and Working strip during set_mode.
   const canvasSession = follow
-    ? mergeCanvasInbound(healed, get().session, catalog)
+    ? pinModeHoldOnCanvas(mergeCanvasInbound(healed, get().session, catalog), get().pendingMode, get().heldPrompt)
     : healed;
   // Replay landed: the first snapshot for this id that carries content
   // is the single post-load flush. A session that really is empty keeps
@@ -416,7 +411,6 @@ export function applyInboundSession(
     connectionMode: "live-bridge",
     lastError: null,
     ...(restoreDone ? { restoringSessionId: null } : {}),
-    ...(modeConfirmed ? { pendingMode: null } : {}),
     ...(follow
       ? {
           session: canvasSession,

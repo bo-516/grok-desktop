@@ -94,6 +94,3 @@ export function isPendingModeResolved(
   }
   return normalizeAgentMode(confirmedMode) === pendingMode;
 }
-
-/** Default timeout before optimistic settle if agent never confirms (ms). */
-export const MODE_PENDING_TIMEOUT_MS = 3000;

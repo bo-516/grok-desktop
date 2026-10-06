@@ -10,7 +10,8 @@ import {
   planSendQueuedNow,
   takeQueuedById,
 } from "@/lib/promptQueue";
-import { cancelTurnAction, sendPromptAction } from "./sessionStorePrompt";
+import { cancelTurnAction } from "./sessionStoreModeHold";
+import { sendPromptAction } from "./sessionStorePrompt";
 
 /**
  * True when the open canvas (or its pool resident) cannot accept a new turn.
@@ -81,7 +82,12 @@ export function sendQueuedNowAction(
       promptQueue: plan.queue,
       bridgeInfo: "Sending now — interrupting the current turn",
     });
-    cancelTurnAction(get);
+    const releasedHold = cancelTurnAction(set, get);
+    // A pretended turn never reaches grok-build, so there is no idle edge
+    // later. Drain the row that Send now just prioritized.
+    if (releasedHold) {
+      drainQueueForSettledTurn(set, get, get().session.id.trim());
+    }
     return;
   }
   set({ promptQueue: plan.queue });
