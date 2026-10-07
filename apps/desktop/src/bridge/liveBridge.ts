@@ -61,8 +61,14 @@ export function connectLiveBridge(
 ): LiveBridgeHandle {
   const ws = new WebSocket(url);
   const pendingCli = new Map<string, PendingCli>();
-  /** Relay reduce + load-replay batching (shipped path; unit-tested via createLiveBridgeDispatch). */
-  const dispatch = createLiveBridgeDispatch({ handlers });
+  /**
+   * Relay reduce + load-replay batching + live stream coalescing (shipped
+   * path; unit-tested via createLiveBridgeDispatch with a fake scheduler).
+   */
+  const dispatch = createLiveBridgeDispatch({
+    handlers,
+    coalesce: { isForeground: handlers.isForegroundSession },
+  });
   const readyCallbacks: {
     resolve?: () => void;
     reject?: (error: Error) => void;
@@ -99,6 +105,8 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     catalogApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
+    // Land coalesced chunks before the error paints.
+    dispatch.flushPendingUpdates();
     // I4: do not leave sessions muted if error aborts a load window.
     dispatch.flushAllReplays();
     readyCallbacks.reject?.(new Error(`WebSocket error connecting to ${url}`));
@@ -108,6 +116,8 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
     catalogApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
+    // No lost final chunk: emit coalesced notifies before onClose.
+    dispatch.flushPendingUpdates();
     // I4: force-close any open replay windows before clearing buckets.
     dispatch.flushAllReplays();
     dispatch.clearBuckets();
@@ -170,6 +180,7 @@ export function connectLiveBridge(
 
   return {
     ready,
+    flushPendingUpdates: dispatch.flushPendingUpdates,
     start: (opts) => {
       // Prefill client reduce from catalog seed so Go pool-hit (empty timeline)
       // + later live chunks append instead of replacing painted history.
@@ -300,6 +311,8 @@ export function connectLiveBridge(
     cli,
     readModelCatalog: catalogApi.readModelCatalog,
     close: () => {
+      // Land coalesced chunks while the store still treats the bridge as live.
+      dispatch.flushPendingUpdates();
       try {
         ws.close();
       } catch {

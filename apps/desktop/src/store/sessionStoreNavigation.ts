@@ -78,6 +78,8 @@ export async function newSessionAction(
 ): Promise<void> {
   /** Draft folder (prefs written); explicit cwd wins, then prefs, then canvas. */
   const workspace = adoptDraftWorkspace(cwd, get().session.workspace);
+  // Session switch: land coalesced stream chunks on the outgoing canvas first.
+  get().live?.flushPendingUpdates?.();
   // Cancel in-flight select/resume so a late resume cannot repaint over the draft.
   selectSeq += 1;
   get().clearPendingMode();
@@ -204,6 +206,8 @@ export function selectSessionAction(
 
   // Mode switch timers / pending belong to the previous canvas only.
   get().clearPendingMode();
+  // Session switch: land coalesced stream chunks before the canvas moves.
+  get().live?.flushPendingUpdates?.();
   // Session switch: force any pending catalog write so the prior chat is durable.
   flushCatalogPersist();
 
@@ -265,6 +269,8 @@ export function removeSessionAction(
   get: SessionStoreGet,
   id: string,
 ): void {
+  // A late coalesced notify must not re-add the row after the filter below.
+  get().live?.flushPendingUpdates?.();
   // Reclaim child process (if in pool)
   get().live?.closeSession(id);
   forgetTurnEdge(id);
@@ -315,6 +321,8 @@ export function disconnectAction(
   set: SessionStoreSet,
   get: SessionStoreGet,
 ): void {
+  // Coalesced stream chunks land before the disconnect flush snapshots them.
+  get().live?.flushPendingUpdates?.();
   forgetAllTurnEdges();
   cancelPendingSessionsSync();
   // Pending / child buffers and the live canvas land in the catalog first.
