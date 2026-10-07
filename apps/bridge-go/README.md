@@ -81,7 +81,7 @@ pkg/workspacepath/   workspace path sandbox + read guards
 pkg/envfilter/       grok child env whitelist
 pkg/bridgeauth/      token / Origin / listen-port helpers
 internal/acp/        thin ACP client + handshake (uses pkg/jsonrpc)
-internal/spawn/      grok process tree (setpgid on posix; Job Object stub on Windows)
+internal/spawn/      grok process tree (setpgid on posix; kill-on-close Job Object on Windows)
 internal/pool/       RuntimePool LRU
 internal/wsapi/      WS server, message routing (auth re-exports pkg/bridgeauth)
 internal/reverse/    fs read/write, terminal registry (uses pkg/workspacepath)

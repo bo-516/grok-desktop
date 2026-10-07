@@ -14,7 +14,9 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/jsonrpc"
 )
 
-// DisposeKillGrace is the SIGTERM→SIGKILL grace period for the agent tree.
+// DisposeKillGrace is how long Dispose lets the agent tree stop gracefully
+// before it is hard-killed (unix SIGTERM→SIGKILL; Windows stdin EOF→
+// TerminateJobObject).
 const DisposeKillGrace = 2 * time.Second
 
 // Options configures a grok agent stdio spawn.
@@ -29,9 +31,18 @@ type Options struct {
 
 // Process is a live grok agent stdio child with line transport.
 type Process struct {
-	Cmd         *exec.Cmd
-	Transport   *StdioTransport
-	UseGroup    bool
+	// Cmd is the started root grok process. Reaped only by Transport (single Wait).
+	Cmd *exec.Cmd
+	// Transport is the NDJSON line transport over the child's stdio.
+	Transport *StdioTransport
+	// UseGroup reports whether Dispose reaches the whole tree (grok + MCP /
+	// tool grandchildren): unix process group, Windows Job Object. false means
+	// only the root grok process is signalled (Windows job fallback).
+	UseGroup bool
+	// tree is the platform handle used to stop the tree; nil only for a
+	// Process not built by SpawnGrokAgent, which Dispose then ignores.
+	tree *agentTree
+	// disposeOnce makes Dispose idempotent (transport and runtime both call it).
 	disposeOnce sync.Once
 }
 
@@ -140,8 +151,18 @@ func BuildGrokAgentArgs(opts Options) []string {
 }
 
 // SpawnGrokAgent starts grok agent stdio with cwd locked to the workspace.
-// Unix: new process group so dispose reaps MCP grandchildren via kill(-pid).
-// Windows: Job Object stub (see dispose_windows.go) — falls back to direct kill.
+// The child is started through startAgentTree so Dispose reaps MCP / tool
+// grandchildren too:
+//   - unix: own process group (setpgid); Dispose signals kill(-pid).
+//   - Windows: kill-on-close Job Object, entered while the child is still
+//     suspended so no grandchild can escape it; Dispose terminates the job,
+//     and the job also dies with the bridge process. If the job cannot be
+//     set up the spawn still succeeds with root-only kill (UseGroup=false).
+//
+// @param opts Workspace cwd, approval mode, extra SPAWN flags, env overrides.
+// @returns The running Process; an error when grok cannot be resolved, the
+// pipes cannot be created, or the child cannot be started (nothing is left
+// running in that case).
 func SpawnGrokAgent(opts Options) (*Process, error) {
 	bin, err := ResolveGrokBin()
 	if err != nil {
@@ -172,32 +193,43 @@ func SpawnGrokAgent(opts Options) (*Process, error) {
 		return nil, err
 	}
 
-	useGroup := configureProcessGroup(cmd)
-
-	if err := cmd.Start(); err != nil {
+	tree, err := startAgentTree(cmd)
+	if err != nil {
 		return nil, fmt.Errorf("spawn grok failed: %w", err)
 	}
 
 	tr := NewStdioTransport(stdin, stdout, stderr, cmd)
-	p := &Process{Cmd: cmd, Transport: tr, UseGroup: useGroup}
+	p := &Process{Cmd: cmd, Transport: tr, UseGroup: tree.grouped(), tree: tree}
 	tr.onDispose = func() { p.Dispose() }
 	return p, nil
 }
 
-// Dispose SIGTERMs the agent tree, then SIGKILLs after grace if still alive.
+// Dispose stops the agent tree: a soft stop now, a hard kill of the whole tree
+// after DisposeKillGrace if it is still alive, then release of the tree's OS
+// resources. Non-blocking, idempotent (only the first call acts), safe from
+// any goroutine.
+//   - unix: SIGTERM to the process group now; SIGKILL to the group after the
+//     grace if the root pid still exists.
+//   - Windows: no SIGTERM exists, so the soft stop is the stdin EOF that
+//     StdioTransport.Dispose sends right after this call. After the grace the
+//     job is terminated if any process in it still runs (an orphaned MCP
+//     server counts), and the job handle is closed.
+//
+// If the bridge exits before the grace fires, unix trees keep only the
+// SIGTERM; Windows trees are killed by the kernel when the job handle closes.
 // Process reaping is owned solely by StdioTransport.waitClose (single Wait).
 func (p *Process) Dispose() {
 	p.disposeOnce.Do(func() {
-		if p.Cmd == nil || p.Cmd.Process == nil {
+		if p.Cmd == nil || p.Cmd.Process == nil || p.tree == nil {
 			return
 		}
-		pid := p.Cmd.Process.Pid
-		signalAgentTree(pid, false, p.UseGroup) // SIGTERM
+		p.tree.signal(false)
 		time.AfterFunc(DisposeKillGrace, func() {
 			// Escalate if still alive.
-			if stillAlive(pid) {
-				signalAgentTree(pid, true, p.UseGroup) // SIGKILL
+			if p.tree.alive() {
+				p.tree.signal(true)
 			}
+			p.tree.release()
 		})
 	})
 }
