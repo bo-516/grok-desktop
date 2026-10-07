@@ -8,6 +8,7 @@ import {
   CRASH_LOG_STORAGE_KEY,
   persistCrashLocally,
   readCrashLog,
+  thrownMessage,
   uiLogPath,
 } from "../../src/lib/crashLog.js";
 
@@ -49,6 +50,14 @@ describe("crashLog", () => {
     assert.equal(list[0]?.message, "m5");
     assert.equal(list[19]?.message, "m24");
     assert.ok(mem.get(CRASH_LOG_STORAGE_KEY));
+  });
+
+  it("thrownMessage prefers Error.message, then strings, then fallback", () => {
+    assert.equal(thrownMessage(new Error("boom"), "fb"), "boom");
+    assert.equal(thrownMessage(new Error(""), "fb"), "");
+    assert.equal(thrownMessage("plain", "fb"), "plain");
+    assert.equal(thrownMessage({ message: "x" }, "fb"), "fb");
+    assert.equal(thrownMessage(undefined, "fb"), "fb");
   });
 
   it("uiLogPath is empty without window (no POST in node tests)", () => {

@@ -59,15 +59,13 @@ export function buildLineDiff(
 
 /**
  * Map a DiffRow onto the legacy DiffLine shape with dual numbers.
+ * `lineNo` is the old-side number for deletions, otherwise the new-side number
+ * (falling back to the old side when a row carries no new number).
  * @param row Structured dual-numbered row.
+ * @returns Legacy line with `lineNo` plus both side numbers.
  */
 function rowToDiffLine(row: DiffRow): DiffLine {
-  const lineNo =
-    row.type === "del"
-      ? row.oldNo
-      : row.newNo !== undefined
-        ? row.newNo
-        : row.oldNo;
+  const lineNo = row.type === "del" ? row.oldNo : (row.newNo ?? row.oldNo);
   return {
     type: row.type,
     text: row.text,

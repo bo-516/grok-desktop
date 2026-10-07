@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyHunkDecisions,
+  carryHunkDecisions,
   createDiffReview,
   setHunkDecision,
 } from "@/lib/diffHunkApply";
@@ -35,6 +36,31 @@ describe("diffHunkApply", () => {
     const { hunks } = createDiffReview("a\nb", "a\nc");
     const next = setHunkDecision(hunks, hunks[0]!.id, "reject");
     assert.equal(next[0]?.decision, "reject");
+  });
+
+  it("carryHunkDecisions transfers decided hunks by index when counts match", () => {
+    const oldT = "a\nb\nc\nd\ne\n";
+    const newT = "a\nB\nc\nD\ne\n";
+    const prior = createDiffReview(oldT, newT).hunks;
+    assert.equal(prior.length, 2);
+    const decided = setHunkDecision(prior, prior[1]!.id, "reject");
+    const fresh = createDiffReview(oldT, newT).hunks;
+    const carried = carryHunkDecisions(decided, fresh);
+    assert.deepEqual(
+      carried.map((h) => h.decision),
+      ["pending", "reject"],
+    );
+    // Undecided hunks keep the fresh object; inputs are not mutated.
+    assert.equal(carried[0], fresh[0]);
+    assert.equal(fresh[1]?.decision, "pending");
+  });
+
+  it("carryHunkDecisions leaves fresh hunks pending when counts differ", () => {
+    const prior = createDiffReview("a\nb\n", "a\nx\n").hunks;
+    const decided = prior.map((h) => ({ ...h, decision: "accept" as const }));
+    const fresh = createDiffReview("a\nb\nc\nd\n", "a\nX\nc\nD\n").hunks;
+    assert.notEqual(decided.length, fresh.length);
+    assert.equal(carryHunkDecisions(decided, fresh), fresh);
   });
 
   it("createDiffReview rebuilds from new texts when target switches", () => {

@@ -62,13 +62,14 @@ export function trapFocusTab(
     return false;
   }
   const list = listFocusable(root);
-  if (list.length === 0) {
+  const first = list[0];
+  const last = list[list.length - 1];
+  // Empty list (no first/last): keep focus on the trap root itself.
+  if (!first || !last) {
     event.preventDefault();
     root.focus();
     return true;
   }
-  const first = list[0]!;
-  const last = list[list.length - 1]!;
   const active = document.activeElement as HTMLElement | null;
   const outside = !active || !root.contains(active);
   if (event.shiftKey) {

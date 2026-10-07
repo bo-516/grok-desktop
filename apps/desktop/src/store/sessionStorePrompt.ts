@@ -125,10 +125,10 @@ function paintOptimisticUserPrompt(
   text: string,
   blocks?: ContentBlock[],
 ): void {
-  const hasBlocks = Array.isArray(blocks) && blocks.length > 0;
-  const promptBlocks: ContentBlock[] = hasBlocks
-    ? blocks!
-    : [{ type: "text", text }];
+  const promptBlocks: ContentBlock[] =
+    Array.isArray(blocks) && blocks.length > 0
+      ? blocks
+      : [{ type: "text", text }];
   if (
     promptBlocks.length === 0 ||
     (promptBlocks.length === 1 &&

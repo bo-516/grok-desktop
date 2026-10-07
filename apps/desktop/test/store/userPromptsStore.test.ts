@@ -55,7 +55,7 @@ beforeEach(() => {
 
 describe("userPromptsStore", () => {
   it("U-01..04: set/clear payloads; add funnels to prompts_set", async () => {
-    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
     const runCli = async (
       command: string,
       args?: Record<string, unknown>,

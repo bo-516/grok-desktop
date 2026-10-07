@@ -5,9 +5,9 @@
  * same workspace only (project folders keep their own order).
  */
 
-import {
-  type ProjectGroup,
-  type SessionRecord,
+import type {
+  ProjectGroup,
+  SessionRecord,
 } from "@/store/sessionCatalog";
 import type { SessionRailPrefs } from "@/lib/sessionRailPrefs";
 

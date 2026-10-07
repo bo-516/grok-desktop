@@ -2,8 +2,10 @@
  * Frontend crash / boot logger.
  *
  * Purpose: capture render failures and uncaught errors so a black WebView is
- * diagnosable. Writes to console + localStorage ring, and POSTs to the shell
- * asset endpoint (`window.__GROK_UI_LOG_PATH__`) when running inside Wails.
+ * diagnosable. Every level goes to the localStorage ring and is POSTed to the
+ * shell asset endpoint (`window.__GROK_UI_LOG_PATH__`) when running inside
+ * Wails; only error / warn are echoed to the console (the UI layer's console
+ * policy allows just those two methods).
  *
  * Boundary: never throws to callers. Network failures are swallowed after a
  * console.warn. localStorage may be unavailable (private mode) — also ignored.
@@ -29,14 +31,17 @@ export const CRASH_LOG_STORAGE_KEY = "grok-desktop.crash-log.v1";
 /** Max entries kept in the localStorage ring. */
 const CRASH_LOG_RING = 20;
 
-declare global {
-  interface Window {
-    /** Injected by shell: absolute log directory on disk. */
-    __GROK_LOG_DIR__?: string;
-    /** Injected by shell: same-origin path for POST crash reports. */
-    __GROK_UI_LOG_PATH__?: string;
-  }
-}
+/**
+ * `window` plus the globals the Wails shell injects before boot.
+ * Both are absent on plain Vite web / tests, so every read must tolerate
+ * undefined.
+ */
+type ShellInjectedWindow = Window & {
+  /** Injected by shell: absolute log directory on disk. */
+  __GROK_LOG_DIR__?: string;
+  /** Injected by shell: same-origin path for POST crash reports. */
+  __GROK_UI_LOG_PATH__?: string;
+};
 
 /**
  * Resolve the UI log POST path (shell inject or default for Wails asset server).
@@ -46,7 +51,7 @@ export function uiLogPath(): string {
   if (typeof window === "undefined") {
     return "";
   }
-  const injected = window.__GROK_UI_LOG_PATH__?.trim();
+  const injected = (window as ShellInjectedWindow).__GROK_UI_LOG_PATH__?.trim();
   if (injected) {
     return injected;
   }
@@ -62,7 +67,24 @@ export function logDirHint(): string {
   if (typeof window === "undefined") {
     return "";
   }
-  return window.__GROK_LOG_DIR__?.trim() ?? "";
+  return (window as ShellInjectedWindow).__GROK_LOG_DIR__?.trim() ?? "";
+}
+
+/**
+ * Human message for an arbitrary thrown / rejected value.
+ * Pure; shared by the global rejection handler and the React error boundary.
+ * @param value Anything thrown or passed to reject (Error, string, object, …).
+ * @param fallback Message used when `value` is neither an Error nor a string.
+ * @returns `Error.message` (even when empty), the string itself, or `fallback`.
+ */
+export function thrownMessage(value: unknown, fallback: string): string {
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return fallback;
 }
 
 /**
@@ -107,7 +129,10 @@ export function readCrashLog(): CrashLogEntry[] {
 }
 
 /**
- * Log a frontend error/boot event: console + localStorage + optional shell POST.
+ * Log a frontend error/boot event: localStorage + optional shell POST for every
+ * level, plus a console line for error / warn only. Info records (e.g. the
+ * "ui boot" marker) stay out of the console per the UI console policy but are
+ * still persisted and sent to the shell log.
  * @param level error | warn | info
  * @param message Short human message (required for usefulness).
  * @param opts Optional stack / source; omitted fields are fine.
@@ -133,8 +158,6 @@ export function reportCrash(
     console.error(line);
   } else if (level === "warn") {
     console.warn(line);
-  } else {
-    console.info(line);
   }
 
   persistCrashLocally(entry);
@@ -192,13 +215,8 @@ export function installGlobalCrashHandlers(): void {
   });
 
   window.addEventListener("unhandledrejection", (ev) => {
-    const reason = ev.reason;
-    const msg =
-      reason instanceof Error
-        ? reason.message
-        : typeof reason === "string"
-          ? reason
-          : "unhandledrejection";
+    const reason: unknown = ev.reason;
+    const msg = thrownMessage(reason, "unhandledrejection");
     const stack = reason instanceof Error ? reason.stack : undefined;
     reportCrash("error", msg, { stack, source: "unhandledrejection" });
   });

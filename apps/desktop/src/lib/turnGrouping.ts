@@ -44,6 +44,12 @@ export type TurnUnit = {
   totalMs: number;
 };
 
+/**
+ * Contiguous members of one turn, typed non-empty: a turn always starts from
+ * the member unit that opened it, so the id source (`[0]`) always exists.
+ */
+type TurnMembers = [TurnActivityChild, ...TurnActivityChild[]];
+
 /** Top-level units after turn grouping: user / turn / error (+ residual fallback). */
 export type TimelineRenderUnitWithTurns =
   | TurnActivityChild
@@ -113,7 +119,7 @@ export function groupTimelineTurns(
       continue;
     }
 
-    const members: TurnActivityChild[] = [unit];
+    const members: TurnMembers = [unit];
     let j = i + 1;
     while (j < units.length) {
       const next = units[j];
@@ -170,9 +176,11 @@ export { turnEarliestStartMs, turnWallDurationMs } from "./turnDuration";
  * Split turn members into activity rail + optional trailing answer.
  * Agent unit i belongs to the rail iff a later member is thought/tool work
  * (equivalently: trailing contiguous agents form the answer).
- * @param members Contiguous turn member units between user/error boundaries.
+ * @param members Contiguous turn member units between user/error boundaries;
+ *   non-empty by type (the first member names the turn id).
+ * @returns Turn unit with activity rail, optional answer, steps, and wall time.
  */
-function buildTurnUnit(members: TurnActivityChild[]): TurnUnit {
+function buildTurnUnit(members: TurnMembers): TurnUnit {
   // Index of first trailing agent that has no work after it (answer start).
   let answerStart = members.length;
   for (let i = members.length - 1; i >= 0; i -= 1) {
@@ -213,7 +221,7 @@ function buildTurnUnit(members: TurnActivityChild[]): TurnUnit {
 
   return {
     type: "turn",
-    id: `turn-${memberUnitKey(members[0]!)}`,
+    id: `turn-${memberUnitKey(members[0])}`,
     activity,
     answer,
     steps: activity.length,

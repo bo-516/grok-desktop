@@ -8,11 +8,7 @@ import cs from "classnames";
 import type { PlanEntry } from "@grok-desktop/acp-core";
 import { Check, ListTodo } from "lucide-react";
 import { useMemo } from "react";
-import {
-  planEntryLabel,
-  planProgress,
-  planStatusLabel,
-} from "../lib/planPanel";
+import { planProgress, planRows, planStatusLabel } from "../lib/planPanel";
 
 type PlanPanelViewProps = {
   /** Plan entries from session.plan; empty shows empty state. */
@@ -20,13 +16,20 @@ type PlanPanelViewProps = {
 };
 
 /**
+ * Shared empty list for a missing plan, so memo deps stay referentially stable
+ * across renders (a fresh `[]` each render would recompute every time).
+ */
+const NO_ENTRIES: PlanEntry[] = [];
+
+/**
  * Stateless plan list with progress and status markers (no store, no prompts).
- * @param props Plan entries from session.plan.
+ * @param props Plan entries from session.plan; undefined renders the empty state.
  * @returns Empty state, or progress header + checklist when entries exist.
  */
 export function PlanPanelView(props: PlanPanelViewProps) {
-  const entries = props.entries ?? [];
+  const entries = props.entries ?? NO_ENTRIES;
   const { done, total } = useMemo(() => planProgress(entries), [entries]);
+  const rows = useMemo(() => planRows(entries), [entries]);
   const progressPct = total === 0 ? 0 : Math.round((done / total) * 100);
 
   if (entries.length === 0) {
@@ -68,15 +71,12 @@ export function PlanPanelView(props: PlanPanelViewProps) {
 
       <div className="plan-list-scroll">
         <ol className="plan-list">
-          {entries.map((entry, index) => {
-            const status = entry.status ?? "pending";
-            const step = index + 1;
-            const label = planEntryLabel(entry, step);
+          {rows.map(({ key, step, status, label }) => {
             const isDone = status === "completed";
             const isActive = status === "in_progress";
             return (
               <li
-                key={`${status}|${label}|${entry.content ?? ""}|${index}`}
+                key={key}
                 className={cs("plan-item", {
                   "plan-item-done": isDone,
                   "plan-item-active": isActive,

@@ -5,7 +5,10 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { logDirHint, reportCrash } from "@/lib/crashLog";
+import { logDirHint, reportCrash, thrownMessage } from "@/lib/crashLog";
+
+/** Message shown / logged when the thrown value is neither an Error nor a string. */
+const RENDER_ERROR_FALLBACK = "Unknown render error";
 
 type Props = {
   /** App tree to protect. */
@@ -31,13 +34,7 @@ export class AppErrorBoundary extends Component<Props, State> {
    * @param error Anything thrown during render (usually Error).
    */
   static getDerivedStateFromError(error: unknown): Partial<State> {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : "Unknown render error";
-    return { errorMessage: message };
+    return { errorMessage: thrownMessage(error, RENDER_ERROR_FALLBACK) };
   }
 
   /**
@@ -46,12 +43,7 @@ export class AppErrorBoundary extends Component<Props, State> {
    * @param info React component stack.
    */
   componentDidCatch(error: unknown, info: ErrorInfo): void {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : "Unknown render error";
+    const message = thrownMessage(error, RENDER_ERROR_FALLBACK);
     const stack =
       (error instanceof Error ? error.stack : undefined) ||
       info.componentStack ||

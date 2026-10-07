@@ -170,15 +170,16 @@ export function reconstructFullTexts(
   const fragNewLines = splitLinesForMatch(fragNew);
   const fragOldLines = splitLinesForMatch(fragOld);
   const starts = findLineSubsequenceStarts(diskLines, fragNewLines);
+  /** 0-based line index of the unique match; undefined when nothing matched. */
+  const startIdx = starts[0];
 
-  if (starts.length === 0) {
+  if (startIdx === undefined) {
     return { kind: "unavailable", reason: "not_found" };
   }
   if (starts.length > 1) {
     return { kind: "unavailable", reason: "ambiguous" };
   }
 
-  const startIdx = starts[0]!;
   const endIdx = startIdx + fragNewLines.length;
   const oldLines = [
     ...diskLines.slice(0, startIdx),

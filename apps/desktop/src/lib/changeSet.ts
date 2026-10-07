@@ -115,6 +115,33 @@ export function extractNoDiffEditPaths(
 }
 
 /**
+ * Resolve the status of one folded path that has diff data.
+ * Precedence: failed > stale > no_baseline > ok. A discontinuous multi-window
+ * merge is stale (the merged pair cannot be trusted as one file), but a failed
+ * tool still wins so the user sees the tool error first.
+ * @param flags Folded per-path flags from {@link buildChangeSetFromToolCalls}.
+ * @returns Status for the path; never `no_diff_data` (the caller emits that
+ *   for paths with no old/new text before reaching here).
+ */
+function foldedFileStatus(flags: {
+  anyFailed: boolean;
+  discontinuous: boolean;
+  hasOld: boolean;
+  hasNew: boolean;
+}): ChangeSetFileStatus {
+  if (flags.anyFailed) {
+    return "failed";
+  }
+  if (flags.discontinuous) {
+    return "stale";
+  }
+  if (!flags.hasOld && flags.hasNew) {
+    return "no_baseline";
+  }
+  return "ok";
+}
+
+/**
  * Fold ordered tool-call events into per-path base/head + line counts.
  * @param toolCalls Session tool-call map (id → card).
  * @param orderedIds Tool-call ids in timeline order; when omitted, Object.keys order.
@@ -235,15 +262,7 @@ export function buildChangeSetFromToolCalls(
       });
       continue;
     }
-    // Discontinuous multi-window merge → stale (do not trust as one file pair).
-    // Failed still wins over stale so the user sees the tool error first.
-    const status: ChangeSetFileStatus = acc.anyFailed
-      ? "failed"
-      : acc.discontinuous
-        ? "stale"
-        : !acc.hasOld && acc.hasNew
-          ? "no_baseline"
-          : "ok";
+    const status = foldedFileStatus(acc);
     // Stale pairs still get a diff for display, but UI banners Apply-disable.
     const diff = buildFileDiff(acc.baseText, acc.headText);
     files.push({

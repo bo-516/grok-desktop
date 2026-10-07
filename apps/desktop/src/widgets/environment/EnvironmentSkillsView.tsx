@@ -6,6 +6,7 @@
 import { useMemo, useState } from "react";
 import type { SkillRow } from "@/lib/inspectModel";
 import {
+  EnvironmentNoMatchesView,
   EnvironmentPathMeta,
   EnvironmentSourceChip,
 } from "./EnvironmentRowShared";
@@ -92,58 +93,83 @@ export function EnvironmentSkillsView(props: EnvironmentSkillsViewProps) {
         loadedLabel={loadedLabel}
         searchPlaceholder="Search skills…"
       />
-      {rows.length === 0 ? (
-        <div className="env-empty">
-          <p className="env-empty-title">No skills discovered</p>
-          <p className="env-empty-hint">
-            Skills come from bundled packages, user/project SKILL.md trees, and
-            plugins. Install a skill or plugin, then Refresh.
-          </p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="env-empty">
-          <p className="env-empty-title">No matches</p>
-          <p className="env-empty-hint">Try a different search or scope filter.</p>
-        </div>
-      ) : (
-        <ul className="env-list">
-          {filtered.map((row) => (
-            <li key={`${row.source.kind}:${row.name}:${row.source.path ?? ""}`} className="env-row group">
-              <div className="env-row-main">
-                <span className="env-row-name">{row.name}</span>
-                {row.userInvocable ? (
-                  <span className="env-chip" title="Invocable as slash command">
-                    /{row.name}
-                  </span>
-                ) : null}
-                <EnvironmentSourceChip source={row.source} />
-                {row.userInvocable ? (
-                  <span className="env-row-actions">
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => void copySlashName(row.name)}
-                    >
-                      Copy /
-                    </button>
-                  </span>
-                ) : null}
-              </div>
-              {row.description ? (
-                <div className="env-row-meta">
-                  <span className="env-row-desc" title={row.description}>
-                    {row.description}
-                  </span>
-                </div>
-              ) : null}
-              <EnvironmentPathMeta
-                path={row.source.path}
-                workspace={workspace}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
+      <EnvironmentSkillsListView
+        rows={rows}
+        filtered={filtered}
+        workspace={workspace}
+      />
     </div>
+  );
+}
+
+type EnvironmentSkillsListViewProps = Pick<
+  EnvironmentSkillsViewProps,
+  "rows" | "workspace"
+> & {
+  /** Rows left after the local search / scope filter (subset of `rows`). */
+  filtered: SkillRow[];
+};
+
+/**
+ * Body under the toolbar: catalog empty state, filter "no matches", or rows.
+ * Stateless; each state is an early return so no JSX ternaries nest.
+ * @param props Full + filtered rows and workspace for path shortening.
+ * @returns "No skills discovered" when `rows` is empty, "No matches" when only
+ *   the filter emptied the list, otherwise the skill list.
+ */
+function EnvironmentSkillsListView(props: EnvironmentSkillsListViewProps) {
+  const { rows, filtered, workspace } = props;
+  if (rows.length === 0) {
+    return (
+      <div className="env-empty">
+        <p className="env-empty-title">No skills discovered</p>
+        <p className="env-empty-hint">
+          Skills come from bundled packages, user/project SKILL.md trees, and
+          plugins. Install a skill or plugin, then Refresh.
+        </p>
+      </div>
+    );
+  }
+  if (filtered.length === 0) {
+    return <EnvironmentNoMatchesView />;
+  }
+  return (
+    <ul className="env-list">
+      {filtered.map((row) => (
+        <li key={`${row.source.kind}:${row.name}:${row.source.path ?? ""}`} className="env-row group">
+          <div className="env-row-main">
+            <span className="env-row-name">{row.name}</span>
+            {row.userInvocable ? (
+              <span className="env-chip" title="Invocable as slash command">
+                /{row.name}
+              </span>
+            ) : null}
+            <EnvironmentSourceChip source={row.source} />
+            {row.userInvocable ? (
+              <span className="env-row-actions">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => void copySlashName(row.name)}
+                >
+                  Copy /
+                </button>
+              </span>
+            ) : null}
+          </div>
+          {row.description ? (
+            <div className="env-row-meta">
+              <span className="env-row-desc" title={row.description}>
+                {row.description}
+              </span>
+            </div>
+          ) : null}
+          <EnvironmentPathMeta
+            path={row.source.path}
+            workspace={workspace}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }

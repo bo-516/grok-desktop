@@ -47,12 +47,15 @@ export function ProjectSwitcherWidget() {
   const [createPath, setCreatePath] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  /** Bumps when prefs mutate so the list/label re-read localStorage. */
-  const [prefsTick, setPrefsTick] = useState(0);
+  /**
+   * Snapshot of workspace prefs from localStorage. Re-read (via reloadPrefs)
+   * whenever the menu opens or closes and after this widget persists a
+   * workspace, so the list/label pick up writes made elsewhere in the app.
+   */
+  const [prefs, setPrefs] = useState(() => loadWorkspacePrefs());
   const rootRef = useRef<HTMLDivElement>(null);
 
   const locked = sessionHasConversationContent(session.timeline);
-  const prefs = useMemo(() => loadWorkspacePrefs(), [prefsTick, menuOpen]);
   // Unlocked: prefs (incl. noProject) win. Locked: show the real chat cwd.
   const activeWorkspace = locked
     ? session.workspace.trim()
@@ -71,12 +74,22 @@ export function ProjectSwitcherWidget() {
   }, [catalog, activeWorkspace, prefs.knownWorkspaces, prefs.activeWorkspace]);
 
   /**
-   * Close the floating menu (keeps create dialog independent).
+   * Re-read workspace prefs from localStorage into the snapshot.
+   * Stable identity; safe to call redundantly (read is idempotent).
+   */
+  const reloadPrefs = useCallback(() => {
+    setPrefs(loadWorkspacePrefs());
+  }, []);
+
+  /**
+   * Close the floating menu (keeps create dialog independent) and refresh the
+   * prefs snapshot, as every menu open/close does.
    */
   const closeMenu = useCallback(() => {
     setMenuOpen(false);
     setQuery("");
-  }, []);
+    reloadPrefs();
+  }, [reloadPrefs]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -116,14 +129,15 @@ export function ProjectSwitcherWidget() {
       setSubmitting(true);
       try {
         await setWorkspace(path || null);
-        setPrefsTick((n) => n + 1);
+        // setWorkspace persisted prefs (known / active / noProject): re-read.
+        reloadPrefs();
         closeMenu();
         setCreateOpen(false);
       } finally {
         setSubmitting(false);
       }
     },
-    [locked, setWorkspace, closeMenu],
+    [locked, setWorkspace, reloadPrefs, closeMenu],
   );
 
   /**
@@ -174,6 +188,7 @@ export function ProjectSwitcherWidget() {
         onClick={() => {
           setMenuOpen((o) => !o);
           setQuery("");
+          reloadPrefs();
         }}
       >
         {locked ? (

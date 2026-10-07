@@ -1,5 +1,5 @@
 /**
- * Unit tests for plan rail pure helpers (labels + progress).
+ * Unit tests for plan rail pure helpers (labels + progress + row keys).
  */
 
 import assert from "node:assert/strict";
@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
   planEntryLabel,
   planProgress,
+  planRows,
   planStatusLabel,
 } from "../../src/lib/planPanel";
 
@@ -54,5 +55,39 @@ describe("planProgress", () => {
       done: 1,
       total: 2,
     });
+  });
+});
+
+describe("planRows", () => {
+  it("derives step, status, label, and a content key per entry", () => {
+    const rows = planRows([
+      { title: "Read", status: "completed" },
+      { content: "Write" },
+    ]);
+    assert.deepEqual(
+      rows.map(({ key, step, status, label }) => ({ key, step, status, label })),
+      [
+        { key: "completed|Read|", step: 1, status: "completed", label: "Read" },
+        { key: "pending|Write|Write", step: 2, status: "pending", label: "Write" },
+      ],
+    );
+  });
+
+  it("keeps keys unique for identical steps and suffix look-alikes", () => {
+    const rows = planRows([
+      { content: "x" },
+      { content: "x" },
+      // Base key equals the suffixed key of the repeat above.
+      { title: "x", content: "x#1" },
+      { content: "x" },
+    ]);
+    assert.deepEqual(
+      rows.map((r) => r.key),
+      ["pending|x|x", "pending|x|x#1", "pending|x|x#1#1", "pending|x|x#2"],
+    );
+  });
+
+  it("returns an empty list for no entries", () => {
+    assert.deepEqual(planRows([]), []);
   });
 });
