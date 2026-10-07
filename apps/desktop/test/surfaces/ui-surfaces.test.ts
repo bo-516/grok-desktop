@@ -1588,8 +1588,8 @@ describe("UI surface presence", () => {
       docWidget + docComponents,
       /from\s+["']@\/lib\/normalizeAgentMath["']/,
     );
-    assert.match(docWidget, /mode="static"/);
-    assert.match(docWidget, /parseIncompleteMarkdown=\{false\}/);
+    assert.match(docWidget, /mode: "static"/);
+    assert.match(docWidget, /parseIncompleteMarkdown: false/);
     assert.match(docWidget, /docComponents|previewDocComponents/);
     // Relative workspace links must not go through default rehype-harden only.
     assert.match(docWidget, /docRehypePlugins|docRehypeSafety/);
