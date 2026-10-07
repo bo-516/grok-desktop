@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   collectProjectWorkspacePaths,
+  forgetActiveWorkspace,
   normalizeWorkspacePrefs,
   rememberAndActivateWorkspace,
   resolvePreferredWorkspace,
@@ -51,6 +52,21 @@ describe("workspacePrefs", () => {
     assert.equal(prefs.activeWorkspace, "");
     assert.equal(prefs.noProject, true);
     assert.deepEqual(prefs.knownWorkspaces, ["/new", "/old"]);
+  });
+
+  it("forgetActiveWorkspace clears the default only for the removed folder", () => {
+    const prefs = normalizeWorkspacePrefs({
+      activeWorkspace: "/ws/a",
+      knownWorkspaces: ["/ws/a", "/ws/b"],
+    });
+    const cleared = forgetActiveWorkspace(prefs, "/ws/a/");
+    assert.equal(cleared.activeWorkspace, "");
+    // Not "no project": New chat follows the open chat's folder instead.
+    assert.equal(cleared.noProject, false);
+    // The switcher keeps listing the folder — that is how it comes back.
+    assert.deepEqual(cleared.knownWorkspaces, ["/ws/a", "/ws/b"]);
+    assert.equal(forgetActiveWorkspace(prefs, "/ws/b"), prefs);
+    assert.equal(forgetActiveWorkspace(prefs, ""), prefs);
   });
 
   it("setActiveWorkspacePrefs toggles noProject on empty path", () => {

@@ -6,7 +6,9 @@
  *
  * Collapse / preview-expand survive remounts via an in-memory cache that is
  * always written on save; localStorage is the cross-reload source of truth.
- * "Show more" / "Show less" mutators live in {@link ./sessionRailPreview}.
+ * "Show more" / "Show less" mutators live in {@link ./sessionRailPreview};
+ * "Remove project" marks and their hide / revive rules in
+ * {@link ./sessionRailRemoved}.
  */
 
 /** localStorage key for pin + collapse + drag order state. */
@@ -48,6 +50,14 @@ export type SessionRailPrefs = {
    * Empty / missing workspace key → pure recency for that project.
    */
   sessionOrderByWorkspace: Record<string, string[]>;
+  /**
+   * Project folders taken off the rail with "Remove project": normalized
+   * workspace key → removal time (epoch ms). Nothing on disk is deleted; a
+   * folder stays hidden only while none of its chats was created after that
+   * time. Pins, drag order, and collapse for the folder are kept so it comes
+   * back as it was.
+   */
+  removedWorkspaces: Record<string, number>;
 };
 
 const EMPTY_PREFS: SessionRailPrefs = {
@@ -55,6 +65,7 @@ const EMPTY_PREFS: SessionRailPrefs = {
   collapsedWorkspaces: [],
   previewExpandedWorkspaces: [],
   sessionOrderByWorkspace: {},
+  removedWorkspaces: {},
 };
 
 /**
@@ -103,12 +114,13 @@ function clonePrefs(prefs: SessionRailPrefs): SessionRailPrefs {
         [...ids],
       ]),
     ),
+    removedWorkspaces: { ...prefs.removedWorkspaces },
   };
 }
 
 /**
  * Empty prefs blob (fresh arrays/maps each call).
- * @returns Defaults with no pins, collapse, or drag order.
+ * @returns Defaults with no pins, collapse, drag order, or removed projects.
  */
 function emptyPrefs(): SessionRailPrefs {
   return {
@@ -117,13 +129,15 @@ function emptyPrefs(): SessionRailPrefs {
     collapsedWorkspaces: [],
     previewExpandedWorkspaces: [],
     sessionOrderByWorkspace: {},
+    removedWorkspaces: {},
   };
 }
 
 /**
  * Normalize a prefs object from storage or partial input.
- * Accepts legacy `pinnedWorkspaces` (ignored) so old blobs still load.
- * Workspace collapse keys are re-normalized (trailing slash stripped).
+ * Accepts legacy `pinnedWorkspaces` (ignored) so old blobs still load;
+ * blobs saved before "Remove project" load with no removed folders.
+ * Workspace collapse / removal keys are re-normalized (trailing slash stripped).
  * @param raw Unknown parse result; non-arrays are treated as empty.
  * @returns Defensive copy with string-only id/path lists (deduped, order kept).
  */
@@ -145,6 +159,7 @@ export function normalizeSessionRailPrefs(raw: unknown): SessionRailPrefs {
     sessionOrderByWorkspace: normalizeOrderByWorkspace(
       obj.sessionOrderByWorkspace,
     ),
+    removedWorkspaces: normalizeRemovedWorkspaces(obj.removedWorkspaces),
   };
 }
 
@@ -389,6 +404,28 @@ function normalizeOrderByWorkspace(
     if (ids.length > 0) {
       out[key] = ids;
     }
+  }
+  return out;
+}
+
+/**
+ * Normalize the removed-project map from storage. Keys are re-normalized
+ * (trailing slash stripped); two raw keys that collapse to one keep the
+ * later removal time. Empty keys and non-finite / non-positive times drop.
+ * @param value Unknown object; arrays and primitives yield `{}`.
+ * @returns Workspace key → removal epoch ms.
+ */
+function normalizeRemovedWorkspaces(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, number> = {};
+  for (const [raw, at] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof at !== "number" || !Number.isFinite(at) || at <= 0) {
+      continue;
+    }
+    const key = normalizeWorkspaceKey(raw);
+    out[key] = Math.max(out[key] ?? 0, at);
   }
   return out;
 }

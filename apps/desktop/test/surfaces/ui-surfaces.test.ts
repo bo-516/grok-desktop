@@ -1216,24 +1216,54 @@ describe("UI surface presence", () => {
     assert.match(looseGroup, /onCollapsePreview/);
     assert.match(looseGroup, /SessionRailGroupMoreView/);
     assert.match(looseGroup, /project-group-session-list-scroll/);
-    // Title | trailing action parent (rename + pin + remove). No leading status dot.
+    // Title | trailing slot (resting meta + one ⋯ chip). No leading status
+    // dot and no packed rename / pin / remove glyph strip: those actions live
+    // in shadcn menus — a DropdownMenu on the chip and a right-click
+    // ContextMenu — wired by the row widget, not the stateless view.
     const sessionRow = readSrc("widgets/SessionRailSessionRowView.tsx");
-    assert.match(sessionRow, /SessionRailSessionActionsView/);
-    assert.doesNotMatch(sessionRow, /sess-status/);
-    assert.match(sessionRow, /onTogglePin/);
-    // Inline rename: double-click title + reserved control next to pin.
+    assert.match(sessionRow, /SessionRailSessionTrailView/);
+    assert.doesNotMatch(sessionRow, /SessionRailSessionActionsView|sess-status/);
+    assert.equal(srcExists("widgets/SessionRailSessionActionsView.tsx"), false);
+    assert.doesNotMatch(sessionRow, /onContextMenu|useState|components\/ui/);
+    // Inline rename: double-click title or the menu's Rename.
     assert.match(sessionRow, /onBeginRename/);
     assert.match(sessionRow, /onCommitRename/);
     assert.match(sessionRow, /SessionRailSessionTitleView/);
-    const sessionActions = readSrc(
-      "widgets/SessionRailSessionActionsView.tsx",
+    const sessionTrail = readSrc("widgets/SessionRailSessionTrailView.tsx");
+    assert.match(sessionTrail, /sess-trail/);
+    assert.match(sessionTrail, /sess-meta/);
+    assert.match(sessionTrail, /menuButton/);
+    assert.doesNotMatch(
+      sessionTrail,
+      /Pencil|sess-rename|sess-remove|"sess-pin"|useState/,
     );
-    assert.match(sessionActions, /sess-actions/);
-    assert.match(sessionActions, /sess-btns/);
-    assert.doesNotMatch(sessionActions, /sess-meta/);
-    assert.match(sessionActions, /sess-pin/);
-    assert.match(sessionActions, /sess-rename/);
-    assert.match(sessionActions, /sess-remove/);
+    // The stateful row widget holds both Radix roots: the ContextMenu
+    // trigger wraps the row, and both contents render beside it (not
+    // inside), so menu clicks never bubble into the row's select handler.
+    const rowWidget = readSrc("widgets/SessionRailSessionRowWidget.tsx");
+    assert.match(rowWidget, /useState/);
+    assert.match(rowWidget, /<ContextMenuTrigger asChild disabled=\{editing\}>/);
+    assert.match(rowWidget, /sess-row-host/);
+    assert.match(rowWidget, /<DropdownMenuContent/);
+    assert.match(rowWidget, /<ContextMenuContent/);
+    // Rename / delete move focus themselves; Radix must not pull it back.
+    assert.match(rowWidget, /onCloseAutoFocus=\{handleCloseAutoFocus\}/);
+    assert.match(rowWidget, /onTogglePin/);
+    assert.match(rail, /SessionRailSessionRowWidget/);
+    const rowMenu = readSrc("widgets/SessionRailSessionMenuView.tsx");
+    assert.match(rowMenu, /@\/components\/ui\/dropdown-menu/);
+    assert.match(rowMenu, /@\/components\/ui\/context-menu/);
+    assert.match(rowMenu, /<DropdownMenuTrigger asChild>/);
+    assert.match(rowMenu, /sess-menu-btn/);
+    assert.match(rowMenu, /stopPropagation/);
+    assert.match(rowMenu, /Rename/);
+    assert.match(rowMenu, /"Pin to top"/);
+    assert.match(rowMenu, /"Unpin"/);
+    assert.match(rowMenu, /variant="destructive"/);
+    assert.match(rowMenu, /Delete…/);
+    // The hand-written menu primitive is gone; shadcn's is the only one.
+    assert.equal(srcExists("lib/menuPlacement.ts"), false);
+    assert.doesNotMatch(readAllUnoShortcuts(), /"ui-menu/);
     const titleView = readSrc("widgets/SessionRailSessionTitleView.tsx");
     assert.match(titleView, /sess-title-input/);
     assert.match(titleView, /onDoubleClick/);
@@ -1251,15 +1281,19 @@ describe("UI surface presence", () => {
       shortcuts,
       /"sess-row":[\s\S]*?grid-cols-\[minmax\(0,1fr\)_auto\]/,
     );
-    assert.match(shortcuts, /"sess-actions":/);
-    assert.match(shortcuts, /"sess-btns":/);
-    // Cluster hugs the track's right edge so the trailing × keeps the same
-    // right edge as the row timestamp; 2px gaps keep the glyphs from welding.
-    const btnsShortcut = shortcuts.match(/"sess-btns":\s*"([^"]+)"/)?.[1] ?? "";
-    assert.match(btnsShortcut, /justify-end/);
-    assert.match(btnsShortcut, /w-full/);
-    assert.match(btnsShortcut, /gap-\[2px\]/);
-    assert.doesNotMatch(shortcuts, /"sess-status"/);
+    // Meta and ⋯ chip are stacked in one grid cell (both col/row 1), so the
+    // hover swap never moves the title's truncation point.
+    assert.match(shortcuts, /"sess-trail":\s*"[^"]*\bgrid\b/);
+    const metaShortcut =
+      shortcuts.match(/"sess-meta":\s*"([^"]+)"/)?.[1] ?? "";
+    const menuBtnShortcut =
+      shortcuts.match(/"sess-menu-btn":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.match(metaShortcut, /col-start-1 row-start-1/);
+    assert.match(menuBtnShortcut, /col-start-1 row-start-1/);
+    assert.doesNotMatch(
+      shortcuts,
+      /"sess-(actions|btns|rename|pin|remove|time|status)":/,
+    );
     assert.match(
       shortcuts,
       /"project-group-name":\s*"min-w-0 flex-1[\s\S]*?text-nav font-normal/,
@@ -1357,9 +1391,6 @@ describe("UI surface presence", () => {
     assert.match(countShortcut[1], /min-w-\[18px\]/);
     assert.match(countShortcut[1], /leading-\[18px\]/);
     assert.doesNotMatch(countShortcut[1], /\bh-4\.5\b|\bmin-w-4\.5\b|\bleading-none\b/);
-    assert.match(shortcuts, /"sess-pin":/);
-    assert.match(shortcuts, /"sess-pin-active":/);
-    assert.match(shortcuts, /"sess-rename":/);
     assert.match(shortcuts, /"sess-title-input":/);
     // Rename field must not grow the row or paint a focus ring / border.
     const titleInputShortcut =
@@ -1367,41 +1398,35 @@ describe("UI surface presence", () => {
     assert.match(titleInputShortcut, /border-none/);
     assert.match(titleInputShortcut, /h-\[20px\]/);
     assert.doesNotMatch(titleInputShortcut, /ring-2|shadow-\[/);
-    // Shared 14×28 slot so hover-reveal does not jitter. Values must be
-    // string literals (a shared const crashes Uno's jiti config reload).
-    const renameShortcut =
-      shortcuts.match(/"sess-rename":\s*"([^"]+)"/)?.[1] ?? "";
-    const pinShortcut =
-      shortcuts.match(/"sess-pin":\s*"([^"]+)"/)?.[1] ?? "";
-    const removeShortcut =
-      shortcuts.match(/"sess-remove":\s*"([^"]+)"/)?.[1] ?? "";
-    assert.match(renameShortcut, /w-\[14px\] h-\[28px\]/);
-    assert.equal(renameShortcut, pinShortcut);
-    assert.equal(renameShortcut, removeShortcut);
-    assert.doesNotMatch(shortcuts, /const sessActionBtn/);
+    // One 24×24 chip (px — rem collapses under html 13px). Hidden at rest
+    // with pointer-events off so the invisible chip never eats row clicks.
+    assert.match(menuBtnShortcut, /w-\[24px\] h-\[24px\]/);
+    assert.match(menuBtnShortcut, /opacity-0 pointer-events-none/);
+    assert.match(
+      menuBtnShortcut,
+      /group-hover:\(opacity-100 pointer-events-auto\)/,
+    );
+    // Keyboard focus on / inside the row reveals it. `:focus-visible`, not
+    // `focus-within`, so a mouse click cannot leave the chip stuck on.
+    assert.match(menuBtnShortcut, /group-focus-visible:/);
+    assert.match(menuBtnShortcut, /group-has-\[:focus-visible\]:/);
+    assert.doesNotMatch(menuBtnShortcut, /group-focus-within/);
+    assert.match(metaShortcut, /group-hover:opacity-0/);
+    assert.match(metaShortcut, /group-has-\[:focus-visible\]:opacity-0/);
+    assert.match(metaShortcut, /pointer-events-none/);
+    // An open menu holds the chip via a parent selector (beats opacity-0).
     assert.match(
       shortcuts,
-      /"sess-row-editing":[\s\S]*?\[&_\.sess-rename\]:\(opacity-100/,
+      /"sess-row-menu-open":[\s\S]*?\[&_\.sess-menu-btn\]:\(opacity-100/,
     );
-    // Pinned visibility must win over base `.sess-pin { opacity:0 }` via parent
-    // selector — same-element active class alone loses on Uno cascade order.
-    assert.match(
-      shortcuts,
-      /"sess-row-pinned":[\s\S]*?\[&_\.sess-pin\]:\(opacity-100/,
-    );
-    assert.match(shortcuts, /"sess-time":[\s\S]*?group-hover:opacity-0/);
-    assert.match(shortcuts, /"sess-actions":[\s\S]*?w-\[56px\]/);
-    assert.match(shortcuts, /"sess-time":[\s\S]*?w-\[24px\]/);
-    assert.doesNotMatch(shortcuts, /"sess-meta"/);
-    // Close is a sibling 14×28 slot, not a right-aligned overlay in the time column.
-    assert.match(removeShortcut, /p-0/);
-    assert.match(removeShortcut, /justify-center/);
-    assert.match(removeShortcut, /w-\[14px\] h-\[28px\]/);
-    assert.doesNotMatch(removeShortcut, /inset-0|absolute right-0/);
-    // Hover-reveal pin / time / remove snap — no opacity transition.
-    const timeShortcut = shortcuts.match(/"sess-time":\s*"([^"]+)"/)?.[1] ?? "";
-    assert.doesNotMatch(removeShortcut, /transition-opacity|duration-reveal/);
-    assert.doesNotMatch(timeShortcut, /transition-opacity|duration-reveal/);
+    // Focus rings are an arbitrary shadow: `ring-*` reads ring vars that
+    // only the disabled preflight defines, so it would paint nothing.
+    const rowShortcut = shortcuts.match(/"sess-row":\s*"([^"]+)"/)?.[1] ?? "";
+    assert.doesNotMatch(rowShortcut, /\bring-2\b/);
+    assert.doesNotMatch(menuBtnShortcut, /\bring-2\b/);
+    // Hover-reveal snaps — no opacity transition.
+    assert.doesNotMatch(menuBtnShortcut, /transition-opacity|duration-reveal/);
+    assert.doesNotMatch(metaShortcut, /transition-opacity|duration-reveal/);
   });
 
   it("tool card normalizes array content and plan empty is en-US", () => {
@@ -2131,6 +2156,23 @@ describe("UnoCSS transform utilities emit literal values", () => {
       /\.project-group-name\{[^}]*overflow:hidden/,
     );
     assert.doesNotMatch(css, /\.sess-title\{[^}]*overflow:hidden/);
+  });
+
+  it("session row trail emits its hover / focus / menu-open selectors", async () => {
+    const uno = await createGenerator(unoConfigModule);
+    const { css } = await uno.generate(
+      "sess-row-host sess-meta sess-menu-btn sess-row-menu-open",
+      { preflights: false },
+    );
+    // Chip shows / meta hides on hover and on keyboard focus on or inside
+    // the row (`group` is a literal class on the row element).
+    assert.match(css, /\.group:hover \.sess-menu-btn/);
+    assert.match(css, /\.group:focus-visible \.sess-menu-btn/);
+    assert.match(css, /\.group:has\(:focus-visible\) \.sess-menu-btn/);
+    assert.match(css, /\.group:has\(:focus-visible\) \.sess-meta/);
+    assert.match(css, /\.sess-row-menu-open \.sess-menu-btn\{[^}]*opacity:1/);
+    // The ContextMenu host must not add a box to the session list.
+    assert.match(css, /\.sess-row-host\{display:contents;?\}/);
   });
 
   it("rail folder count badge is an 18px box with matching line-height", async () => {

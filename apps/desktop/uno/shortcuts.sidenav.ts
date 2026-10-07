@@ -133,9 +133,12 @@ export const sideNavShortcuts: Record<string, string> = {
    * Height is px (html font-size is 13px; rem `min-h-8` / `h-8` collapse to
    * 26px and clip Inter descenders on names like "grok-desktop"). Matches
    * the 36px session pill so folder + chat rows share one cadence.
+   * `data-[state=open]` is set by the project context menu (Radix trigger)
+   * and keeps the hover fill while the menu is open, so the right-clicked
+   * folder stays marked after the pointer moves into the menu.
    */
   "project-group-header":
-    "sticky top-0 z-10 flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover",
+    "sticky top-0 z-10 flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover data-[state=open]:before:bg-sidebar-hover",
   "project-group-main":
     "flex flex-1 items-center gap-1.5 min-w-0 h-[36px] pl-1 border-none rounded-8px bg-transparent text-left cursor-pointer focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-sidebar)])",
   /* Rotate −90° when collapsed so the same ChevronDown points right. */
@@ -216,21 +219,28 @@ export const sideNavShortcuts: Record<string, string> = {
   "time-group-label":
     "px-2.5 pt-1.5 pb-2 text-11px font-normal tracking-wide text-fg-muted",
   /*
-   * Session rows: title | trailing action parent (rename + pin + remove).
-   * One 56px `sess-actions` track owns the three 14×28 buttons (`sess-btns`,
-   * right-aligned, 2px gaps) plus a 24px time overlay on the right — hover-
-   * reveal does not shift the title truncation point, and the trailing ×
-   * shares the timestamp's right edge. Height uses px (html font-size is
-   * 13px; rem h-* collapses). No leading status dot; live / waiting only
-   * lift title color; selection is elevated pill + medium title.
+   * Session rows: title | trailing slot (`sess-trail`). At rest the slot
+   * shows quiet meta (relative time, a pin mark on pinned chats, a spinner /
+   * dot while the agent runs or waits); on hover or keyboard focus it swaps to
+   * a single ⋯ chip whose shadcn DropdownMenu holds rename / pin / delete
+   * (a right-click ContextMenu lists the same rows). One chip instead of
+   * three packed glyphs keeps the row calm. Height uses px (html font-size is 13px; rem h-* collapses). No
+   * leading status dot; selection is an elevated pill + medium title.
+   * pr-[6px]: the 24px chip sits 6px off the pill edge on top, right, and
+   * bottom alike. Keyboard focus paints a 2px focus-ring shadow: an
+   * arbitrary `shadow-[…]`, not `ring-2` — with preflight off the ring
+   * chain reads --un-ring-inset / --un-ring-offset-width, which nothing
+   * defines, so `ring-*` computes to no shadow at all (base.css only
+   * defaults the three vars `shadow-*` needs).
    */
   /*
-   * pr-2.5 (not pr-1.5): keeps the action track (relative time / streaming
-   * "…" / remove) a touch clear of the pill's right edge. Scoped to the row
-   * only so folder headers, scroll inset, and count badges stay put.
+   * ContextMenu trigger around one row (Radix `asChild` host). `contents`
+   * drops its box, so the row stays the flex item of the session list and
+   * gaps / widths are unchanged; events still bubble through it.
    */
+  "sess-row-host": "contents",
   "sess-row":
-    "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 w-full h-[36px] pl-2.5 pr-2.5 rounded-8px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) data-[dragging=true]:(opacity-45) data-[drag-over=true]:(bg-white-soft shadow-[inset_0_2px_0_0_var(--color-text-primary)])",
+    "relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 w-full h-[36px] pl-2.5 pr-[6px] rounded-8px cursor-pointer text-fg-secondary transition-colors duration-normal ease-soft hover:(text-fg bg-white-faint) focus-visible:(outline-none shadow-[0_0_0_2px_var(--color-focus-ring)]) data-[dragging=true]:(opacity-45) data-[drag-over=true]:(bg-white-soft shadow-[inset_0_2px_0_0_var(--color-text-primary)])",
   /*
    * Selected chat: elevated fill one step above the rest (surface-highest)
    * + medium title. No border / inset ring — fill + weight alone mark
@@ -242,20 +252,22 @@ export const sideNavShortcuts: Record<string, string> = {
     "bg-highest text-fg hover:(bg-highest text-fg) [&_.sess-title]:font-medium",
   "sess-row-process-live": "[&_.sess-title]:text-fg",
   "sess-row-waiting": "[&_.sess-title]:text-fg",
+  "sess-row-pinned": "[&_.sess-title]:text-fg",
   /*
-   * Pinned row: keep the pin solid without fighting `.sess-pin { opacity:0 }`.
-   * Parent selector (`.sess-row-pinned .sess-pin`) beats the single-class base
-   * rule; a same-element `.sess-pin-active` alone loses when Uno emits the base
-   * shortcut after the active one.
+   * Menu open (⋯ or right-click): Radix menus are modal, so the page ignores
+   * the pointer and `:hover` drops. Hold the hover paint here — fill (unless
+   * already selected), lifted title, and the ⋯ chip pressed — so it is
+   * clear which chat the menu acts on.
+   * Parent selectors (2 classes) outrank the single-class base shortcuts.
    */
-  "sess-row-pinned":
-    "[&_.sess-title]:text-fg [&_.sess-pin]:(opacity-100 pointer-events-auto text-fg)",
+  "sess-row-menu-open":
+    "[&:not(.sess-row-active)]:bg-white-faint [&_.sess-title]:text-fg [&_.sess-meta]:opacity-0 [&_.sess-menu-btn]:(opacity-100 pointer-events-auto text-fg bg-white-soft)",
   /*
-   * Editing: keep the rename/save control solid (same parent-selector trick
-   * as the pinned pin) so the user can confirm without hunting a hover target.
+   * Renaming: the trailing slot is not rendered, so the field takes the
+   * row. A 1px inset focus hairline is the only edit chrome on the row
+   * (the input itself stays borderless); Enter / blur save, Escape cancels.
    */
-  "sess-row-editing":
-    "[&_.sess-rename]:(opacity-100 pointer-events-auto text-fg)",
+  "sess-row-editing": "shadow-[inset_0_0_0_1px_var(--color-border-focus)]",
   /* Same text-nav line-height as folder names — see --line-height-nav-item.
    * overflow-x-hidden matches project-group-name so a session titled
    * "grok-desktop" does not lose its p/g either. */
@@ -269,46 +281,35 @@ export const sideNavShortcuts: Record<string, string> = {
   "sess-title-input":
     "h-[20px] box-border border-none outline-none shadow-none appearance-none bg-transparent p-0 m-0 rounded-none select-text caret-fg focus-visible:outline-none",
   /*
-   * Parent track stays 56px so the resting time keeps its position. The
-   * three 14×28 buttons no longer pack from the left: `sess-btns` fills the
-   * track and right-aligns (`justify-end`), so the trailing remove glyph
-   * lands on the same right edge as the `13h` timestamp painted above it.
-   * Left-packing put the × ~8px inboard of that edge and read as a ragged
-   * second column. 14*3 + 2*2 gap = 46px, so the cluster still clears the
-   * time's 24px overlay box.
+   * Trailing slot: meta and ⋯ chip are stacked in ONE grid cell (both pinned
+   * to col/row 1), so the cell is as wide as the wider of the two and the
+   * hover swap never moves the title's truncation point.
    */
-  "sess-actions": "relative shrink-0 w-[56px] h-[28px]",
-  "sess-btns": "flex items-center justify-end gap-[2px] w-full h-[28px]",
+  "sess-trail": "grid items-center justify-items-end h-[24px] min-w-[24px]",
   /*
-   * Rename / pin / remove share one 14×28 chrome string (keep them in
-   * lockstep). Width/height are px — html font-size is 13px, so rem
-   * `w-4` / `h-7` collapse to 13×23 and leave a hole after the cluster.
-   * The box is 14px wide (not 16) with a 2px gap so the glyphs breathe
-   * instead of reading as one welded strip; height stays 28px because it is
-   * invisible hit area, not chrome. Hidden at rest; visible on row hover /
-   * focus. Pinned / editing visibility is forced by the row parent selectors
-   * so this base opacity-0 cannot win. No hover fill — one cluster, one cadence.
+   * Resting meta (`now` / `12m` / `3d` / `1mo`, pin mark, spinner / dot).
+   * 11px tabular figures; pr-[6px] lines the text's right edge up with the
+   * last dot of the ⋯ glyph that replaces it. Hidden whenever the chip is
+   * up: row hover, keyboard focus on / inside the row (`:has` keeps a mouse
+   * click from leaving it stuck), or menu open (row parent selector).
+   * Snaps, no fade — display-only, never a click target.
    */
-  "sess-rename":
-    "shrink-0 flex items-center justify-center w-[14px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
-  "sess-rename-save": "text-fg",
-  "sess-rename-icon": "w-[13px] h-[13px] block shrink-0",
-  "sess-pin":
-    "shrink-0 flex items-center justify-center w-[14px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
-  "sess-pin-active": "text-fg",
-  "sess-pin-icon": "w-[13px] h-[13px] block shrink-0",
-  "sess-remove":
-    "shrink-0 flex items-center justify-center w-[14px] h-[28px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-within:(opacity-100 pointer-events-auto) hover:text-fg focus-visible:(opacity-100 pointer-events-auto outline-none ring-2 ring-[var(--color-focus-ring)] rounded-6px)",
-  "sess-remove-icon": "w-[13px] h-[13px] block shrink-0",
+  "sess-meta":
+    "col-start-1 row-start-1 inline-flex items-center gap-1 h-[24px] pr-[6px] text-11px leading-none text-fg-muted tabular-nums whitespace-nowrap pointer-events-none group-hover:opacity-0 group-focus-visible:opacity-0 group-has-[:focus-visible]:opacity-0",
+  "sess-meta-pin": "block shrink-0 w-[11px] h-[11px]",
+  "sess-meta-live":
+    "block shrink-0 w-[12px] h-[12px] animate-spin motion-reduce:animate-none",
+  "sess-meta-wait": "block shrink-0 w-[6px] h-[6px] rounded-full bg-warning",
   /*
-   * Resting time: right 24px of `sess-actions` (fits `45s` / `now` / `1d`
-   * / `1mo` at 10px tabular-nums). Hidden on hover / focus so remove — now
-   * the right-most slot of the same track — can take that edge. The 2px
-   * `pr-0.5` here is what the × glyph's own stroke inset lines up against.
-   * pointer-events-none: it is display-only.
+   * The row's only control: a 24×24 ⋯ chip (16px glyph) with its own hover
+   * fill so it reads as a button, not a stray mark. Hidden at rest; shown on
+   * row hover, keyboard focus on / inside the row, or menu open. opacity-0
+   * keeps it in the Tab order; pointer-events-none keeps the hidden chip
+   * from swallowing row clicks. Focus ring is a shadow (see sess-row).
    */
-  "sess-time":
-    "absolute right-0 top-0 flex items-center justify-end w-[24px] h-[28px] pr-0.5 text-10px leading-none text-fg-muted whitespace-nowrap tabular-nums text-right pointer-events-none group-hover:opacity-0 group-focus-within:opacity-0",
+  "sess-menu-btn":
+    "col-start-1 row-start-1 flex items-center justify-center w-[24px] h-[24px] p-0 m-0 border-none rounded-6px bg-transparent text-fg-muted cursor-pointer opacity-0 pointer-events-none group-hover:(opacity-100 pointer-events-auto) group-focus-visible:(opacity-100 pointer-events-auto) group-has-[:focus-visible]:(opacity-100 pointer-events-auto) hover:(text-fg bg-white-soft) focus-visible:(outline-none shadow-[0_0_0_2px_var(--color-focus-ring)])",
+  "sess-menu-icon": "block shrink-0 w-[16px] h-[16px]",
   "side-nav-footer":
     "mt-auto px-3.5 pt-2.5 pb-1 border-t border-line-subtle flex flex-col gap-2.5",
   "side-nav-quota":

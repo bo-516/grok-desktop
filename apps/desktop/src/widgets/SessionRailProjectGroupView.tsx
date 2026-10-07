@@ -7,7 +7,8 @@
  * outside the scroll area) while this group's sessions scroll — see
  * project-group-header in shortcuts.sidenav (36px px row; rem h-8 clips
  * "grok-desktop"). Pin lives on individual session rows, not on the
- * folder header.
+ * folder header. Right-clicking the header opens the project menu
+ * ("Remove project", see SessionRailProjectMenuView).
  *
  * Collapse and "Show more" / "Show less" are controlled from the parent
  * (rail prefs) so remounts do not re-expand projects the user already closed.
@@ -19,6 +20,7 @@ import type { ReactNode } from "react";
 import { projectGroupListModel } from "@/lib/sessionRailPreview";
 import type { ProjectGroup, SessionRecord } from "@/store/sessionCatalog";
 import { SessionRailGroupMoreView } from "./SessionRailGroupMoreView";
+import { SessionRailProjectMenuView } from "./SessionRailProjectMenuView";
 
 export {
   PROJECT_SESSION_EXPANDED_CAP,
@@ -49,6 +51,13 @@ export type SessionRailProjectGroupViewProps = {
   onCollapsePreview: () => void;
   /** Render one session row (keeps selection/live/pin wiring in the parent). */
   renderSession: (rec: SessionRecord) => ReactNode;
+  /**
+   * Right-click "Remove project": hide this folder from the rail (chats stay
+   * on disk and return with the folder). Missing → no project menu.
+   */
+  onRemove?: () => void;
+  /** A chat in this folder is running; "Remove project" shows disabled. */
+  removeDisabled?: boolean;
 };
 
 /**
@@ -63,7 +72,8 @@ export type SessionRailProjectGroupViewProps = {
  * folder stuck open or the list stuck at the preview cap. Expanded lists
  * longer than the 8-row cap scroll inside the group; "Show less" restores
  * the preview.
- * @param props Group data, active/collapse/preview flags, and session row renderer.
+ * @param props Group data, active/collapse/preview flags, session row
+ *   renderer, and the optional remove action + busy flag for the header menu.
  * @returns Project section for the side-nav scroll area.
  */
 export function SessionRailProjectGroupView(
@@ -78,6 +88,8 @@ export function SessionRailProjectGroupView(
     onExpandPreview,
     onCollapsePreview,
     renderSession,
+    onRemove,
+    removeDisabled,
   } = props;
   /** Folder chat count for the header badge (includes hidden preview rows). */
   const total = group.sessions.length;
@@ -99,49 +111,55 @@ export function SessionRailProjectGroupView(
         "project-group-collapsed": collapsed,
       })}
     >
-      <div className="project-group-header group">
-        <button
-          type="button"
-          className="project-group-main"
-          onClick={() => onToggleCollapse()}
-          aria-expanded={!collapsed}
-          aria-label={collapseLabel}
-          title={group.workspace || group.projectName}
-        >
-          {/* One chevron rotated −90° when collapsed (points right). */}
-          <ChevronDown
-            className={cs("project-group-chevron", {
-              "project-group-chevron-collapsed": collapsed,
-            })}
-            strokeWidth={2}
-            aria-hidden="true"
-          />
-          {/* Both glyphs stacked; active one fades/scales in (no well). */}
-          <span className="project-group-folder" aria-hidden="true">
-            <Folder
-              className={cs("project-group-icon", {
-                "project-group-icon-active": collapsed,
-                "project-group-icon-idle": !collapsed,
+      <SessionRailProjectMenuView
+        projectName={group.projectName}
+        onRemove={onRemove}
+        removeDisabled={removeDisabled}
+      >
+        <div className="project-group-header group">
+          <button
+            type="button"
+            className="project-group-main"
+            onClick={() => onToggleCollapse()}
+            aria-expanded={!collapsed}
+            aria-label={collapseLabel}
+            title={group.workspace || group.projectName}
+          >
+            {/* One chevron rotated −90° when collapsed (points right). */}
+            <ChevronDown
+              className={cs("project-group-chevron", {
+                "project-group-chevron-collapsed": collapsed,
               })}
-              strokeWidth={1.75}
+              strokeWidth={2}
+              aria-hidden="true"
             />
-            <FolderOpen
-              className={cs("project-group-icon", {
-                "project-group-icon-active": !collapsed,
-                "project-group-icon-idle": collapsed,
-              })}
-              strokeWidth={1.75}
-            />
+            {/* Both glyphs stacked; active one fades/scales in (no well). */}
+            <span className="project-group-folder" aria-hidden="true">
+              <Folder
+                className={cs("project-group-icon", {
+                  "project-group-icon-active": collapsed,
+                  "project-group-icon-idle": !collapsed,
+                })}
+                strokeWidth={1.75}
+              />
+              <FolderOpen
+                className={cs("project-group-icon", {
+                  "project-group-icon-active": !collapsed,
+                  "project-group-icon-idle": collapsed,
+                })}
+                strokeWidth={1.75}
+              />
+            </span>
+            <span className="project-group-name">{group.projectName}</span>
+          </button>
+          <span
+            className="project-group-count"
+            aria-label={`${total} chats`}
+          >
+            {total}
           </span>
-          <span className="project-group-name">{group.projectName}</span>
-        </button>
-        <span
-          className="project-group-count"
-          aria-label={`${total} chats`}
-        >
-          {total}
-        </span>
-      </div>
+        </div>
+      </SessionRailProjectMenuView>
 
       {collapsed ? null : (
         <div className="project-group-sessions">
