@@ -139,7 +139,7 @@ Covers config resolution (`go` default, `node` rejected), free port + token gene
 
 - `go:embed` cannot reach outside `apps/shell/`; always sync `apps/desktop/dist` → `apps/shell/frontend/dist` before `go build`.
 - Bridge remains an external process in packaged builds so the UI can still be browser-debugged.
-- On exit (window close / SIGINT / SIGTERM / `OnShutdown`): SIGTERM process group, then SIGKILL after grace (Unix `Setpgid`).
+- On exit (window close / SIGINT / SIGTERM / `OnShutdown`): SIGTERM process group, then SIGKILL after grace (Unix `Setpgid`). Windows: `TerminateJobObject` on a kill-on-close Job Object holding the bridge and everything it spawned; the job also reaps the tree if the shell itself dies.
 
 ## Env blockers / requirements
 
