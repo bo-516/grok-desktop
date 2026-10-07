@@ -7,17 +7,18 @@
  * via applySessionUpdate + eventId set dedupe and surfaces SessionState to handlers.
  */
 
-import type { ContentBlock, SessionState } from "@grok-desktop/acp-core";
+import type { SessionState } from "@grok-desktop/acp-core";
 import { createLiveBridgeDispatch } from "./liveBridgeDispatch";
 import { createLiveBridgeFs } from "./liveBridgeFs";
+import { createLiveBridgeModelCatalog } from "./liveBridgeModelCatalog";
 import type {
   AuthProbe,
   BridgeServerMsg,
   CliChannelResult,
   EnvironmentInfo,
+  LiveBridgeHandle,
   LiveBridgeHandlers,
   PoolEntry,
-  PreviewWorkspaceFileResult,
   ReadWorkspaceFileResult,
   SessionSpawnConfig,
   StartOpts,
@@ -57,102 +58,7 @@ type PendingCli = {
 export function connectLiveBridge(
   url: string,
   handlers: LiveBridgeHandlers,
-): {
-  start: (opts?: StartOpts) => boolean;
-  prompt: (
-    text: string,
-    sessionId?: string,
-    blocks?: ContentBlock[],
-  ) => boolean;
-  cancel: (sessionId?: string) => void;
-  permission: (optionId: string, sessionId?: string) => void;
-  closeSession: (sessionId: string) => boolean;
-  listPool: () => boolean;
-  checkEnvironment: () => boolean;
-  /**
-   * Cheap login-state probe (`check_auth` → `auth_state`). Safe on the 3s
-   * poll cadence because the bridge answers from an env read plus one stat;
-   * `checkEnvironment` spawns `grok --version` and must stay event-driven.
-   * @returns False when the socket is not open (the tick is simply skipped).
-   */
-  checkAuth: () => boolean;
-  /**
-   * `@` completion index.
-   * @param query Fragment after `@`.
-   * @param cwd Workspace to index. Omit only when no session is known — the
-   *   bridge then falls back to the last started session's cwd, which with a
-   *   multi-session pool may not be the workspace on screen.
-   */
-  listWorkspaceEntries: (
-    query: string,
-    cwd?: string,
-  ) => Promise<WorkspaceEntry[]>;
-  /** Write a workspace-relative file (diff review apply). */
-  writeWorkspaceFile: (
-    path: string,
-    content: string,
-    cwd?: string,
-  ) => Promise<{ ok: boolean; error?: string }>;
-  /**
-   * Read a workspace-relative file for @mention embedding.
-   * Guards (sensitive / size / binary / sandbox) run on the bridge.
-   */
-  readWorkspaceFile: (
-    path: string,
-    cwd?: string,
-  ) => Promise<ReadWorkspaceFileResult>;
-  /**
-   * Read a workspace file for the preview drawer (may truncate with flag).
-   * Sensitive / binary / outside still reject with reason.
-   */
-  previewWorkspaceFile: (
-    path: string,
-    cwd?: string,
-    maxBytes?: number,
-  ) => Promise<PreviewWorkspaceFileResult>;
-  setModel: (modelId: string, sessionId?: string) => boolean;
-  setMode: (modeId: string, sessionId?: string) => boolean;
-  compact: (instruction?: string, sessionId?: string) => boolean;
-  /**
-   * Branch the session into a peer (`_x.ai/session/fork` via bridge).
-   * @param sessionId Source session; omit to use the focused bridge session.
-   * @param opts Optional source/new cwd overrides.
-   * @returns cli_result envelope; `data` holds `{ newSessionId, … }` on success.
-   */
-  forkSession: (
-    sessionId?: string,
-    opts?: { sourceCwd?: string; newCwd?: string },
-  ) => Promise<CliChannelResult>;
-  /**
-   * Account weekly remaining (`_x.ai/billing` via bridge).
-   * @param sessionId Live session whose process carries the RPC; omit for focused.
-   * @returns cli_result envelope; `data` is the credits-config bag on success.
-   */
-  billing: (sessionId?: string) => Promise<CliChannelResult>;
-  /**
-   * Session context occupancy (`session/token_usage` via bridge).
-   * @param sessionId Live session whose process carries the RPC; omit for focused.
-   * @returns cli_result envelope; `data` is the usage bag on success.
-   */
-  tokenUsage: (sessionId?: string) => Promise<CliChannelResult>;
-  restartSession: (
-    sessionId: string,
-    spawnConfig?: SessionSpawnConfig,
-    alwaysApprove?: boolean,
-  ) => boolean;
-  /**
-   * Prefill the client reduce bucket (optimistic user row / seed canvas).
-   * @param session Canvas session snapshot; must carry a non-empty id.
-   */
-  seedSession: (session: SessionState) => void;
-  cli: (
-    command: string,
-    args?: Record<string, unknown>,
-    cwd?: string,
-  ) => Promise<CliChannelResult>;
-  close: () => void;
-  ready: Promise<void>;
-} {
+): LiveBridgeHandle {
   const ws = new WebSocket(url);
   const pendingCli = new Map<string, PendingCli>();
   /** Relay reduce + load-replay batching (shipped path; unit-tested via createLiveBridgeDispatch). */
@@ -176,6 +82,7 @@ export function connectLiveBridge(
   };
 
   const fsApi = createLiveBridgeFs(send);
+  const catalogApi = createLiveBridgeModelCatalog(send);
 
   function rejectCliRequests(error: Error): void {
     for (const pending of pendingCli.values()) {
@@ -190,6 +97,7 @@ export function connectLiveBridge(
   };
   ws.onerror = () => {
     fsApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
+    catalogApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
     // I4: do not leave sessions muted if error aborts a load window.
     dispatch.flushAllReplays();
@@ -198,6 +106,7 @@ export function connectLiveBridge(
   };
   ws.onclose = () => {
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
+    catalogApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
     // I4: force-close any open replay windows before clearing buckets.
     dispatch.flushAllReplays();
@@ -212,6 +121,9 @@ export function connectLiveBridge(
       return;
     }
     if (fsApi.handleServerMsg(msg)) {
+      return;
+    }
+    if (catalogApi.handleServerMsg(msg)) {
       return;
     }
     if (dispatch.handleServerMsg(msg)) {
@@ -386,6 +298,7 @@ export function connectLiveBridge(
       });
     },
     cli,
+    readModelCatalog: catalogApi.readModelCatalog,
     close: () => {
       try {
         ws.close();

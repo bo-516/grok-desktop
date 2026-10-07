@@ -170,10 +170,11 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(input, /composer-input-listening|data-listening/);
     assert.match(modeView, /role="radiogroup"/);
     assert.match(modeView, /aria-checked/);
-    assert.match(modeView, /aria-busy/);
-    // Pending must not expand the chip with "Switching to …" (layout flash).
-    assert.doesNotMatch(modeView, /Switching to \$\{modeLabel/);
-    assert.match(modeView, /modeLabel\(displayMode\)/);
+    // Mode switches wait in the background. The chip must not show a spinner.
+    assert.doesNotMatch(modeView, /aria-busy/);
+    assert.doesNotMatch(modeView, /Switching to/);
+    assert.doesNotMatch(modeView, /composer-mode-spinner/);
+    assert.match(modeView, /modeLabel\(mode\)/);
     // Mic chip must not swap its visible label to "Listening" (bar width flash).
     assert.doesNotMatch(view, /dictating\s*\?\s*["']Listening["']/);
     assert.match(view, /composer-mic-chip/);
@@ -794,10 +795,15 @@ describe("UI surface presence", () => {
   it("setModel/setMode call live bridge (not local-only) with pendingMode", () => {
     const store = readSrc("store/sessionStore.ts");
     assert.match(store, /live\.setModel/);
-    assert.match(store, /live\.setMode/);
+    assert.match(store, /beginModeSwitch/);
     assert.match(store, /promptQueue/);
     assert.match(store, /pendingMode/);
-    assert.match(store, /armPendingModeTimeout|clearPendingModeTimer/);
+    const hold = readSrc("store/sessionStoreModeHold.ts");
+    assert.match(hold, /setMode\(target, sid\)/);
+    assert.match(hold, /pendingMode/);
+    assert.match(hold, /armPendingModeTimeout/);
+    assert.match(hold, /heldPrompt/);
+    assert.match(hold, /mode set to/);
   });
 
   it("sandbox honesty note exists for macOS", () => {

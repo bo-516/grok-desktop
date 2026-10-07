@@ -10,6 +10,10 @@ import {
   tagSeedUserMessages,
 } from "./sessionLifecycle.js";
 import {
+  extractConfigOptions,
+  preferConfigOptions,
+} from "./sessionConfigOptions.js";
+import {
   extractAvailableModelsFromSessionResult,
   extractInitializeSessionMetadata,
   extractModelFromSessionResult,
@@ -166,6 +170,12 @@ export async function runAcpHandshake(
         cur.availableModels,
         modelsFromInit,
       ),
+      // Result body wins. An empty result must not wipe a config_option_update
+      // that arrived while session/load was in flight.
+      configOptions: preferConfigOptions(
+        extractConfigOptions(loadResult),
+        cur.configOptions,
+      ),
       agentCapabilities: cur.agentCapabilities ?? agentCapabilities,
       // Replay is finished by the time session/load answers, so the trailing
       // chunk's "streaming" must not survive: a live-looking last turn would
@@ -214,7 +224,13 @@ export async function runAcpHandshake(
       modelsFromInit,
     ),
     agentCapabilities,
-    configOptions: interim.configOptions,
+    // session/new carries configOptions on the result. Interim updates are only
+    // the fallback: the selects often arrive on the result with no earlier
+    // config_option_update.
+    configOptions: preferConfigOptions(
+      extractConfigOptions(session),
+      interim.configOptions,
+    ),
     title: interim.title,
   });
 

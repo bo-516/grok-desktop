@@ -248,6 +248,44 @@ describe("resolveThinkingEffort", () => {
       "medium",
     );
   });
+
+  it("uses the catalog row reasoningEffort when config and local pref are absent", () => {
+    const options = [
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High", default: true },
+      { id: "xhigh", label: "Extra High" },
+    ];
+    const models = [
+      {
+        id: "grok-4.7",
+        name: "Grok 4.7",
+        reasoningEffort: "xhigh",
+      },
+    ];
+    assert.equal(
+      resolveThinkingEffort(undefined, options, null, "grok-4.7", models),
+      "xhigh",
+    );
+    assert.equal(
+      resolveThinkingEffort(undefined, options, "high", "grok-4.7", models),
+      "high",
+    );
+    assert.equal(
+      resolveThinkingEffort(
+        [{ id: "reasoning_effort", currentValue: "medium" }],
+        options,
+        null,
+        "grok-4.7",
+        models,
+      ),
+      "medium",
+    );
+    assert.equal(
+      resolveThinkingEffort(undefined, options, null, "grok-4.5", models),
+      "high",
+    );
+  });
 });
 
 describe("formatThinkingLabel / formatEffortIdLabel", () => {

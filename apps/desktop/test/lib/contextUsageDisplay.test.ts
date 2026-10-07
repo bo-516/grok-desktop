@@ -327,4 +327,13 @@ describe("mergeAvailableModelsPreferContext", () => {
     );
     assert.equal(merged?.[0]?.reasoningEfforts?.[0]?.id, "xhigh");
   });
+
+  it("fills reasoningEffort when the primary row already has a window", () => {
+    const merged = mergeAvailableModelsPreferContext(
+      [{ id: "grok-4.7", totalContextTokens: 500_000 }],
+      [{ id: "grok-4.7", reasoningEffort: "xhigh" }],
+    );
+    assert.equal(merged?.[0]?.reasoningEffort, "xhigh");
+    assert.equal(merged?.[0]?.totalContextTokens, 500_000);
+  });
 });

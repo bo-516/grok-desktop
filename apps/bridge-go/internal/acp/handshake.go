@@ -145,6 +145,9 @@ func (c *Client) Handshake(opts HandshakeOpts) (HandshakeResult, error) {
 		// session/load replay may have already stored a catalog via
 		// available_commands_update; prefer that, then initialize `_meta`.
 		cur.AvailableCommands = preferCommands(cur.AvailableCommands, meta.AvailableCommands)
+		// Result body wins. An empty result must not wipe a config_option_update
+		// that arrived while session/load was in flight.
+		cur.ConfigOptions = preferConfigOptions(extractConfigOptions(loadResult), cur.ConfigOptions)
 		if cur.Status != StatusWaitingPermission {
 			cur.Status = StatusIdle
 		}
@@ -181,7 +184,10 @@ func (c *Client) Handshake(opts HandshakeOpts) (HandshakeResult, error) {
 	)
 	st.AvailableCommands = preferCommands(interim.AvailableCommands, meta.AvailableCommands)
 	st.AgentCapabilities = agentCaps
-	st.ConfigOptions = interim.ConfigOptions
+	// session/new carries configOptions on the result. Interim updates are only
+	// the fallback: grok-build often returns the selects on the result and never
+	// emits config_option_update before the RPC completes.
+	st.ConfigOptions = preferConfigOptions(extractConfigOptions(session), interim.ConfigOptions)
 	st.Title = interim.Title
 	c.ReplaceSessionState(st)
 

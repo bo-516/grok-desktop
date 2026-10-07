@@ -2,7 +2,9 @@
  * Thinking / reasoning-effort options for the composer control menu.
  * Same contract as grok-build: a model only accepts levels its menu
  * advertises (`config_option_update`, then that model's `reasoningEfforts`).
- * No family regex fallback and no Extra High injection.
+ * The selected effort is local pref, then config currentValue, then the
+ * catalog row's `reasoningEffort`, then the list default. No family regex
+ * fallback and no Extra High injection.
  */
 
 import type { AvailableModel } from "@grok-desktop/acp-core";
@@ -294,32 +296,64 @@ export function defaultEffortFromOptions(
 }
 
 /**
+ * Current effort on the matching catalog row (`_meta.reasoningEffort`).
+ * This is the agent's selection, distinct from the ladder row marked `default`
+ * (the recommended level). Empty or unmatched modelId yields null — never
+ * inherit `availableModels[0]`.
+ * @param modelId Live or cached model id or name.
+ * @param availableModels Catalog that may carry reasoningEffort per row.
+ * @returns Wire id, or null when that row did not declare a current effort.
+ */
+export function currentEffortFromCatalog(
+  modelId: string | undefined,
+  availableModels: AvailableModel[] | undefined,
+): string | null {
+  const id = (modelId ?? "").trim();
+  if (!id || !Array.isArray(availableModels) || availableModels.length === 0) {
+    return null;
+  }
+  const match = availableModels.find((m) => m.id === id || m.name === id);
+  const effort = match?.reasoningEffort?.trim();
+  return effort || null;
+}
+
+/**
  * Pick the effective effort for first paint / after agent options change.
- * Advertised menu: valid local pref → agent currentValue → list default.
- * Empty menu (handshake not in yet): keep pref or agent current, do not invent.
+ * Advertised menu: valid local pref → config currentValue → catalog
+ * reasoningEffort → list default. Empty menu (handshake not in yet): keep
+ * pref, config current, or catalog current; do not invent a family default.
  * Prefs the current advertised list does not include (e.g. `xhigh` on 4.5) drop.
- * @param configOptions Agent config snapshot (for currentValue).
+ * @param configOptions Agent config snapshot (for currentValue). Missing yields
+ *   no config current; the catalog effort is then eligible.
  * @param options Active thinking menu rows (empty = not advertised yet).
  * @param preferred Optional localStorage (or prior UI) preference.
- * @param _modelId Unused; kept so existing call sites type-check.
+ * @param modelId Model whose catalog row supplies reasoningEffort. Empty skips
+ *   the catalog current.
+ * @param availableModels Catalog rows. Omitted when the caller has no catalog;
+ *   existing call sites that only pass modelId keep the old priority.
  */
 export function resolveThinkingEffort(
   configOptions: unknown[] | undefined,
   options: ThinkingOption[],
   preferred?: string | null,
-  _modelId?: string,
+  modelId?: string,
+  availableModels?: AvailableModel[],
 ): ThinkingEffort {
   const valid = new Set(options.map((o) => o.id));
   const pref = typeof preferred === "string" ? preferred.trim() : "";
   const agentCurrent = currentEffortFromConfig(configOptions);
+  const catalogCurrent = currentEffortFromCatalog(modelId, availableModels);
   if (options.length === 0) {
-    return pref || agentCurrent || "";
+    return pref || agentCurrent || catalogCurrent || "";
   }
   if (pref && valid.has(pref)) {
     return pref;
   }
   if (agentCurrent && valid.has(agentCurrent)) {
     return agentCurrent;
+  }
+  if (catalogCurrent && valid.has(catalogCurrent)) {
+    return catalogCurrent;
   }
   return defaultEffortFromOptions(options);
 }
@@ -344,7 +378,8 @@ export function loadThinkingEffortRaw(): string | null {
  * Load persisted thinking effort, clamped to the advertised option list.
  * Empty `options` keeps the raw stored id (handshake not in yet).
  * @param options Advertised rows; default [] does not invent a family ladder.
- * @param modelId Unused; kept so existing call sites type-check.
+ * @param modelId Model id forwarded to resolveThinkingEffort. Without a catalog
+ *   argument it does not change the result.
  * @returns Stored id when valid or menu unknown; else the advertised default.
  */
 export function loadThinkingEffort(

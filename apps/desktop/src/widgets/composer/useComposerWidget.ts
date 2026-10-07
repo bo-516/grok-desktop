@@ -19,6 +19,8 @@ import {
 } from "react";
 import type { AvailableModel } from "@grok-desktop/acp-core";
 import { useSessionStore } from "../../store/sessionStore";
+import { useModelCatalogStore } from "../../store/modelCatalogStore";
+import { resolveComposerModelSources } from "@/lib/modelCatalog";
 import { useComposerCompletion } from "./useComposerCompletion";
 import { tryComposerMentionKey } from "./composerMentionKeys";
 import { useComposerAttachments } from "./useComposerAttachments";
@@ -53,7 +55,6 @@ export function useComposerWidget() {
   const connectionMode = useSessionStore((state) => state.connectionMode);
   const model = useSessionStore((state) => state.session.model);
   const mode = useSessionStore((state) => state.session.mode);
-  const pendingMode = useSessionStore((state) => state.pendingMode);
   const setMode = useSessionStore((state) => state.setMode);
   const setModel = useSessionStore((state) => state.setModel);
   const configOptions = useSessionStore(
@@ -62,12 +63,38 @@ export function useComposerWidget() {
   const availableModels = useSessionStore(
     (state) => state.session.availableModels ?? EMPTY_AVAILABLE_MODELS,
   );
+  const cachedModel = useModelCatalogStore((state) => state.model);
+  const cachedModels = useModelCatalogStore((state) => state.availableModels);
+  const cachedConfig = useModelCatalogStore((state) => state.configOptions);
+  /**
+   * Drafts have no handshake catalog. Use the window cache until the painted
+   * session reports its own models. A session list wins over the cache.
+   */
+  const composerSources = useMemo(
+    () =>
+      resolveComposerModelSources({
+        sessionModel: model,
+        sessionModels: availableModels,
+        sessionConfig: configOptions,
+        cachedModel,
+        cachedModels,
+        cachedConfig,
+      }),
+    [
+      availableModels,
+      cachedConfig,
+      cachedModel,
+      cachedModels,
+      configOptions,
+      model,
+    ],
+  );
   /** Live occupancy + last-turn billed usage for the context ring. */
   const tokenUsage = useSessionStore((state) => state.session.tokenUsage);
   /** Prebuilt ring view-model; null when the pref is off or occupancy is unknown. */
   const contextUsageDisplay = useContextUsageDisplay(
-    model,
-    availableModels,
+    composerSources.model,
+    composerSources.availableModels,
     tokenUsage,
   );
   const bridgeInfo = useSessionStore((state) => state.bridgeInfo);
@@ -100,10 +127,9 @@ export function useComposerWidget() {
   const { notice, showNotice, clearNotice } = useComposerNotice();
   const bar = useComposerBarControls({
     mode,
-    pendingMode,
-    model,
-    configOptions,
-    availableModels,
+    model: composerSources.model,
+    configOptions: composerSources.configOptions,
+    availableModels: composerSources.availableModels,
     setMode,
     setModel,
   });
@@ -124,7 +150,7 @@ export function useComposerWidget() {
   const completion = useComposerCompletion({
     commands: slash.commands,
     models: bar.models,
-    availableModels,
+    availableModels: composerSources.availableModels,
     currentModel: bar.model,
     listWorkspaceEntries,
     workspace,
@@ -155,6 +181,7 @@ export function useComposerWidget() {
     setDraftWithCaret: completion.setDraftWithCaret,
     showNotice,
     textareaRef,
+    getDraft: () => completion.draft,
   });
 
   const viewingSubagent = useSessionStore((state) => state.viewingSubagent);
@@ -255,8 +282,8 @@ export function useComposerWidget() {
    * Backspace / Delete, Esc interrupt, and Enter send.
    * Enter / Tab on a `/model` / `/effort` argument row applies chrome immediately
    * (via pickSuggestion); `@` / skill / command-name rows still insert.
-   * ⇧Tab always cycles Build → Plan → Ask (from pendingMode when in flight) so
-   * the three modes can be flipped without waiting for agent confirmation; plain
+   * ⇧Tab always cycles Build → Plan → Ask from the chip's current mode so
+   * the three modes can be flipped without waiting for grok-build; plain
    * Tab still accepts the active completion row when the menu is open.
    * While an IME is composing, all shortcuts are suppressed so Enter confirms
    * the candidate instead of sending.
@@ -379,7 +406,6 @@ export function useComposerWidget() {
     modeOptions: bar.modeOptions,
     notice,
     openFilePicker: media.openFilePicker,
-    pendingMode,
     removeAttachment: media.removeAttachment,
     stopDictation: dictation.stopDictation,
     toggleDictation: dictation.toggleDictation,

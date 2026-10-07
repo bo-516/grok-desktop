@@ -6,8 +6,11 @@
 /** Active settle timeout handle, or null when idle. */
 let pendingModeTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Default settle timeout when agent never confirms (ms). */
-export const PENDING_MODE_TIMEOUT_MS = 3000;
+/**
+ * Give up on session/set_mode when grok-build never finishes (ms).
+ * This is a failure, not a success: the chip reverts and a held prompt is not sent.
+ */
+export const PENDING_MODE_TIMEOUT_MS = 15_000;
 
 /**
  * Cancel the pending-mode settle timer if armed.
@@ -21,9 +24,10 @@ export function clearPendingModeTimer(): void {
 }
 
 /**
- * Arm a one-shot settle callback after the pending-mode timeout.
- * Replaces any previously armed timer.
- * @param onTimeout Callback when the agent has not confirmed in time.
+ * Arm a one-shot failure callback after the pending-mode timeout.
+ * Replaces any previously armed timer. The callback must revert; it must not
+ * treat silence as a successful mode switch.
+ * @param onTimeout Callback when session/set_mode has not finished in time.
  */
 export function armPendingModeTimeout(onTimeout: () => void): void {
   clearPendingModeTimer();

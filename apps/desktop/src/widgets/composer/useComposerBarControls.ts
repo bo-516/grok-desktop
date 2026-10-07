@@ -29,10 +29,11 @@ import {
 } from "./composerModes";
 
 export type UseComposerBarControlsArgs = {
-  /** Confirmed session mode from the store. */
+  /**
+   * Painted session mode. setMode writes this immediately, including while
+   * grok-build is still applying session/set_mode.
+   */
   mode: string | null | undefined;
-  /** Optimistic pending mode while bridge applies setMode. */
-  pendingMode: AgentMode | null;
   /** Session model id from the store. */
   model: string;
   /** Agent config_option_update snapshot. */
@@ -55,7 +56,6 @@ export type UseComposerBarControlsArgs = {
 export function useComposerBarControls(args: UseComposerBarControlsArgs) {
   const {
     mode,
-    pendingMode,
     model,
     configOptions,
     availableModels,
@@ -72,10 +72,15 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     const initialModel =
       args.model || loadPreferredModel() || args.availableModels[0]?.id || "";
     return resolveThinkingEffort(
-      undefined,
-      resolveThinkingOptions(undefined, initialModel, args.availableModels),
+      args.configOptions,
+      resolveThinkingOptions(
+        args.configOptions,
+        initialModel,
+        args.availableModels,
+      ),
       loadThinkingEffortRaw(),
       initialModel,
+      args.availableModels,
     );
   });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -97,6 +102,7 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
     models.find((m) => m.id === effectiveModel)?.label ??
     formatModelLabel(effectiveModel);
   const effortLabel = formatThinkingLabel(effort, thinkingOptions);
+  /** Chip mode. Updates as soon as the user picks, before the RPC returns. */
   const confirmedMode = normalizeAgentMode(mode);
 
   /**
@@ -113,9 +119,10 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
         thinkingOptions,
         loadThinkingEffortRaw() ?? prev,
         effectiveModel,
+        availableModels,
       ),
     );
-  }, [configOptions, effectiveModel, thinkingOptions]);
+  }, [availableModels, configOptions, effectiveModel, thinkingOptions]);
 
   /**
    * Select a mode explicitly from the popover (or ⇧Tab cycle).
@@ -131,20 +138,16 @@ export function useComposerBarControls(args: UseComposerBarControlsArgs) {
 
   /** Cycle mode via nextMode helper (⇧Tab when composer focused). */
   const cycleMode = useCallback(() => {
-    const base = pendingMode ?? confirmedMode;
-    selectMode(nextMode(base));
-  }, [confirmedMode, pendingMode, selectMode]);
+    selectMode(nextMode(confirmedMode));
+  }, [confirmedMode, selectMode]);
 
   const closeModeMenu = useCallback(() => {
     setModeMenuOpen(false);
   }, []);
 
   const toggleModeMenu = useCallback(() => {
-    if (pendingMode !== null) {
-      return;
-    }
     setModeMenuOpen((o) => !o);
-  }, [pendingMode]);
+  }, []);
 
   const closeMenu = useCallback(() => {
     setMenuOpen(false);

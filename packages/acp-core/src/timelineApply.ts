@@ -315,9 +315,11 @@ export function applySessionUpdateKind(
     }
     case "config_option_update": {
       // Store snapshot for chrome (model picker etc.); no timeline row.
+      // An empty array is a missing update, not a clear — wiping here hides
+      // the model and reasoning_effort selects the composer prefers.
       const configOptions = (update as { configOptions?: unknown[] })
         .configOptions;
-      if (!Array.isArray(configOptions)) {
+      if (!Array.isArray(configOptions) || configOptions.length === 0) {
         return state;
       }
       return { ...state, configOptions };
