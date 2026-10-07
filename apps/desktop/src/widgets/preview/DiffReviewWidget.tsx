@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applyHunkDecisions,
+  carryHunkDecisions,
   createDiffReview,
   setHunkDecision,
   type HunkDecision,
@@ -140,19 +141,7 @@ export function DiffReviewWidget(props: DiffReviewWidgetProps) {
        * counts match; otherwise leave pending (full newText wins for unset).
        */
       const fresh = createDiffReview(aligned.oldText, aligned.newText);
-      let reviewHunks = fresh.hunks;
-      if (reviewHunks.length === hunks.length) {
-        for (let i = 0; i < reviewHunks.length; i += 1) {
-          const prior = hunks[i];
-          if (prior && prior.decision !== "pending") {
-            reviewHunks = setHunkDecision(
-              reviewHunks,
-              reviewHunks[i]!.id,
-              prior.decision,
-            );
-          }
-        }
-      }
+      const reviewHunks = carryHunkDecisions(hunks, fresh.hunks);
       const content = applyHunkDecisions(
         aligned.oldText,
         aligned.newText,
@@ -176,6 +165,9 @@ export function DiffReviewWidget(props: DiffReviewWidgetProps) {
     }
   };
 
+  /** Full-file align has finished (any outcome); idle/loading are pre-settle. */
+  const fullFileSettled =
+    fullFile.state !== "idle" && fullFile.state !== "loading";
   /*
    * Idle/loading: allow the click so apply() can ensureFullFile first.
    * After settle: require canApply (whole/window only). Unavailable stays off.
@@ -184,16 +176,11 @@ export function DiffReviewWidget(props: DiffReviewWidgetProps) {
     applying ||
     applyGate.checking ||
     fullFile.state === "unavailable" ||
-    (fullFile.state !== "idle" &&
-      fullFile.state !== "loading" &&
-      !applyGate.canApply);
+    (fullFileSettled && !applyGate.canApply);
   const banner = fullFileBannerText(fullFile);
+  /** Gate reason under the Apply button; only once settled and blocked. */
   const footerHint =
-    fullFile.state === "idle" || fullFile.state === "loading"
-      ? null
-      : !applyGate.canApply
-        ? applyGate.reason
-        : null;
+    fullFileSettled && !applyGate.canApply ? applyGate.reason : null;
 
   if (hunks.length === 0) {
     return (

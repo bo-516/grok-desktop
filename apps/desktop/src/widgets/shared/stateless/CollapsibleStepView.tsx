@@ -58,6 +58,35 @@ export type CollapsibleStepViewProps = {
 };
 
 /**
+ * Build the header label slot for {@link CollapsibleStepView}.
+ * Pure: returns elements only (no hooks), so the rendered tree is identical to
+ * inlining it.
+ * @param opts.isShell True for the shell-toggle variant (always wrapped in
+ *   `shell-toggle-label` for flex alignment).
+ * @param opts.bareLabel Turn-step only: when true the label node is returned
+ *   as-is; otherwise wrapped in `turn-step-label`.
+ * @param opts.label Header text or richer node.
+ * @param opts.labelClassName Optional extra class on the wrapping span (ignored
+ *   when bare).
+ * @returns The label node to place beside the chevron.
+ */
+function stepLabelNode(opts: {
+  isShell: boolean;
+  bareLabel: boolean;
+  label: ReactNode;
+  labelClassName?: string;
+}): ReactNode {
+  const { isShell, bareLabel, label, labelClassName } = opts;
+  if (isShell) {
+    return <span className={cs("shell-toggle-label", labelClassName)}>{label}</span>;
+  }
+  if (bareLabel) {
+    return label;
+  }
+  return <span className={cs("turn-step-label", labelClassName)}>{label}</span>;
+}
+
+/**
  * Controlled collapsible step: chevron + aria-expanded + optional body.
  * Shell-toggle places the chevron after the label and draws a rule under the
  * header; turn-step keeps chevron-before-label geometry for nested rail rows.
@@ -113,13 +142,7 @@ export function CollapsibleStepView(props: CollapsibleStepViewProps) {
   );
 
   /** Label node: shell always wraps for flex; turn-step wraps unless bareLabel. */
-  const labelNode = isShell ? (
-    <span className={cs("shell-toggle-label", labelClassName)}>{label}</span>
-  ) : bareLabel ? (
-    label
-  ) : (
-    <span className={cs("turn-step-label", labelClassName)}>{label}</span>
-  );
+  const labelNode = stepLabelNode({ isShell, bareLabel, label, labelClassName });
 
   /**
    * After the expanded body is in the DOM, bring this unit into the nearest

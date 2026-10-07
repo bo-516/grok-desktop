@@ -9,10 +9,14 @@ import {
   changeRunsFromFileDiff,
   diffRowKey,
 } from "@/lib/diffChangeRuns";
-import { buildFileDiff } from "@/lib/diffCore";
+import {
+  buildFileDiff,
+  type DiffGap,
+  type DiffHunkBlock,
+  type FileDiff,
+} from "@/lib/diffCore";
 import { expandGap, splitDiffSourceLines } from "@/lib/diffGapExpand";
 import { createDiffReview } from "@/lib/diffHunkApply";
-import type { DiffGap, DiffHunkBlock, FileDiff } from "@/lib/diffCore";
 
 /** Fixtures: multi-sample old/new pairs. */
 const FIXTURES: Array<{ name: string; old: string; next: string }> = [

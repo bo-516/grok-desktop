@@ -14,9 +14,15 @@ export type PlanStatus = "pending" | "in_progress" | "completed" | string;
  * @returns Short display string; unknown values pass through with underscores spaced.
  */
 export function planStatusLabel(status: PlanStatus): string {
-  if (status === "completed") return "Done";
-  if (status === "in_progress") return "In progress";
-  if (status === "pending") return "Pending";
+  if (status === "completed") {
+    return "Done";
+  }
+  if (status === "in_progress") {
+    return "In progress";
+  }
+  if (status === "pending") {
+    return "Pending";
+  }
   return String(status).replace(/_/g, " ");
 }
 
@@ -28,10 +34,67 @@ export function planStatusLabel(status: PlanStatus): string {
  */
 export function planEntryLabel(entry: PlanEntry, step: number): string {
   const title = entry.title?.trim();
-  if (title) return title;
+  if (title) {
+    return title;
+  }
   const content = entry.content?.trim();
-  if (content) return content;
+  if (content) {
+    return content;
+  }
   return `Step ${step}`;
+}
+
+/** One renderable plan step with a stable, content-derived React key. */
+export type PlanRow = {
+  /**
+   * Unique within the list: `status|label|content`, suffixed `#n` (first free
+   * n ≥ 1) when that string is already taken so duplicate steps never collide.
+   */
+  key: string;
+  /** Source entry from session.plan. */
+  entry: PlanEntry;
+  /** 1-based position shown in the marker. */
+  step: number;
+  /** Entry status with missing values treated as "pending". */
+  status: PlanStatus;
+  /** Display label from {@link planEntryLabel}. */
+  label: string;
+};
+
+/**
+ * Pick the first key not yet in `used`: `base`, then `base#1`, `base#2`, …
+ * Pure apart from the caller-owned `used` set, which it does not mutate.
+ * @param base Preferred key derived from row content.
+ * @param used Keys already assigned to earlier rows.
+ * @returns A key guaranteed absent from `used`.
+ */
+function firstFreeKey(base: string, used: ReadonlySet<string>): string {
+  let candidate = base;
+  let n = 1;
+  while (used.has(candidate)) {
+    candidate = `${base}#${n}`;
+    n += 1;
+  }
+  return candidate;
+}
+
+/**
+ * Derive display rows (status, label, step, key) for the plan checklist.
+ * Keys come from row content rather than the array index; a repeated key gets
+ * an occurrence suffix so keys stay unique even for identical steps.
+ * @param entries Plan list in agent order (may be empty).
+ * @returns One row per entry, same order and length as `entries`.
+ */
+export function planRows(entries: PlanEntry[]): PlanRow[] {
+  const used = new Set<string>();
+  return entries.map((entry, index) => {
+    const step = index + 1;
+    const status = entry.status ?? "pending";
+    const label = planEntryLabel(entry, step);
+    const key = firstFreeKey(`${status}|${label}|${entry.content ?? ""}`, used);
+    used.add(key);
+    return { key, entry, step, status, label };
+  });
 }
 
 /**

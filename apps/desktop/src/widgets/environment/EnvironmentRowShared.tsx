@@ -1,5 +1,6 @@
 /**
- * Shared row anatomy for Environment lists: status dot, provenance chip, path.
+ * Shared row anatomy for Environment lists: status dot, provenance chip, path,
+ * plus the common "no matches" filter empty state.
  * Stateless pure presentation helpers used by MCP / Skills / stub pages.
  */
 
@@ -66,6 +67,19 @@ export function EnvironmentPathMeta(props: {
     <span className="env-row-meta" title={display.full}>
       <PathLabelView display={display} />
     </span>
+  );
+}
+
+/**
+ * Empty state shown when a list has rows but the local search / scope filter
+ * hides all of them. Stateless; identical copy across Environment pages.
+ */
+export function EnvironmentNoMatchesView() {
+  return (
+    <div className="env-empty">
+      <p className="env-empty-title">No matches</p>
+      <p className="env-empty-hint">Try a different search or scope filter.</p>
+    </div>
   );
 }
 

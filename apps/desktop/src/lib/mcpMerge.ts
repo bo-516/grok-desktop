@@ -82,6 +82,19 @@ function headerNamesFrom(headers: unknown): string[] | undefined {
 }
 
 /**
+ * Map a config `scope` string onto the closed McpRow scope set.
+ * @param scopeRaw CLI scope field ("" when missing / non-string).
+ * @returns "user" / "project" as-is, "unknown" for any other non-empty value,
+ *   undefined when empty (row then carries no scope).
+ */
+function normalizeConfigScope(scopeRaw: string): McpRow["scope"] {
+  if (scopeRaw === "user" || scopeRaw === "project") {
+    return scopeRaw;
+  }
+  return scopeRaw ? "unknown" : undefined;
+}
+
+/**
  * Parse one config MCP server from `mcp list --json`.
  * Accepts object rows; ignores non-objects. Values of env/headers are never kept.
  * @param raw One list element.
@@ -95,13 +108,7 @@ function normalizeConfigMcp(raw: unknown): McpRow | null {
   if (!name) {
     return null;
   }
-  const scopeRaw = str(obj, "scope");
-  const scope: McpRow["scope"] =
-    scopeRaw === "user" || scopeRaw === "project"
-      ? scopeRaw
-      : scopeRaw
-        ? "unknown"
-        : undefined;
+  const scope = normalizeConfigScope(str(obj, "scope"));
   const enabled =
     typeof obj.enabled === "boolean" ? obj.enabled : undefined;
   const source =
@@ -151,11 +158,10 @@ export function normalizeMcpList(configServers: unknown): McpRow[] {
   if (root && typeof root.raw === "string" && root.servers == null) {
     return [];
   }
+  // Bare array as-is; wrapper object → servers / mcpServers; anything else → [].
   const list = Array.isArray(configServers)
     ? configServers
-    : root
-      ? asArray(root.servers ?? root.mcpServers)
-      : [];
+    : asArray(root?.servers ?? root?.mcpServers);
   return mapRows(list, normalizeConfigMcp);
 }
 
@@ -175,14 +181,10 @@ export function normalizeDoctorHealth(
   if (!root) {
     return out;
   }
-  // Single-server doctor sometimes is the server object itself.
   const servers = asArray(root.servers);
-  const items =
-    servers.length > 0
-      ? servers
-      : typeof root.name === "string"
-        ? [root]
-        : [];
+  // Single-server doctor sometimes is the server object itself.
+  const singleServer = typeof root.name === "string" ? [root] : [];
+  const items = servers.length > 0 ? servers : singleServer;
   for (const item of items) {
     const obj = asRecord(item);
     if (!obj) {

@@ -60,9 +60,7 @@ describe("startLiveBridgeSession guard (T3)", () => {
       connectionMode: "live-bridge" | "disconnected" | "connecting";
       bridgeInfo: string;
       lastError: string | null;
-      live: ReturnType<
-        typeof import("@/store/sessionStoreLive").startLiveBridgeSession
-      > extends Promise<void>
+      live: ReturnType<typeof startLiveBridgeSession> extends Promise<void>
         ? unknown
         : never;
       catalog: never[];
@@ -98,7 +96,7 @@ describe("startLiveBridgeSession guard (T3)", () => {
     };
 
     /** Canvas sets that touch viewingSessionId after connect (post-await). */
-    const viewingSets: (string | null | undefined)[] = [];
+    const viewingSets: Array<string | null | undefined> = [];
 
     const get = () => state as never;
     const set = (partial: Partial<Slice> | ((s: Slice) => Partial<Slice>)) => {

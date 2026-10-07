@@ -870,7 +870,7 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(paletteHook, /sessionsToPaletteItems/);
     const paletteRow = readSrc("widgets/CommandPaletteItemView.tsx");
     assert.match(paletteRow, /OverflowTextView/);
-    assert.match(paletteLib, /kind: \"mcp\"|kind: \"skill\"/);
+    assert.match(paletteLib, /kind: "mcp"|kind: "skill"/);
     assert.match(paletteLib, /buildPaletteCatalog/);
     const composer = readSrc("widgets/composer/useComposerWidget.ts");
     assert.match(composer, /useComposerFocusEvents/);
@@ -881,7 +881,7 @@ describe("UI surface presence", () => {
     const slashLib = readSrc("lib/slashCatalog.ts");
     assert.match(slashLib, /withCachedSlashCatalog/);
     assert.match(slashLib, /desktopSlashCommands/);
-    assert.match(readSrc("lib/slashBuiltins.ts"), /name: \"model\"|name: \"effort\"/);
+    assert.match(readSrc("lib/slashBuiltins.ts"), /name: "model"|name: "effort"/);
     assert.match(composer, /bindTryLocalSlashFromBar|tryLocalSlash/);
     assert.match(composer, /applyLocalSlashDraftFromBar|applyArgDraft/);
     assert.match(paletteLib, /prefill_model|prefill_effort/);

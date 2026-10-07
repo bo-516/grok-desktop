@@ -143,7 +143,13 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
     if (live && !userToggledRef.current) {
       setIsOpen(true);
     }
-  }, [live, unit.activity]);
+    /*
+     * unit.totalMs feeds the sanity cap above. It is derived from activity in
+     * buildTurnUnit, so it only changes alongside a new unit.activity; a run
+     * without a live edge is idempotent anyway (no collapse; re-open only while
+     * live and untoggled, which already holds).
+     */
+  }, [live, unit.activity, unit.totalMs]);
 
   /** Change list always opens the preview drawer (never expands in-panel). */
   const changeSummary =

@@ -157,3 +157,30 @@ export function setHunkDecision(
 ): ReviewableHunk[] {
   return hunks.map((h) => (h.id === hunkId ? { ...h, decision } : h));
 }
+
+/**
+ * Carry accept/reject decisions from a previous hunk list onto a rebuilt one
+ * (e.g. fragment hunks → full-file hunks after disk alignment), by index.
+ * Only transfers when both lists have the same length; otherwise index mapping
+ * is unreliable and `fresh` is returned untouched (its own decisions, normally
+ * all pending, win). Pending prior hunks never overwrite a fresh decision.
+ * @param prior Hunks holding the user's decisions (may be stale fragment hunks).
+ * @param fresh Newly built hunks whose ids / lines are authoritative.
+ * @returns New array with decided hunks copied over; `fresh` itself when the
+ *   lengths differ.
+ */
+export function carryHunkDecisions(
+  prior: ReviewableHunk[],
+  fresh: ReviewableHunk[],
+): ReviewableHunk[] {
+  if (prior.length !== fresh.length) {
+    return fresh;
+  }
+  return fresh.map((hunk, i) => {
+    const decision = prior[i]?.decision;
+    if (decision === undefined || decision === "pending") {
+      return hunk;
+    }
+    return { ...hunk, decision };
+  });
+}

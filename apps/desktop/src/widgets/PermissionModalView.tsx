@@ -13,19 +13,24 @@ export function PermissionModalView() {
   const respondPermission = useSessionStore((s) => s.respondPermission);
   const [submitting, setSubmitting] = useState(false);
   const firstButtonRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * Identity of the open request; undefined when no permission is pending
+   * (`requestId` is required on PermissionRequest). The effect below keys on
+   * this alone so unrelated `pending` object churn does not steal focus.
+   */
+  const requestId = pending?.requestId;
 
   // Focus primary action when a new permission arrives; reset submit guard.
   useEffect(() => {
-    if (!pending) {
-      setSubmitting(false);
+    setSubmitting(false);
+    if (requestId === undefined) {
       return;
     }
-    setSubmitting(false);
     const id = requestAnimationFrame(() => {
       firstButtonRef.current?.focus();
     });
     return () => cancelAnimationFrame(id);
-  }, [pending?.requestId]);
+  }, [requestId]);
 
   if (!pending) {
     return null;

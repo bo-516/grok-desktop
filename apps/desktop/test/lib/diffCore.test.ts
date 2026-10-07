@@ -38,13 +38,13 @@ describe("diffCore regression (§1.2)", () => {
 
   it("3000-line file with 20 edits is +20/−20", () => {
     const lines = Array.from({ length: 3000 }, (_, i) => `line-${i}`);
-    const oldT = lines.join("\n") + "\n";
+    const oldT = `${lines.join("\n")}\n`;
     const edited = lines.slice();
     for (let k = 0; k < 20; k += 1) {
       const idx = 50 + k * 100;
       edited[idx] = `changed-${k}`;
     }
-    const newT = edited.join("\n") + "\n";
+    const newT = `${edited.join("\n")}\n`;
     const h = buildLineDiff(oldT, newT);
     assert.equal(h.added, 20);
     assert.equal(h.removed, 20);
@@ -75,10 +75,10 @@ describe("diffCore dual line numbers + hunk shape", () => {
 
   it("single-line change produces one hunk with context rows", () => {
     const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`);
-    const oldT = lines.join("\n") + "\n";
+    const oldT = `${lines.join("\n")}\n`;
     const edited = lines.slice();
     edited[4] = "CHANGED";
-    const newT = edited.join("\n") + "\n";
+    const newT = `${edited.join("\n")}\n`;
     const file = buildFileDiff(oldT, newT, { context: 3 });
     const hunks = file.blocks.filter(
       (b): b is DiffHunkBlock => b.kind === "hunk",
@@ -127,9 +127,9 @@ describe("diffCore degrade gates", () => {
   it("near-total rewrite on 8000 lines sets degraded within a bound", () => {
     const n = 8000;
     const oldT =
-      Array.from({ length: n }, (_, i) => `old-${i}`).join("\n") + "\n";
+      `${Array.from({ length: n }, (_, i) => `old-${i}`).join("\n")}\n`;
     const newT =
-      Array.from({ length: n }, (_, i) => `new-${i}`).join("\n") + "\n";
+      `${Array.from({ length: n }, (_, i) => `new-${i}`).join("\n")}\n`;
     const t0 = performance.now();
     const file = buildFileDiff(oldT, newT, {
       maxEditLength: DIFF_MAX_EDIT_LENGTH,
@@ -142,13 +142,13 @@ describe("diffCore degrade gates", () => {
 
   it("3000 lines / 600 edits is not degraded under design cap", () => {
     const lines = Array.from({ length: 3000 }, (_, i) => `line-${i}`);
-    const oldT = lines.join("\n") + "\n";
+    const oldT = `${lines.join("\n")}\n`;
     const edited = lines.slice();
     for (let k = 0; k < 600; k += 1) {
       const idx = Math.floor((k * 3000) / 600);
       edited[idx] = `changed-${k}`;
     }
-    const newT = edited.join("\n") + "\n";
+    const newT = `${edited.join("\n")}\n`;
     const file = buildFileDiff(oldT, newT, {
       maxEditLength: DIFF_MAX_EDIT_LENGTH,
     });

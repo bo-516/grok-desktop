@@ -354,6 +354,25 @@ function emptySnapshot(rawFallback?: string): InspectSnapshot {
 }
 
 /**
+ * Pick the raw external-compat cell list from whichever shape the CLI sent.
+ * Precedence: `externalCompat.cells` (object form) → `externalCompat` itself
+ * (bare array form) → legacy top-level `compat`.
+ * @param root Parsed inspect root record.
+ * @returns Unvalidated candidate list (may be undefined / a non-array);
+ *   `mapRows` downstream treats anything that is not an array as empty.
+ */
+function pickCompatCells(root: Record<string, unknown>): unknown {
+  const externalCompat = asRecord(root.externalCompat);
+  if (externalCompat != null) {
+    return externalCompat.cells;
+  }
+  if (Array.isArray(root.externalCompat)) {
+    return root.externalCompat;
+  }
+  return root.compat;
+}
+
+/**
  * Normalize `grok inspect --json` into the desktop model.
  * Accepts the bridge's `{ raw: string }` text fallback and any missing /
  * mistyped field; unknown source types degrade to "unknown" rather than
@@ -379,13 +398,7 @@ export function normalizeInspect(raw: unknown): InspectSnapshot {
 
   const configSources = asRecord(root.configSources);
   const layersRaw = configSources?.layers;
-  const externalCompat = asRecord(root.externalCompat);
-  const compatCells =
-    externalCompat != null
-      ? externalCompat.cells
-      : Array.isArray(root.externalCompat)
-        ? root.externalCompat
-        : root.compat;
+  const compatCells = pickCompatCells(root);
 
   return {
     grokVersion: str(root, "grokVersion"),

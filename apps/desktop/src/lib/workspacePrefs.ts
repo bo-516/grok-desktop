@@ -259,7 +259,11 @@ export function collectProjectWorkspacePaths(
     if (na !== nb) {
       return na < nb ? -1 : 1;
     }
-    return a < b ? -1 : a > b ? 1 : 0;
+    // Same display name: full path tiebreak (equal paths cannot occur — Set).
+    if (a === b) {
+      return 0;
+    }
+    return a < b ? -1 : 1;
   });
 }
 
