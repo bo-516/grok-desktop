@@ -9,41 +9,30 @@
  *   status/model/mode, and emits a single onState
  * Windows are per sessionId (I3). Open windows close on socket close / error /
  * ~20s timeout (I4). Missing replay_begin keeps per-update fan-out (I6).
+ *
+ * Window timers live in liveBridgeReplay; handler-only messages route through
+ * liveBridgeNotices. This module keeps the reduce buckets and SessionState routing.
  */
 
-import type { SessionState, SessionUpdate } from "@grok-desktop/acp-core";
+import type { SessionState } from "@grok-desktop/acp-core";
 import {
   applySessionLifecycle,
   createSessionReduceBucket,
   hydrateSessionBucket,
   reduceSessionUpdate,
-  replayEndCanvasStatus,
   type SessionReduceBucket,
 } from "../lib/sessionReduce";
+import {
+  applyReplayEndAuthoritative,
+  createReplayWindowTracker,
+  reduceReplayEndUpdates,
+  REPLAY_TIMEOUT_MS,
+  type ReplayDispatchClock,
+} from "./liveBridgeReplay";
+import { routeBridgeNotice } from "./liveBridgeNotices";
 import type { BridgeServerMsg, LiveBridgeHandlers } from "./liveBridgeTypes";
 
-/** Default max time a replay window may stay open before forced flush (ms). */
-export const REPLAY_TIMEOUT_MS = 20_000;
-
-/**
- * Injectable timers for tests (fake clock). Production uses global timers.
- */
-export type ReplayDispatchClock = {
-  setTimeout: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
-  clearTimeout: (id: ReturnType<typeof setTimeout>) => void;
-};
-
-/** Production clock. */
-const defaultClock: ReplayDispatchClock = {
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
-  clearTimeout: (id) => globalThis.clearTimeout(id),
-};
-
-/** Open replay window bookkeeping for one session. */
-type ReplayWindow = {
-  /** Timeout handle that forces flush if the bridge never sends replay_end. */
-  timer: ReturnType<typeof setTimeout>;
-};
+export { REPLAY_TIMEOUT_MS, type ReplayDispatchClock };
 
 /**
  * Options for createLiveBridgeDispatch.
@@ -96,12 +85,14 @@ export function createLiveBridgeDispatch(
   opts: LiveBridgeDispatchOpts,
 ): LiveBridgeDispatch {
   const handlers = opts.handlers;
-  const clock = opts.clock ?? defaultClock;
-  const replayTimeoutMs = opts.replayTimeoutMs ?? REPLAY_TIMEOUT_MS;
   /** Per-session reduce state for the relay path. */
   const reduceBuckets = new Map<string, SessionReduceBucket>();
-  /** Sessions currently inside a silent replay window (I3 isolation). */
-  const replayingSessions = new Map<string, ReplayWindow>();
+  /** Silent replay windows + recently-replayed marks for this connection. */
+  const replayWindows = createReplayWindowTracker({
+    clock: opts.clock,
+    timeoutMs: opts.replayTimeoutMs ?? REPLAY_TIMEOUT_MS,
+    onFlush: paintFlushedReplay,
+  });
 
   /**
    * Resolve or create the reduce bucket for a session id.
@@ -142,70 +133,16 @@ export function createLiveBridgeDispatch(
   }
 
   /**
-   * Arm or replace the I4 timeout for a session's replay window.
-   * @param sessionId Session whose window must eventually close.
+   * Notify the store with a force-closed window's bucket (timeout / error /
+   * socket close). Stamps the id first so catalog upserts key correctly.
+   * @param sessionId Session whose window the tracker just closed.
    */
-  function armReplayTimeout(sessionId: string): void {
-    const prev = replayingSessions.get(sessionId);
-    if (prev) {
-      clock.clearTimeout(prev.timer);
-    }
-    const timer = clock.setTimeout(() => {
-      // Bridge never closed the window — force one paint so the session is not mute.
-      flushReplaySession(sessionId);
-    }, replayTimeoutMs);
-    replayingSessions.set(sessionId, { timer });
-  }
-
-  /**
-   * Close one session's replay window and notify the store with current bucket state.
-   * @param sessionId Session to flush.
-   */
-  function flushReplaySession(sessionId: string): void {
-    const win = replayingSessions.get(sessionId);
-    if (!win) {
-      return;
-    }
-    clock.clearTimeout(win.timer);
-    replayingSessions.delete(sessionId);
+  function paintFlushedReplay(sessionId: string): void {
     const bucket = bucketFor(sessionId);
     if (sessionId && !bucket.state.id) {
       bucket.state = { ...bucket.state, id: sessionId };
     }
     handlers.onState(bucket.state, { recency: "passive" });
-  }
-
-  /**
-   * Close every open replay window (socket close / hard error).
-   */
-  function flushAllReplays(): void {
-    const ids = [...replayingSessions.keys()];
-    for (const id of ids) {
-      flushReplaySession(id);
-    }
-  }
-
-  /**
-   * Sessions that recently finished a load-replay batch. Go bridge still emits
-   * a post-handshake `state` with an empty timeline (it never holds one); that
-   * must not wipe the client-reduced history from replay_end.
-   */
-  const recentlyReplayed = new Set<string>();
-
-  /**
-   * Apply authoritative lifecycle fields from replay_end (T7).
-   * @param bucket Target reduce bucket.
-   * @param msg replay_end payload.
-   */
-  function applyReplayEndAuthoritative(
-    bucket: SessionReduceBucket,
-    msg: Extract<BridgeServerMsg, { type: "replay_end" }>,
-  ): SessionState {
-    return applySessionLifecycle(bucket, {
-      status: replayEndCanvasStatus(msg.status),
-      model: msg.model,
-      mode: msg.mode,
-    });
   }
 
   /**
@@ -224,7 +161,7 @@ export function createLiveBridgeDispatch(
        * snapshots. Closing the window + painting empty blanks the catalog seed
        * and aborts silent batching — ignore empty hydrates until replay_end.
        */
-      if (msg.session.id && replayingSessions.has(msg.session.id) && incomingEmpty) {
+      if (msg.session.id && replayWindows.isOpen(msg.session.id) && incomingEmpty) {
         return true;
       }
       /**
@@ -237,7 +174,7 @@ export function createLiveBridgeDispatch(
         incomingEmpty &&
         (bucket.state.timeline?.length ?? 0) > 0 &&
         (bucket.state.id === incoming.id ||
-          recentlyReplayed.has(incoming.id) ||
+          replayWindows.wasRecentlyReplayed(incoming.id) ||
           !bucket.state.id);
       // Single full-snapshot entry: ownership merge lives inside hydrate.
       // Keep eventId ring when preserving history so live updates still dedupe.
@@ -250,20 +187,16 @@ export function createLiveBridgeDispatch(
         reduceBuckets.set(msg.session.id, bucket);
       }
       // Non-empty full hydrate ends any open replay for this session (I4-safe).
-      const win = replayingSessions.get(msg.session.id);
-      if (win) {
-        clock.clearTimeout(win.timer);
-        replayingSessions.delete(msg.session.id);
-      }
+      const closedReplay = replayWindows.close(msg.session.id);
       handlers.onState(
         nextSession,
-        win ? { recency: "passive" } : undefined,
+        closedReplay ? { recency: "passive" } : undefined,
       );
       return true;
     }
 
     if (msg.type === "replay_begin") {
-      armReplayTimeout(msg.sessionId);
+      replayWindows.arm(msg.sessionId);
       // Load replay re-applies the full transcript. Drop catalog seed body so
       // chunks are not double-appended on top of the cache (identity merge is
       // best-effort; a clean base is safer). Keep id / workspace / model.
@@ -302,7 +235,7 @@ export function createLiveBridgeDispatch(
       const next = reduceSessionUpdate(bucket, msg.update, msg.eventId);
       const applied = next !== before;
       // Silent reduce during load replay — bucket only, no store notify.
-      if (replayingSessions.has(msg.sessionId)) {
+      if (replayWindows.isOpen(msg.sessionId)) {
         return true;
       }
       if (handlers.onSessionUpdate) {
@@ -323,43 +256,19 @@ export function createLiveBridgeDispatch(
       if (msg.sessionId && !bucket.state.id) {
         bucket.state = { ...bucket.state, id: msg.sessionId };
       }
-      const win = replayingSessions.get(msg.sessionId);
-      if (win) {
-        clock.clearTimeout(win.timer);
-        replayingSessions.delete(msg.sessionId);
-      }
+      replayWindows.close(msg.sessionId);
       // Node path: already-reduced snapshot — ownership-merge so missing
       // orchestration maps (subagents/goal) do not wipe live cards.
       // Go path: ordered raw updates.
       if (msg.session) {
         hydrateSessionBucket(bucket, msg.session, { clearDedupe: true });
       } else {
-        for (const item of msg.updates ?? []) {
-          // Tolerate both {update,eventId} wire items and bare SessionUpdate.
-          const update =
-            item &&
-            typeof item === "object" &&
-            "update" in item &&
-            item.update
-              ? item.update
-              : (item as unknown as SessionUpdate);
-          const eventId =
-            item && typeof item === "object" && "eventId" in item
-              ? item.eventId
-              : undefined;
-          if (update && typeof update === "object" && "sessionUpdate" in update) {
-            reduceSessionUpdate(bucket, update, eventId);
-          }
-        }
+        reduceReplayEndUpdates(bucket, msg.updates);
       }
       // T7: override batch-reduce streaming residue with authoritative lifecycle.
       const finalState = applyReplayEndAuthoritative(bucket, msg);
       if (msg.sessionId) {
-        recentlyReplayed.add(msg.sessionId);
-        // Drop the mark after a quiet window so a later true empty session can hydrate.
-        clock.setTimeout(() => {
-          recentlyReplayed.delete(msg.sessionId);
-        }, 5_000);
+        replayWindows.markReplayed(msg.sessionId);
       }
       handlers.onState(finalState, { recency: "passive" });
       return true;
@@ -387,57 +296,22 @@ export function createLiveBridgeDispatch(
       return true;
     }
 
-    if (msg.type === "pool") {
-      handlers.onPool?.(msg.entries);
-      return true;
+    // Hard error: if session-scoped and replaying, flush that window (I4)
+    // before the error handler runs.
+    if (msg.type === "error" && msg.sessionId && replayWindows.isOpen(msg.sessionId)) {
+      replayWindows.flush(msg.sessionId);
     }
-    if (msg.type === "environment") {
-      handlers.onEnvironment?.(msg.env);
-      return true;
-    }
-    if (msg.type === "auth_state") {
-      handlers.onAuthState?.(msg.auth);
-      return true;
-    }
-    if (msg.type === "info") {
-      handlers.onInfo?.(msg.message, msg.sessionId);
-      return true;
-    }
-    if (msg.type === "error") {
-      // Hard error: if session-scoped and replaying, flush that window (I4).
-      if (msg.sessionId && replayingSessions.has(msg.sessionId)) {
-        flushReplaySession(msg.sessionId);
-      }
-      handlers.onError?.(msg.message, msg.sessionId);
-      return true;
-    }
-    if (msg.type === "stderr") {
-      handlers.onStderr?.(msg.text, msg.sessionId);
-      return true;
-    }
-    if (msg.type === "hello") {
-      handlers.onHello?.(msg.cwd, msg.poolCapacity, {
-        impl: msg.impl,
-        version: msg.version,
-      });
-      return true;
-    }
-    if (msg.type === "restart_required") {
-      handlers.onRestartRequired?.(msg);
-      return true;
-    }
-
-    return false;
+    return routeBridgeNotice(handlers, msg);
   }
 
   return {
     handleServerMsg,
     seedSession,
-    flushAllReplays,
+    flushAllReplays: replayWindows.flushAll,
     clearBuckets: () => {
       reduceBuckets.clear();
     },
-    replayingSessionIds: () => [...replayingSessions.keys()],
+    replayingSessionIds: replayWindows.openIds,
     bucketFor,
   };
 }
