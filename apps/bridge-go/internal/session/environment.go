@@ -3,6 +3,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,25 @@ import (
 // minGrokVersion is the lowest grok CLI CheckEnvironment will mark ok.
 // Floor matches the removed Node bridge: major.minor.patch 0.9.0.
 const minGrokVersion = "0.9.0"
+
+// defaultVersionProbeTimeout bounds one `grok --version` run when the caller
+// passes no timeout. It is deliberately generous: the first exec of a newly
+// installed or updated binary on macOS stalls while the system assesses it
+// (measured 0.25-0.8s for a tiny script at idle and up to 5.7s under load),
+// and a slow disk adds more. Too short and a healthy CLI is reported as
+// broken; too long only delays the error for a CLI that truly hangs.
+const defaultVersionProbeTimeout = 15 * time.Second
+
+// versionProbeTimeout is the budget CheckEnvironment gives `grok --version`.
+// A package var, not a const, only so tests can swap in a generous value for
+// the happy path and a tiny one for the timeout path. Production never writes
+// it; tests that do must not run in parallel (they already use t.Setenv).
+var versionProbeTimeout = defaultVersionProbeTimeout
+
+// versionProbeWaitDelay caps how long ReadGrokVersion keeps waiting for the
+// output pipes after the CLI was killed (or exited). Without it a grandchild
+// that inherited stdout would hold the pipe open and block past the timeout.
+const versionProbeWaitDelay = time.Second
 
 // semverPattern finds the first major.minor.patch in a version line.
 // Extra text such as "grok 1.0.0 (abc)" is ignored after the triple.
@@ -105,40 +125,42 @@ func ProbeAuthSource() (authed bool, authSource, authPathChecked string) {
 	return false, "none", authPathChecked
 }
 
-// ReadGrokVersion runs `grok --version` with a soft timeout.
-func ReadGrokVersion(bin string, timeoutMs int) *string {
-	if timeoutMs <= 0 {
-		timeoutMs = 3000
+// ReadGrokVersion runs `bin --version` and returns its first non-empty output
+// line (stdout and stderr combined, trimmed). A non-zero exit still yields the
+// line when the CLI printed one, so the version check can judge it.
+//
+// @param bin Path of the grok CLI, normally from spawn.ResolveGrokBin. A path
+// that cannot be executed is not an error here: it reads as "no output".
+// @param timeout Budget for the whole run; <= 0 uses defaultVersionProbeTimeout.
+// On expiry the process is killed and its pipes are abandoned after
+// versionProbeWaitDelay, so the call returns within about timeout + 1s even if
+// a grandchild keeps stdout open.
+// @returns line is the first non-empty line, or nil when the CLI printed
+// nothing (failed exec, or exit without output). timedOut is true only when
+// the deadline cut the run short; line is then nil, and callers should say the
+// CLI was slow rather than call its output unparseable.
+func ReadGrokVersion(bin string, timeout time.Duration) (line *string, timedOut bool) {
+	if timeout <= 0 {
+		timeout = defaultVersionProbeTimeout
 	}
-	cmd := exec.Command(bin, "--version")
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "--version")
 	cmd.Env = os.Environ()
+	cmd.WaitDelay = versionProbeWaitDelay
 	spawn.HideConsoleWindow(cmd)
-	done := make(chan string, 1)
-	go func() {
-		out, err := cmd.CombinedOutput()
-		if err != nil && len(out) == 0 {
-			done <- ""
-			return
-		}
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			if t := strings.TrimSpace(line); t != "" {
-				done <- t
-				return
-			}
-		}
-		done <- ""
-	}()
-	select {
-	case v := <-done:
-		if v == "" {
-			return nil
-		}
-		return &v
-	case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
-		_ = cmd.Process.Kill()
-		return nil
+	out, err := cmd.CombinedOutput()
+	// A clean exit wins even if the deadline passed meanwhile; only a run the
+	// context killed (err set by the kill) counts as a timeout.
+	if err != nil && ctx.Err() != nil {
+		return nil, true
 	}
+	for _, raw := range strings.Split(string(out), "\n") {
+		if t := strings.TrimSpace(raw); t != "" {
+			return &t, false
+		}
+	}
+	return nil, false
 }
 
 // parseSemver returns the first major.minor.patch in raw.
@@ -212,10 +234,34 @@ func grokVersionSupported(versionRaw *string, min string) versionSupport {
 	return versionSupport{OK: true, Message: "grok " + pretty + " ok", Parsed: pretty}
 }
 
+// grokVersionTimedOut is the verdict for a `grok --version` run that
+// ReadGrokVersion killed at its deadline. Nothing is parsed: the CLI never
+// answered, so the message names the wait instead of blaming the output
+// (which is what the "Unable to parse … (null)" text would wrongly imply).
+//
+// @param timeout The budget that expired, printed as a Go duration ("15s").
+// @param min Version floor, echoed so the text reads like the other failures.
+// @returns OK false with empty Parsed and a message pointing at the CLI.
+func grokVersionTimedOut(timeout time.Duration, min string) versionSupport {
+	return versionSupport{
+		OK: false,
+		Message: fmt.Sprintf(
+			"Timed out after %s waiting for `grok --version`; need ≥ %s. Run `grok --version` in a terminal to check the CLI.",
+			timeout, min,
+		),
+	}
+}
+
 // CheckEnvironment aggregates CLI, version floor, and login probe results.
 // Order matches the removed Node checker: missing binary, then version floor,
-// then login. A logged-in user with grok < 0.9.0 or an unparseable version
-// still gets ok=false. poolCapacity < 1 reads BRIDGE_POOL_CAPACITY.
+// then login. A logged-in user with grok < 0.9.0, an unparseable version, or a
+// `grok --version` that outlives versionProbeTimeout still gets ok=false; the
+// timeout has its own message so a slow CLI is not reported as unparseable.
+// The version probe can block for up to versionProbeTimeout (+ ~1s pipe
+// drain), so run it off any path that must answer quickly.
+//
+// @param poolCapacity Echoed in the result; < 1 reads BRIDGE_POOL_CAPACITY.
+// @returns The probe snapshot for the `environment` message; never carries secrets.
 func CheckEnvironment(poolCapacity int) EnvironmentInfo {
 	if poolCapacity < 1 {
 		poolCapacity = PoolCapacityFromEnv()
@@ -230,8 +276,11 @@ func CheckEnvironment(poolCapacity int) EnvironmentInfo {
 		}
 	}
 	grokPath := bin
-	version := ReadGrokVersion(bin, 3000)
+	version, timedOut := ReadGrokVersion(bin, versionProbeTimeout)
 	support := grokVersionSupported(version, minGrokVersion)
+	if timedOut {
+		support = grokVersionTimedOut(versionProbeTimeout, minGrokVersion)
+	}
 	if !support.OK {
 		return EnvironmentInfo{
 			GrokPath: &grokPath, Version: version, Authed: authed, AuthSource: authSource,

@@ -7,7 +7,7 @@ Go implementation of the grok-desktop local bridge. This is the only bridge proc
 - Spawns real `grok agent stdio` only — no mock agent product path
 - Does **not** port timeline reduce; forwards raw `session_update` to the UI
 - Session ops (`set_model`, `set_mode`, `compact`, `token_usage`, `fork_session`) and the CLI channel are the product protocol
-- `check_environment` marks `ok=false` when `grok --version` is missing, unparseable, or below `0.9.0`, even if the user is logged in
+- `check_environment` marks `ok=false` when `grok --version` is missing, unparseable, below `0.9.0`, or silent for 15s (reported as a timeout, not as unparseable), even if the user is logged in
 
 ## Build
 
