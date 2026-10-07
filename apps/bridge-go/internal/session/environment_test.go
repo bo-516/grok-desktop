@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPoolCapacityFromEnv(t *testing.T) {
@@ -109,6 +110,24 @@ func writeFakeGrok(t *testing.T, script string) string {
 	return path
 }
 
+// generousProbeTimeout is the version-probe budget for tests that expect the
+// fake grok to answer. It only caps a wedged fake: a healthy one returns as
+// soon as it prints, so the value never slows the suite. It must dwarf the
+// first-exec stall macOS adds to a freshly written script (seconds under a
+// parallel `go test ./...`), which is what made the old fixed 3s flaky here.
+const generousProbeTimeout = 2 * time.Minute
+
+// setVersionProbeTimeout swaps the package's versionProbeTimeout for one test
+// and restores it on cleanup. d is the budget CheckEnvironment gives the fake
+// grok. The var is shared, so callers must not use t.Parallel (the tests here
+// already cannot, because they call t.Setenv).
+func setVersionProbeTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := versionProbeTimeout
+	versionProbeTimeout = d
+	t.Cleanup(func() { versionProbeTimeout = prev })
+}
+
 func TestGrokVersionSupportedMessages(t *testing.T) {
 	old := "grok 0.8.9"
 	got := grokVersionSupported(&old, minGrokVersion)
@@ -130,6 +149,7 @@ func TestCheckEnvironmentRejectsOldVersionEvenWhenAuthed(t *testing.T) {
 	bin := writeFakeGrok(t, "#!/bin/sh\nprintf '%s\\n' 'grok 0.8.9'\n")
 	t.Setenv("GROK_BIN", bin)
 	t.Setenv("XAI_API_KEY", "sk-test")
+	setVersionProbeTimeout(t, generousProbeTimeout)
 	info := CheckEnvironment(8)
 	if info.OK {
 		t.Fatal("old version must not be ok")
@@ -146,6 +166,7 @@ func TestCheckEnvironmentAcceptsParsedVersionWhenAuthed(t *testing.T) {
 	bin := writeFakeGrok(t, "#!/bin/sh\nprintf '%s\\n' 'grok 1.0.0 (abc)'\n")
 	t.Setenv("GROK_BIN", bin)
 	t.Setenv("XAI_API_KEY", "sk-test")
+	setVersionProbeTimeout(t, generousProbeTimeout)
 	info := CheckEnvironment(8)
 	if !info.OK {
 		t.Fatalf("want ok, message %q", info.Message)
@@ -159,6 +180,7 @@ func TestCheckEnvironmentRejectsUnparsedVersion(t *testing.T) {
 	bin := writeFakeGrok(t, "#!/bin/sh\nexit 1\n")
 	t.Setenv("GROK_BIN", bin)
 	t.Setenv("XAI_API_KEY", "sk-test")
+	setVersionProbeTimeout(t, generousProbeTimeout)
 	info := CheckEnvironment(8)
 	if info.OK {
 		t.Fatal("unparsed version must not be ok")
@@ -168,5 +190,39 @@ func TestCheckEnvironmentRejectsUnparsedVersion(t *testing.T) {
 	}
 	if !info.Authed {
 		t.Fatal("auth probe still reports the API key")
+	}
+}
+
+// A CLI that never answers must read as a timeout, not as unparseable output,
+// and the probe must kill it rather than wait for it to exit on its own.
+func TestCheckEnvironmentReportsVersionTimeout(t *testing.T) {
+	// exec replaces the shell, so the kill lands on the sleeper itself and no
+	// orphan keeps the output pipe open.
+	bin := writeFakeGrok(t, "#!/bin/sh\nexec sleep 60\n")
+	t.Setenv("GROK_BIN", bin)
+	t.Setenv("XAI_API_KEY", "sk-test")
+	setVersionProbeTimeout(t, 50*time.Millisecond)
+	start := time.Now()
+	info := CheckEnvironment(8)
+	elapsed := time.Since(start)
+	if info.OK {
+		t.Fatal("timed-out probe must not be ok")
+	}
+	want := "Timed out after 50ms waiting for `grok --version`; need ≥ 0.9.0. Run `grok --version` in a terminal to check the CLI."
+	if info.Message != want {
+		t.Fatalf("message %q", info.Message)
+	}
+	if info.Version != nil {
+		t.Fatalf("version must stay null on timeout, got %q", *info.Version)
+	}
+	if info.GrokPath == nil || *info.GrokPath != bin {
+		t.Fatalf("grokPath %v want %s", info.GrokPath, bin)
+	}
+	if !info.Authed {
+		t.Fatal("auth probe still reports the API key")
+	}
+	// The fake sleeps 60s; coming back far sooner proves it was killed.
+	if elapsed >= 30*time.Second {
+		t.Fatalf("probe waited %s for a hung CLI", elapsed)
 	}
 }
