@@ -1,24 +1,34 @@
 /**
  * Stateless session list row + footer live status for the session rail.
- * Pin is per-session within its workspace folder only (not per folder, and
- * does not float the project group): hover reveals the pin control; a pinned
- * row keeps the pin visible and stays at the top of its project list via
- * prefs. Rename / pin / remove render from one parent cluster
- * (`SessionRailSessionActionsView`) so the three glyphs share a cadence;
- * double-clicking the title swaps in a borderless input. Rows are
+ * A row is title | trailing slot (`SessionRailSessionTrailView`): quiet
+ * meta at rest (time, pin mark, live glyph), one ⋯ chip on hover / focus.
+ * Rename, pin, and delete live in the row's shadcn menus — the ⋯ chip's
+ * DropdownMenu and a right-click ContextMenu — which the stateful
+ * `SessionRailSessionRowWidget` wires around this view. Pin is per-session
+ * within its workspace folder only (does not float the project group).
+ * Double-clicking the title also swaps in the borderless rename input. Rows are
  * HTML5-draggable so the user can reorder within a project; drag order
  * outranks last-message recency auto-sort.
  */
 
 import cs from "classnames";
-import { memo, useRef, type DragEvent } from "react";
+import {
+  memo,
+  useRef,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ShinyText } from "@/components/react-bits";
 import { railSessionTitle } from "@/lib/sessionTitleEdit";
 import {
   formatRelativeTime,
   type SessionRecord,
 } from "@/store/sessionCatalog";
-import { SessionRailSessionActionsView } from "./SessionRailSessionActionsView";
+import {
+  SessionRailSessionTrailView,
+  type SessionRowActivity,
+} from "./SessionRailSessionTrailView";
 import { SessionRailSessionTitleView } from "./SessionRailSessionTitleView";
 
 /** dataTransfer type so drops only accept session-rail rows. */
@@ -43,21 +53,47 @@ export function SessionRailFooterLiveStatus(props: {
   return <>0 running</>;
 }
 
-/** Props for one session rail row (memoized against catalog churn). */
+/**
+ * Meta glyph for a row: only a process-live row can be streaming / waiting
+ * (a catalog status alone may be stale after the pool dropped the process).
+ * @param liveStatus Pool / session status string (`streaming`, …).
+ * @param isLiveActive Whether this row's agent process is live right now.
+ * @returns Activity for the trailing meta.
+ */
+export function sessionRowActivity(
+  liveStatus: string,
+  isLiveActive: boolean,
+): SessionRowActivity {
+  if (!isLiveActive) {
+    return "idle";
+  }
+  if (liveStatus === "waiting_permission") {
+    return "waiting";
+  }
+  if (liveStatus === "streaming") {
+    return "streaming";
+  }
+  return "idle";
+}
+
+/**
+ * Props for one session rail row view (memoized against catalog churn).
+ * Pin / delete handlers are not here: they run from the action menu, which
+ * the row widget renders beside this view.
+ */
 export type SessionRailSessionRowProps = {
+  /** Catalog record (title, updatedAt, id). */
   rec: SessionRecord;
+  /** This row is the chat in view (elevated pill + medium title). */
   selected: boolean;
+  /** This row's agent process is live right now (pool or active session). */
   isLiveActive: boolean;
+  /** Pool / session status (`streaming`, `waiting_permission`, …). */
   liveStatus: string;
   /** Whether this chat is pinned to the top of its project list. */
   pinned: boolean;
+  /** Open this chat (click, Enter, Space). */
   onSelect: () => void;
-  onRemove: () => void;
-  /**
-   * Toggle pin for this session only (within its workspace; does not pin
-   * or float the project folder).
-   */
-  onTogglePin: () => void;
   /**
    * Reorder within the same project after a successful drop.
    * @param fromId Dragged session id.
@@ -66,27 +102,41 @@ export type SessionRailSessionRowProps = {
   onReorder?: (fromId: string, toId: string) => void;
   /** True while this row's title is an input. */
   editing?: boolean;
-  /** Double-click title or the pencil control; missing leaves the title read-only. */
+  /** Double-click title or the menu's Rename; missing leaves the title read-only. */
   onBeginRename?: () => void;
   /**
-   * Persist the typed title (Enter, blur, or the check control).
+   * Persist the typed title (Enter or blur).
    * @param nextTitle Current input value.
    */
   onCommitRename?: (nextTitle: string) => void;
   /** Escape (or an empty commit at the store) leaves the previous title. */
   onCancelRename?: () => void;
+  /**
+   * True while this row's ⋯ or right-click menu is open. Radix menus are
+   * modal (the page ignores the pointer while open), so this class holds
+   * the hover paint that `:hover` can no longer provide.
+   */
+  menuOpen?: boolean;
+  /**
+   * The ⋯ chip (a DropdownMenu trigger from the row widget). Missing
+   * renders the meta only, e.g. in isolated mounts.
+   */
+  menuButton?: ReactNode;
 };
 
 /**
  * Inner session row render function (memo-wrapped below).
- * Title and the action cluster are separate grid tracks so long titles
- * never overlap buttons. Trailing rename / pin / remove live in
- * `SessionRailSessionActionsView` (one reserved 56px parent). Selected
- * state is a quiet elevated fill + medium title. Drag-and-drop reorders
- * within the parent project; a short drag does not fire select.
+ * Title and the trailing slot are separate grid tracks so long titles never
+ * run under the ⋯ chip. While renaming, the slot is not rendered and the
+ * field takes the row. Selected state is a quiet elevated fill + medium
+ * title. Menus are not handled here: the row widget's ContextMenu trigger
+ * wraps this element and its DropdownMenu trigger arrives as `menuButton`.
+ * Drag-and-drop reorders within the parent project; a short drag does not
+ * fire select.
  * Wrapped in React.memo so catalog identity churn without prop changes
  * does not re-render every rail row.
- * @param props Session record, selection / live / pin / rename flags, handlers.
+ * @param props Session record, selection / live / pin / rename / menu
+ *   flags, handlers.
  * @returns Interactive row for the side-nav session list.
  */
 function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
@@ -97,23 +147,20 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
     liveStatus,
     pinned,
     onSelect,
-    onRemove,
-    onTogglePin,
     onReorder,
     editing = false,
     onBeginRename,
     onCommitRename,
     onCancelRename,
+    menuOpen = false,
+    menuButton,
   } = props;
-  const isStreaming = liveStatus === "streaming" && isLiveActive;
-  const isWaiting = liveStatus === "waiting_permission" && isLiveActive;
+  /** Streaming / waiting / idle — drives the meta glyph and title lift. */
+  const activity = sessionRowActivity(liveStatus, isLiveActive);
   /** Friendly rail label; locked custom names skip the weak-title rewrite. */
   const titleLabel = railSessionTitle(rec);
-  /** Handle so the Save control can read the input before blur unmounts it. */
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  /** Relative time already fits the 24px overlay (`45s` / `12m` / `1d`). */
-  const fullTime = formatRelativeTime(rec.updatedAt);
-  const timeLabel = isStreaming ? "…" : fullTime;
+  /** Compact relative time for the resting meta (`now` / `12m` / `1d`). */
+  const timeLabel = formatRelativeTime(rec.updatedAt);
   /**
    * After a real drag, the browser still emits click — skip select once so
    * reordering does not also switch the active chat.
@@ -191,14 +238,31 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
     }
   };
 
+  /**
+   * Enter / Space on the row itself select the chat. Keys from children
+   * (the ⋯ chip, the rename field) are theirs — without this guard Enter
+   * on the chip would select the chat instead of opening its menu.
+   * @param e Keydown that reached the row.
+   */
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) {
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelect();
+    }
+  };
+
   return (
     <div
       className={cs("sess-row group", {
         "sess-row-active": selected,
-        "sess-row-process-live": isStreaming,
-        "sess-row-waiting": isWaiting,
+        "sess-row-process-live": activity === "streaming",
+        "sess-row-waiting": activity === "waiting",
         "sess-row-pinned": pinned,
         "sess-row-editing": editing,
+        "sess-row-menu-open": menuOpen,
       })}
       role="button"
       tabIndex={0}
@@ -215,34 +279,24 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
         }
         onSelect();
       }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
+      onKeyDown={handleKeyDown}
     >
       <SessionRailSessionTitleView
         label={titleLabel}
         rawTitle={rec.title}
         editing={editing}
-        inputRef={titleInputRef}
         onBeginRename={() => onBeginRename?.()}
         onCommitRename={(nextTitle) => onCommitRename?.(nextTitle)}
         onCancelRename={() => onCancelRename?.()}
       />
-      <SessionRailSessionActionsView
-        titleLabel={titleLabel}
-        editing={editing}
-        pinned={pinned}
-        timeLabel={timeLabel}
-        fullTime={fullTime}
-        titleInputRef={titleInputRef}
-        onBeginRename={onBeginRename}
-        onCommitRename={onCommitRename}
-        onTogglePin={onTogglePin}
-        onRemove={onRemove}
-      />
+      {editing ? null : (
+        <SessionRailSessionTrailView
+          pinned={pinned}
+          activity={activity}
+          timeLabel={timeLabel}
+          menuButton={menuButton}
+        />
+      )}
     </div>
   );
 }

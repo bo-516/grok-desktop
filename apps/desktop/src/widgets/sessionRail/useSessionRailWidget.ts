@@ -31,6 +31,7 @@ import {
   type SessionRecord,
 } from "@/store/sessionCatalog";
 import { useSessionStore } from "@/store/sessionStore";
+import { useRailProjectRemoval } from "./useRailProjectRemoval";
 
 export type SessionRailWidgetProps = {
   /**
@@ -113,14 +114,41 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   }, [poolEntries]);
 
   /**
+   * Persist prefs after a local mutation so pin/collapse survive refresh.
+   * Uses functional setState so rapid toggles never clobber each other with
+   * a stale railPrefs closure.
+   * @param updater Pure transform from previous prefs to next.
+   */
+  const commitRailPrefs = useCallback(
+    (updater: (prev: SessionRailPrefs) => SessionRailPrefs) => {
+      setRailPrefs((prev) => {
+        const next = updater(prev);
+        saveSessionRailPrefs(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** "Remove project": hidden-folder filter, footer count, menu actions. */
+  const { visibleCatalog, catalogLength, onRemoveProject, isProjectBusy } =
+    useRailProjectRemoval({
+      catalog,
+      railPrefs,
+      commitRailPrefs,
+      poolStatusById,
+    });
+
+  /**
    * Workspace-folder groups: project-name first-char order stays fixed.
    * Inside each folder: pin → drag → last message recency (`updatedAt`
    * desc). Pin never reorders the folder list itself.
    * Subagents and empty (no-message / untitled) drafts are stripped by
-   * {@link filterCatalogForSessionRail} so the list only shows real chats.
+   * {@link filterCatalogForSessionRail} so the list only shows real chats;
+   * removed project folders are already gone from `visibleCatalog`.
    */
   const { groups, noProjectSessions } = useMemo(() => {
-    const filtered = filterCatalogForSessionRail(catalog, query);
+    const filtered = filterCatalogForSessionRail(visibleCatalog, query);
     // Unfiled chats are their own rail section, never a pseudo folder.
     const { noProject, withProject } = splitNoProjectSessions(filtered);
     return {
@@ -136,20 +164,11 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
       ),
     };
   }, [
-    catalog,
+    visibleCatalog,
     query,
     railPrefs.pinnedSessions,
     railPrefs.sessionOrderByWorkspace,
   ]);
-
-  /**
-   * Rail-visible session count (no search). Footer "Sessions N" uses this so
-   * empty drafts / subagents do not inflate the density cue.
-   */
-  const catalogLength = useMemo(
-    () => filterCatalogForSessionRail(catalog).length,
-    [catalog],
-  );
 
   const selectedId = viewingSessionId ?? activeSessionId;
   /**
@@ -197,23 +216,6 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
       props.onClose?.();
     },
     [props, selectSession],
-  );
-
-  /**
-   * Persist prefs after a local mutation so pin/collapse survive refresh.
-   * Uses functional setState so rapid toggles never clobber each other with
-   * a stale railPrefs closure.
-   * @param updater Pure transform from previous prefs to next.
-   */
-  const commitRailPrefs = useCallback(
-    (updater: (prev: SessionRailPrefs) => SessionRailPrefs) => {
-      setRailPrefs((prev) => {
-        const next = updater(prev);
-        saveSessionRailPrefs(next);
-        return next;
-      });
-    },
-    [],
   );
 
   /**
@@ -419,6 +421,10 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     beginRename,
     commitRename,
     cancelRename,
+    /** Folder header "Remove project" (hides the folder; deletes nothing). */
+    onRemoveProject,
+    /** True while a chat in the folder runs; disables "Remove project". */
+    isProjectBusy,
   };
 }
 

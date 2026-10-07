@@ -172,6 +172,38 @@ export function rememberAndActivateWorkspace(
 }
 
 /**
+ * Clear the default project when it is the folder being removed from the
+ * session rail, so New chat (⌘N) does not start there and bring the folder
+ * straight back. `noProject` stays false: New chat then follows the open
+ * chat's folder. `knownWorkspaces` is untouched — the project switcher
+ * keeps listing the folder, which is how it gets added back.
+ * @param prefs Current prefs (not mutated).
+ * @param workspace Removed folder path (trailing slash ok).
+ * @returns `prefs` itself when the default is another folder (or unset),
+ *   otherwise new prefs with an empty `activeWorkspace`.
+ */
+export function forgetActiveWorkspace(
+  prefs: WorkspacePrefs,
+  workspace: string,
+): WorkspacePrefs {
+  const target = trimPathTail(workspace);
+  if (!target || trimPathTail(prefs.activeWorkspace) !== target) {
+    return prefs;
+  }
+  return { ...prefs, activeWorkspace: "" };
+}
+
+/**
+ * Path without surrounding whitespace or trailing separators, so `/a/b/`
+ * and `/a/b` compare equal.
+ * @param path Absolute path or empty.
+ * @returns Comparable path ("" for empty input).
+ */
+function trimPathTail(path: string): string {
+  return path.trim().replace(/[/\\]+$/, "");
+}
+
+/**
  * Display name for a workspace path (last path segment).
  * @param workspace Absolute path or empty.
  * @returns Basename, or "No project" when empty.

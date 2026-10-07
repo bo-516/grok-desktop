@@ -12,7 +12,7 @@ import type { SessionRecord } from "@/store/sessionCatalog";
 import { SessionRailFooterView } from "../SessionRailFooterView";
 import { SessionRailNoProjectGroupView } from "../SessionRailNoProjectGroupView";
 import { SessionRailProjectGroupView } from "../SessionRailProjectGroupView";
-import { SessionRailSessionRowView } from "../SessionRailSessionRowView";
+import { SessionRailSessionRowWidget } from "../SessionRailSessionRowWidget";
 import type { SessionRailWidgetModel } from "./useSessionRailWidget";
 
 export type SessionRailViewProps = SessionRailWidgetModel;
@@ -58,13 +58,15 @@ export function SessionRailView(props: SessionRailViewProps) {
     beginRename,
     commitRename,
     cancelRename,
+    onRemoveProject,
+    isProjectBusy,
   } = props;
   /** Docked hide vs overlay dismiss — same control, different verb. */
   const collapseLabel = sidebarDocked ? "Collapse sessions" : "Close sessions";
 
   /**
    * One session row with its full model (selection, live status, pin, drag,
-   * inline rename).
+   * inline rename) and its own action menu (⋯ chip / right-click).
    * Shared by the project tree and the no-project section so both lists behave
    * identically; `workspace` scopes drag order to the owning section.
    * @param rec Catalog row to render.
@@ -78,7 +80,7 @@ export function SessionRailView(props: SessionRailViewProps) {
   ) => {
     const row = rowForSession(rec, workspace, orderedIds);
     return (
-      <SessionRailSessionRowView
+      <SessionRailSessionRowWidget
         key={rec.id}
         rec={row.rec}
         selected={row.selected}
@@ -226,6 +228,8 @@ export function SessionRailView(props: SessionRailViewProps) {
                       group.sessions.map((s) => s.id),
                     )
                   }
+                  onRemove={() => onRemoveProject(group.workspace)}
+                  removeDisabled={isProjectBusy(group.workspace)}
                 />
               ))}
               {/*

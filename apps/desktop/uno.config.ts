@@ -8,6 +8,7 @@ import {
   presetUno,
   transformerVariantGroup,
 } from "unocss";
+import { presetAnimations } from "unocss-preset-animations";
 import { appShortcuts } from "./uno/shortcuts";
 
 /** Semantic color tokens → CSS variables from defineColor.css */
@@ -148,6 +149,16 @@ export default defineConfig({
       // defineColor/base own document chrome; avoid double preflight fights
       preflight: false,
     }),
+    /*
+     * tailwindcss-animate API used by the shadcn primitives in
+     * src/components/ui (`animate-in`, `fade-in-0`, `zoom-in-95`,
+     * `slide-in-from-*`). It only sets --una-* variables plus two keyframes;
+     * `duration-*` stays presetUno's transition rule. unocss-preset-shadcn
+     * is deliberately not used: its HSL-only color variables would override
+     * this theme's `primary` / `accent` / `sidebar`, so the primitives map
+     * shadcn's color classes to app tokens instead (menu-classes.ts).
+     */
+    presetAnimations(),
   ],
   transformers: [transformerVariantGroup()],
   theme: {

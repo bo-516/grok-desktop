@@ -8,6 +8,7 @@ import { App } from "./App";
 import { applyTheme, loadTheme } from "./lib/theme";
 import { applyPalette, loadPalette } from "./lib/colorPalette";
 import { installGlobalCrashHandlers, reportCrash } from "./lib/crashLog";
+import { installBrowserContextMenuSuppressor } from "./lib/suppressBrowserContextMenu";
 import { AppErrorBoundary } from "./widgets/AppErrorBoundary";
 
 // F-NATIVE-02 + Settings palette: restore appearance before first paint
@@ -16,6 +17,8 @@ applyPalette(loadPalette());
 
 // Capture uncaught errors + boot beacon before React mounts (black-screen diagnosis).
 installGlobalCrashHandlers();
+// Cancel WebView Reload / Inspect Element before the first right-click.
+installBrowserContextMenuSuppressor();
 
 const root = document.getElementById("root");
 if (!root) {

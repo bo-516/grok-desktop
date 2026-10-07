@@ -201,6 +201,44 @@ describe("sessionRailPrefs", () => {
     assert.equal(same, prefs);
   });
 
+  it("loads blobs saved before Remove project with no removed folders", () => {
+    const prefs = normalizeSessionRailPrefs({
+      pinnedSessions: ["a"],
+      collapsedWorkspaces: ["/ws"],
+    });
+    assert.deepEqual(prefs.removedWorkspaces, {});
+  });
+
+  it("normalizes removed folders: key slashes, later time wins, junk dropped", () => {
+    const prefs = normalizeSessionRailPrefs({
+      removedWorkspaces: {
+        "/ws/a/": 100,
+        "/ws/a": 300,
+        "/ws/b": "300",
+        "/ws/c": -1,
+        "/ws/d": Number.NaN,
+        "": 5,
+      },
+    });
+    assert.deepEqual(prefs.removedWorkspaces, { "/ws/a": 300 });
+    assert.deepEqual(
+      normalizeSessionRailPrefs({ removedWorkspaces: ["/ws/a"] })
+        .removedWorkspaces,
+      {},
+    );
+  });
+
+  it("save/load roundtrip keeps removed folders", () => {
+    restoreLocalStorage = installMemoryLocalStorage();
+    saveSessionRailPrefs(
+      normalizeSessionRailPrefs({ removedWorkspaces: { "/ws/a": 100 } }),
+    );
+    resetSessionRailPrefsCache();
+    assert.deepEqual(loadSessionRailPrefs().removedWorkspaces, {
+      "/ws/a": 100,
+    });
+  });
+
   it("save/load roundtrip keeps collapsed workspaces across remount", () => {
     restoreLocalStorage = installMemoryLocalStorage();
     let prefs = normalizeSessionRailPrefs({});
