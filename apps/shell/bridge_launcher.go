@@ -37,9 +37,15 @@ type BridgeLaunchParams struct {
 
 // BridgeProcess is a running bridge child (separate OS process, never in-process).
 type BridgeProcess struct {
-	cmd  *exec.Cmd
+	// cmd is the started bridge; nil after Stop.
+	cmd *exec.Cmd
+	// impl is the bridge implementation that was launched.
 	impl BridgeImpl
-	mu   sync.Mutex
+	// tree kills the bridge's whole process tree on Stop (Unix: placeholder,
+	// the process group needs no handle; Windows: kill-on-close Job Object).
+	tree *bridgeTree
+	// mu serializes Stop.
+	mu sync.Mutex
 }
 
 // DefaultAllowedOrigins for packaged Wails shell + common dev origins.
@@ -65,7 +71,8 @@ func DefaultAllowedOrigins() string {
 }
 
 // StartBridge spawns bridge-go as a child process with its own process group
-// (Unix Setpgid) so Stop can kill the whole tree.
+// (Unix Setpgid) or kill-on-close Job Object (Windows) so Stop can kill the
+// whole tree; on Windows the job also takes the tree down if the shell dies.
 // Empty RepoRoot is packaged mode: locate the Go binary next to the executable
 // and use Cwd (or ResolveBridgeLaunchCwd) as cmd.Dir.
 // Impl "node" returns nodeBridgeRemoved and does not exec. Empty Impl is Go.
@@ -117,14 +124,19 @@ func StartBridge(p BridgeLaunchParams) (*BridgeProcess, error) {
 	cmd.Stdout = p.Stdout
 	cmd.Stderr = p.Stderr
 	cmd.Env = bridgeEnv(os.Environ(), p)
-	// Own process group (Unix Setpgid) so we can kill the tree (bridge-go → grok).
-	configureBridgeProcAttr(cmd)
+	// Own process group (Unix Setpgid) / kill-on-close Job Object (Windows) so
+	// Stop kills the whole tree (bridge-go → grok → MCP servers, terminals).
+	tree := configureBridgeProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
+		tree.release()
 		return nil, fmt.Errorf("start bridge (%s): %w", p.Impl, err)
 	}
+	// Must run before WaitUntilListening / before the UI gets the token, so
+	// the bridge cannot have spawned anything outside the job yet.
+	tree.attach(cmd.Process)
 	log.Printf("[shell] bridge %s started pid=%d port=%d", p.Impl, cmd.Process.Pid, p.Port)
-	bp := &BridgeProcess{cmd: cmd, impl: p.Impl}
+	bp := &BridgeProcess{cmd: cmd, impl: p.Impl, tree: tree}
 	// Block until the child accepts TCP (or dies). UI auto-connects on first
 	// paint; without this race, WebSocket hits a closed port → Offline banner.
 	if err := bp.WaitUntilListening(p.Host, p.Port, 15*time.Second); err != nil {
@@ -204,8 +216,9 @@ func bridgeEnv(parent []string, p BridgeLaunchParams) []string {
 	return out
 }
 
-// Stop signals the bridge process tree (SIGTERM then SIGKILL on Unix process group).
-// Safe to call multiple times.
+// Stop kills the bridge process tree: SIGTERM then SIGKILL on the Unix
+// process group; TerminateJobObject on Windows (bridge pid only if the job
+// could not be set up). Safe to call multiple times.
 func (b *BridgeProcess) Stop() {
 	if b == nil {
 		return
@@ -217,8 +230,9 @@ func (b *BridgeProcess) Stop() {
 	}
 	pid := b.cmd.Process.Pid
 	log.Printf("[shell] stopping bridge pid=%d", pid)
-	stopBridgeProcess(b.cmd, 3*time.Second)
+	stopBridgeProcess(b.cmd, b.tree, 3*time.Second)
 	b.cmd = nil
+	b.tree = nil
 }
 
 // Wait blocks until the bridge process exits.
