@@ -1,9 +1,14 @@
 /**
  * Session store actions: new/select/remove/workspace/reconnect/disconnect.
  * Wired into useSessionStore; no React.
+ *
+ * Every exported action stays here (structural tests pin their bodies to
+ * this file). Heavy internals live in step modules: New chat draft building
+ * in sessionStoreDraft, the live half of select in sessionStoreSelectResume,
+ * and disconnect's catalog flush in sessionStoreDisconnectFlush.
  */
 
-import { createSessionState, markDisconnected } from "@grok-desktop/acp-core";
+import { markDisconnected } from "@grok-desktop/acp-core";
 import { focusComposer } from "@/lib/composerFocus";
 import { withCachedSlashCatalog } from "@/lib/slashCatalog";
 import { isSubagentSessionKind } from "@/lib/sessionActions";
@@ -22,14 +27,15 @@ import {
 import {
   cancelPendingSessionsSync,
   DEFAULT_ALWAYS_APPROVE,
-  flushPendingSessionsToCatalog,
   startLiveBridgeSession,
   stopPoolPoll,
 } from "./sessionStoreLive";
-import { flushChildSessionsToCatalog } from "./sessionRoles";
 import { stampProvenance } from "./sessionProvenance";
+import { flushSessionsForDisconnect } from "./sessionStoreDisconnectFlush";
+import { adoptDraftWorkspace, buildDraftSession } from "./sessionStoreDraft";
 import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
 import { promoteBufferedChildForSelect } from "./sessionStoreSelectPromote";
+import { resumeSelectedSession } from "./sessionStoreSelectResume";
 import {
   flushCatalogPersist,
   INITIAL_SESSION,
@@ -70,40 +76,14 @@ export async function newSessionAction(
   get: SessionStoreGet,
   cwd?: string,
 ): Promise<void> {
-  const prefs = loadWorkspacePrefs();
-  // Explicit arg (including "") wins. Otherwise prefer prefs (noProject → "")
-  // so bridge default cwd on session.workspace cannot hijack New chat.
-  let workspace: string;
-  if (cwd !== undefined) {
-    workspace = cwd.trim();
-  } else if (prefs.noProject) {
-    workspace = "";
-  } else {
-    workspace =
-      prefs.activeWorkspace.trim() || get().session.workspace.trim();
-  }
-  if (workspace) {
-    saveWorkspacePrefs(rememberAndActivateWorkspace(prefs, workspace));
-  } else if (cwd !== undefined || prefs.noProject) {
-    // Explicit no-project (caller or prefs) — keep the flag sticky.
-    saveWorkspacePrefs(setActiveWorkspacePrefs(prefs, ""));
-  }
+  /** Draft folder (prefs written); explicit cwd wins, then prefs, then canvas. */
+  const workspace = adoptDraftWorkspace(cwd, get().session.workspace);
   // Cancel in-flight select/resume so a late resume cannot repaint over the draft.
   selectSeq += 1;
   get().clearPendingMode();
   const prev = get().session;
-  /**
-   * Keep the last grok-build slash catalog on the draft. Handshake is deferred
-   * until first send; `/` must still list compact / skills immediately.
-   */
-  const draftSession = withCachedSlashCatalog({
-    ...createSessionState({
-      id: "",
-      workspace,
-      mode: prev.mode,
-    }),
-    availableCommands: prev.availableCommands,
-  });
+  /** Blank draft keeping the last grok-build slash catalog and mode. */
+  const draftSession = buildDraftSession(prev, workspace);
   // Persist the previous live canvas into the rail before blanking the UI.
   // No bridge spawn here — avoids empty "Chat xxxx" ghosts until the user sends.
   if (prev.id) {
@@ -262,47 +242,14 @@ export function selectSessionAction(
     });
   }
 
-  // Already in pool or current live focus: only run start hit-path / push state.
-  if (
-    get().connectionMode === "live-bridge" &&
-    get().live &&
-    (inPool || id === get().activeSessionId)
-  ) {
-    get().live?.start({
-      resumeId: id,
-      cwd: rec.workspace || undefined,
-      alwaysApprove: DEFAULT_ALWAYS_APPROVE,
-      seed: seeded,
-    });
-    return;
-  }
-
-  void (async () => {
-    try {
-      await startLiveBridgeSession(set, get, {
-        alwaysApprove: DEFAULT_ALWAYS_APPROVE,
-        cwd: rec.workspace || undefined,
-        resumeId: id,
-        seed: seeded,
-        // Skip post-await canvas writes when a later select superseded us.
-        guard: () => seq === selectSeq,
-      });
-      if (seq !== selectSeq) {
-        return;
-      }
-      set({ bridgeInfo: `live · ${rec.title}` });
-    } catch {
-      if (seq !== selectSeq) {
-        return;
-      }
-      set({
-        session: seeded,
-        viewingSessionId: id,
-        restoringSessionId: null,
-        bridgeInfo: "Showing local history — resume failed, check bridge",
-      });
-    }
-  })();
+  // Pool hit-path or background resume; stale once a later select bumps seq.
+  resumeSelectedSession(set, get, {
+    id,
+    rec,
+    seeded,
+    inPool,
+    isCurrent: () => seq === selectSeq,
+  });
 }
 
 /**
@@ -370,58 +317,8 @@ export function disconnectAction(
 ): void {
   forgetAllTurnEdges();
   cancelPendingSessionsSync();
-  const s = get().session;
-  // Always flush pending so unproven multi-client sessions are not lost.
-  let catalog = get().catalog;
-  let provenance = get().sessionProvenance;
-  const pendingFlush = flushPendingSessionsToCatalog(
-    catalog,
-    get().pendingSessions,
-    provenance,
-  );
-  catalog = pendingFlush.catalog;
-  provenance = pendingFlush.provenance;
-
-  if (s.id) {
-    // Promote buffered children so L3 drill-down still resolves offline.
-    const parentWs: Record<string, string> = {};
-    for (const rec of catalog) {
-      if (rec.workspace.trim()) {
-        parentWs[rec.id] = rec.workspace;
-      }
-    }
-    if (s.workspace.trim()) {
-      parentWs[s.id] = s.workspace;
-    }
-    const flushed = flushChildSessionsToCatalog(
-      upsertFromLiveState(catalog, {
-        ...s,
-        status: "disconnected",
-      }),
-      get().childSessions,
-      get().sessionRoles,
-      parentWs,
-    );
-    catalog = normalizeCatalog(flushed.catalog);
-    persistNormalizedCatalog(catalog);
-    flushCatalogPersist();
-    set({
-      catalog,
-      childSessions: flushed.remaining,
-      pendingSessions: {},
-      pendingSessionOrder: [],
-      sessionProvenance: provenance,
-    });
-  } else {
-    persistNormalizedCatalog(catalog);
-    flushCatalogPersist();
-    set({
-      catalog,
-      pendingSessions: {},
-      pendingSessionOrder: [],
-      sessionProvenance: provenance,
-    });
-  }
+  // Pending / child buffers and the live canvas land in the catalog first.
+  flushSessionsForDisconnect(set, get);
   // stopPoolPoll is also called from onClose; clear here so a close that
   // never fires onClose (already-null live) still ends the interval.
   stopPoolPoll();
