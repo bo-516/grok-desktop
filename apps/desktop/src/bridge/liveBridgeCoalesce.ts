@@ -191,16 +191,16 @@ export function createStreamCoalescer(
    * @param eventId Latest eventId.
    */
   function defer(sessionId: string, eventId: string | undefined): void {
-    const foreground = opts.isForeground?.(sessionId) ?? true;
     const prev = pending.get(sessionId);
     if (prev) {
       prev.eventId = eventId ?? prev.eventId;
       // Became the viewed session while waiting on the slow lane.
-      if (foreground && prev.lane === "background") {
+      if (prev.lane === "background" && (opts.isForeground?.(sessionId) ?? true)) {
         toFrameLane(prev);
       }
       return;
     }
+    const foreground = opts.isForeground?.(sessionId) ?? true;
     const entry: PendingEntry = { eventId, lane: "background" };
     pending.set(sessionId, entry);
     if (foreground) {

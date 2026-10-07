@@ -5,6 +5,8 @@
  *
  * Relay protocol: hot-path streaming arrives as session_update; this client reduces
  * via applySessionUpdate + eventId set dedupe and surfaces SessionState to handlers.
+ * Those notifies are coalesced per animation frame (liveBridgeCoalesce); close()
+ * and socket close / error flush pending ones first.
  */
 
 import type { SessionState } from "@grok-desktop/acp-core";
