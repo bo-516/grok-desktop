@@ -12,8 +12,12 @@ import (
 // a sibling fake bridge-go without depending on os.Executable's cache dir.
 var executablePath = os.Executable
 
-// RepoRoot walks from start (or cwd) upward until it finds apps/bridge/src/server.ts
-// or go.mod sibling markers that identify the monorepo root.
+// repoMarker is the monorepo file that identifies a grok-desktop checkout.
+// Same relative path as bridge-go session.repoMarker. A missing file is
+// packaged mode, not a failed start — callers use ResolveOptionalRepoRoot.
+const repoMarker = "apps/bridge-go/cmd/bridge/main.go"
+
+// RepoRoot walks from start (or cwd) upward until it finds repoMarker.
 // Returns absolute path or error when not found within a reasonable depth.
 // Callers that treat missing markers as packaged mode should use
 // ResolveOptionalRepoRoot — an empty repo root is not a start failure.
@@ -30,7 +34,7 @@ func RepoRoot(start string) (string, error) {
 		return "", err
 	}
 	for i := 0; i < 12; i++ {
-		marker := filepath.Join(dir, "apps", "bridge", "src", "server.ts")
+		marker := filepath.Join(dir, filepath.FromSlash(repoMarker))
 		if st, err := os.Stat(marker); err == nil && !st.IsDir() {
 			return dir, nil
 		}
@@ -41,7 +45,7 @@ func RepoRoot(start string) (string, error) {
 		}
 		dir = parent
 	}
-	return "", fmt.Errorf("could not locate monorepo root (apps/bridge/src/server.ts) from %s", start)
+	return "", fmt.Errorf("could not locate monorepo root (%s) from %s", repoMarker, start)
 }
 
 // ResolveOptionalRepoRoot is the shell start-path lookup: cwd, then the
@@ -69,11 +73,6 @@ func ResolveOptionalRepoRootFrom(start, exe string) string {
 		return r
 	}
 	return ""
-}
-
-// NodeBridgeScript returns the absolute path to the Node bridge entry script.
-func NodeBridgeScript(repoRoot string) string {
-	return filepath.Join(repoRoot, "apps", "bridge", "src", "server.ts")
 }
 
 // exeSuffix is the platform executable extension for bridge binaries.
@@ -165,30 +164,4 @@ func DefaultBridgeCWD(repoRoot string) string {
 		return repoRoot
 	}
 	return EnsureWorkspaceDir(ProductionWorkspaceDir(""))
-}
-
-// ResolveTsx returns a command+args prefix to run TypeScript bridge entry.
-// Prefers monorepo node_modules/.bin/tsx, then PATH tsx, then npx tsx.
-func ResolveTsx(repoRoot string) (cmd string, argsPrefix []string, err error) {
-	candidates := []string{
-		filepath.Join(repoRoot, "node_modules", ".bin", "tsx"),
-		filepath.Join(repoRoot, "apps", "bridge", "node_modules", ".bin", "tsx"),
-	}
-	for _, p := range candidates {
-		if st, e := os.Stat(p); e == nil && !st.IsDir() {
-			return p, nil, nil
-		}
-	}
-	if path, e := lookPath("tsx"); e == nil {
-		return path, nil, nil
-	}
-	if path, e := lookPath("npx"); e == nil {
-		return path, []string{"tsx"}, nil
-	}
-	return "", nil, fmt.Errorf("tsx not found (install deps or put tsx on PATH)")
-}
-
-// lookPath is a thin wrapper so tests can stub if needed.
-var lookPath = func(file string) (string, error) {
-	return execLookPath(file)
 }

@@ -30,7 +30,7 @@ export function readSrc(rel: string): string {
 
 /**
  * Reads a file from the desktop app root (vite/uno configs, index.html).
- * Also used for sibling paths under `apps/` via `../bridge/...`.
+ * Also used for sibling paths under `apps/` via `../bridge-go/...`.
  * @param rel Path relative to `apps/desktop/`, e.g. "uno/shortcuts.ts".
  */
 export function readDesktopRoot(rel: string): string {

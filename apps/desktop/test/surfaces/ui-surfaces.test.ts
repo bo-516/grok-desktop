@@ -1043,15 +1043,15 @@ describe("UI surface presence", () => {
     assert.match(prompt, /handle\.prompt\(text,\s*sid/);
   });
 
-  it("env whitelist and permission deny-wins modules ship in bridge", () => {
-    const env = readDesktopRoot("../bridge/src/envWhitelist.ts");
-    assert.match(env, /filterEnvForGrokChild/);
+  it("env whitelist and deny rules ship in the Go bridge", () => {
+    const env = readDesktopRoot("../bridge-go/pkg/envfilter/env.go");
+    assert.match(env, /FilterEnvForGrokChild/);
     assert.match(env, /XAI_API_KEY/);
-    const perm = readDesktopRoot("../bridge/src/permissionRules.ts");
-    assert.match(perm, /evaluatePermissionRules/);
-    assert.match(perm, /deny/);
-    const spawn = readDesktopRoot("../bridge/src/spawnGrok.ts");
-    assert.match(spawn, /filterEnvForGrokChild/);
+    const spawn = readDesktopRoot("../bridge-go/internal/spawn/spawn.go");
+    assert.match(spawn, /FilterEnvForGrokChild/);
+    const runtime = readDesktopRoot("../bridge-go/internal/session/runtime.go");
+    assert.match(runtime, /--deny/);
+    assert.match(runtime, /DenyRules/);
   });
 
   it("product UI is live-only (no mock agent entry)", () => {

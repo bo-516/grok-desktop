@@ -51,7 +51,7 @@ Every version: [Releases](https://github.com/bo-516/grok-desktop/releases).
 
 | Allowed | Never |
 |---|---|
-| `grok agent stdio` via `npm run bridge` / `npm run m0:live` / `npm run demo:e2e` | Mock agent UI, offline fixture as “session”, silent fallback to mock |
+| `grok agent stdio` via `npm run bridge` / `npm run m0:live` | Mock agent UI, offline fixture as “session”, silent fallback to mock |
 | Workspace demo under `demo/` | Pretending mock is a live agent |
 
 Unit tests may use an in-process ACP mock for codec/timeline isolation only.
@@ -60,12 +60,11 @@ Unit tests may use an in-process ACP mock for codec/timeline isolation only.
 
 ```
 packages/acp-core/   Pure protocol codec, timeline reducers, AcpClient
-apps/bridge/         Node RuntimePool of real `grok agent stdio` + WebSocket
-apps/bridge-go/      Go bridge (product default when the binary is present)
+apps/bridge-go/      Go bridge: real `grok agent stdio` + WebSocket
 apps/desktop/        Vite + React shell (live-bridge only)
 apps/shell/          Wails v3 host — own bridge process, embeds the UI
 apps/m0/             CLI handshake (default: live only)
-demo/                Constrained sandbox for `demo:e2e` / `m0:live`
+demo/                Constrained sandbox for `m0:live`
 ```
 
 ## Prerequisites
@@ -74,8 +73,8 @@ demo/                Constrained sandbox for `demo:e2e` / `m0:live`
 - **Required for product use**: `grok` on PATH (or `~/.grok/bin/grok`) with `grok login` / auth
   - Auth: `grok login` (writes `~/.grok/auth.json`) **or** env `XAI_API_KEY`
   - UI shows an auth banner when the bridge reports missing credentials
-- **Optional, for the Go bridge / desktop window**: Go 1.25+
-  - `cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge`
+- **Required for the bridge / desktop window**: Go 1.25+
+  - `npm run bridge` builds `apps/bridge-go/bin/bridge-go` when it is missing or stale
   - Wails shell: see [`apps/shell/README.md`](apps/shell/README.md)
 
 ## Install
@@ -89,7 +88,7 @@ npm install
 UI is three columns: **session rail · timeline · Plan / Agents**. Composer sits under the transcript.
 
 ```bash
-# Terminal A — real grok-build (prefers go-bridge; Node if the binary is missing)
+# Terminal A — Go bridge (builds apps/bridge-go/bin/bridge-go when needed)
 # Default workspace = this checkout. Override with BRIDGE_CWD=…
 npm run bridge
 
@@ -103,23 +102,22 @@ One process for **web + desktop** (Vite HMR and a Wails window; each owns its ow
 
 ```bash
 npm run run:both
-# Node bridge instead of Go: npm run run:node-both
-# Interactive menu (web / desktop / both × Go / Node): npm run run:dev
+# Interactive menu (web / desktop / both): npm run run:dev
 ```
 
 | Command | What |
 |---|---|
-| `npm run bridge` | Go binary if `apps/bridge-go/bin/bridge-go` exists, else Node |
+| `npm run bridge` | Build if needed, then run `apps/bridge-go/bin/bridge-go` |
 | `npm run dev` | Vite web UI on `:8172` |
-| `npm run run:both` | Go: Vite web + Wails desktop (two isolated bridges) |
-| `npm run run:go-web` / `run:node-web` | One web UI + matching bridge |
-| `npm run run:go-desktop` / `run:node-desktop` | Wails window (shell spawns its own bridge) |
+| `npm run run:both` | Vite web + Wails desktop (two isolated Go bridges) |
+| `npm run run:go-web` | One web UI + Go bridge |
+| `npm run run:go-desktop` | Wails window (shell spawns its own Go bridge) |
 
 ### Workspace
 
 - **Dev (this checkout, unset `BRIDGE_CWD`)**: monorepo root so chats sit next to the code
 - **Packaged / no source tree**: `Documents/Grok` on macOS, Windows, and Linux
-- **`demo/`**: constrained sandbox for `demo:e2e` / `m0:live` only — not the default chat cwd
+- **`demo/`**: constrained sandbox for `m0:live` only — not the default chat cwd
 
 ### What you get
 
@@ -132,13 +130,6 @@ npm run run:both
 - **Composer**: Enter to send, Shift+Enter for newline; Ask / Plan / Build; Thinking; `/model` `/effort` `/fork` `/rewind`; follow-up queue; context-usage ring; weekly remaining
 - **⌘K**: actions, settings, slash stubs, MCP servers, and skills (sessions stay in the rail)
 - Bridge down → offline banner; history still shown; **auto-reconnect every 3s** (footer Reconnect still works)
-
-### Live e2e (stdio, tools, subagent)
-
-```bash
-npm run demo:e2e
-# log: demo/e2e-last-run.log
-```
 
 ### M0 handshake (live)
 

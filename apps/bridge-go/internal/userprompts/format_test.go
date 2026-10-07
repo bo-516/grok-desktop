@@ -13,8 +13,8 @@ func goldenDir(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	// apps/bridge-go/internal/userprompts → apps/bridge/test/fixtures/prompts-golden
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", "bridge", "test", "fixtures", "prompts-golden"))
+	// apps/bridge-go/internal/userprompts → apps/bridge-go/testdata/prompts-golden
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "testdata", "prompts-golden"))
 }
 
 func TestSerializeEmptyNull(t *testing.T) {

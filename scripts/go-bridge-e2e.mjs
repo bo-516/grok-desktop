@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
  * Multi-turn live e2e against the **Go bridge WS** path (shipped binary).
- * Mirrors Node demo:e2e primary observables: explore tools, write file under
- * demo/, edit hello.ts, summary — checks greetNoteExists / helloHasDemoSuffix /
- * hadTools / hadAgentText / stayedInDemo.
+ * Explores tools, writes a file under demo/, edits hello.ts, then checks
+ * greetNoteExists / helloHasDemoSuffix / hadTools / hadAgentText / stayedInDemo.
  *
  * Usage (from repo root):
  *   node scripts/go-bridge-e2e.mjs
@@ -369,7 +368,7 @@ async function main() {
     const helloSrc = readFileSync(helloPath, "utf8");
     const tools = client.toolCallIds();
     const agentAccum = client.agentText();
-    // Primary observables aligned with Node demo:e2e
+    // Primary observables for the demo-workspace edit.
     const checks = {
       greetNoteExists: existsSync(greetNote),
       helloHasDemoSuffix: helloSrc.includes("(demo)"),

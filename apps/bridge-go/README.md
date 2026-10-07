@@ -1,15 +1,13 @@
 # bridge-go
 
-Go implementation of the grok-desktop local bridge (T0+T1+T2 of the dual-bridge plan).
-
-Matches the frozen relay WebSocket protocol in
-[`docs/protocol-freeze-relay-2026-08-10.md`](../../docs/protocol-freeze-relay-2026-08-10.md).
+Go implementation of the grok-desktop local bridge. This is the only bridge process.
 
 **Hard constraints**
 
 - Spawns real `grok agent stdio` only — no mock agent product path
 - Does **not** port timeline reduce; forwards raw `session_update` to the UI
-- Session ops (`set_model`, `set_mode`, `compact`, `token_usage`, `fork_session`) and the full CLI channel match the Node bridge protocol surface
+- Session ops (`set_model`, `set_mode`, `compact`, `token_usage`, `fork_session`) and the CLI channel are the product protocol
+- `check_environment` marks `ok=false` when `grok --version` is missing, unparseable, or below `0.9.0`, even if the user is logged in
 
 ## Build
 

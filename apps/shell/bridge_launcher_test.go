@@ -92,22 +92,15 @@ func TestStartBridge_PackagedEmptyRepoUsesDocumentsGrok(t *testing.T) {
 	}
 }
 
-func TestStartBridge_NodeEmptyRepoIsSourceCheckoutError(t *testing.T) {
+func TestStartBridge_NodeRemovedDoesNotExec(t *testing.T) {
 	_, err := StartBridge(BridgeLaunchParams{
-		Impl:     BridgeImplNode,
+		Impl:     "node",
 		Port:     1,
 		Token:    "tok",
-		RepoRoot: "",
+		RepoRoot: t.TempDir(),
 	})
-	if err == nil {
-		t.Fatal("expected source-checkout error")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "source checkout") {
-		t.Fatalf("want source checkout, got %q", msg)
-	}
-	if strings.Contains(strings.ToLower(msg), "tsx") {
-		t.Fatalf("must not mention tsx: %q", msg)
+	if err == nil || err.Error() != nodeBridgeRemoved {
+		t.Fatalf("got %v", err)
 	}
 }
 

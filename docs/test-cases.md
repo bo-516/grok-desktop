@@ -159,9 +159,9 @@
 
 ---
 
-## 4. Bridge (`apps/bridge`)
+## 4. Bridge (`apps/bridge-go`)
 
-> Modules: `server.ts`, `spawnGrok.ts`, `workspaceEntries.ts`, `demo-e2e.ts`
+> Modules: `cmd/bridge/main.go`, `internal/wsapi`, `internal/session/workspace_entries.go`
 
 ### 4.1 Process and session
 
@@ -174,7 +174,7 @@
 | TC-BR-05 | start + resumeId → session/load | P0 | M | Manual | Has history session | Click sidebar session | Timeline restored; no new ghost id |
 | TC-BR-06 | Cold start does not blindly session/new | P0 | M | Manual | catalog has last | Refresh page | resume last or reconnect; no `Chat 019…` ghost |
 | TC-BR-07 | prompt / cancel / permission forwarding | P0 | M | Manual | live | Send, Stop, click permission | bridge forwards to agent; state broadcast |
-| TC-BR-08 | BRIDGE_ALWAYS_APPROVE=1 | P1 | L1 | Covered(e2e) | — | demo:e2e | Tool turns complete without UI |
+| TC-BR-08 | BRIDGE_ALWAYS_APPROVE=1 | P1 | L1 | Covered(e2e) | — | `node scripts/go-bridge-e2e.mjs` | Tool turns complete without UI |
 | TC-BR-09 | stderr broadcast | P1 | M | Manual | — | Auth/sandbox errors | UI/logs show stderr |
 | TC-BR-10 | Repeat start disposes old process first | P0 | B/L0 | TBD | — | start twice in a row | Old child exits; no zombies |
 

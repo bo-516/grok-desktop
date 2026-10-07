@@ -1,15 +1,15 @@
 // Package main is the thin Wails v3 desktop shell for grok-desktop.
 //
 // Responsibilities only:
-//  1. Resolve bridge.impl (config file + GROK_DESKTOP_BRIDGE env, default go)
+//  1. Resolve bridge impl (config file + GROK_DESKTOP_BRIDGE env; only go, default go)
 //  2. Pick free port + generate random token
-//  3. Spawn selected bridge as a **separate child process** (never in-process)
+//  3. Spawn bridge-go as a **separate child process** (never in-process)
 //  4. Embed apps/desktop dist and inject window.__GROK_BRIDGE_URL__
 //  5. Session file logs under ~/Library/Logs/grok-desktop (purge >12h on start)
 //  6. On exit: kill bridge process group
 //
-// No business reduce / ACP logic lives here. Protocol: docs/protocol-freeze-relay-2026-08-10.md
-// Design: docs/plan-wails3-dual-bridge-2026-08-10.md §4
+// No business reduce / ACP logic lives here.
+// "node" in env or config is a fatal error; the Node bridge process is gone.
 //
 // Wails pin: v3.0.0-beta.6 (see go.mod).
 package main

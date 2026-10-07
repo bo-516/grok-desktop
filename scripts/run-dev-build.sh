@@ -1,5 +1,5 @@
 # Sourced by run-dev.sh. Rebuild helpers for go-bridge / desktop dist / Wails shell.
-# Expects: ROOT, GO_BRIDGE_BIN, SHELL_BIN, TSX_BIN (ensure_tsx may reassign), log, err.
+# Expects: ROOT, GO_BRIDGE_BIN, SHELL_BIN, log, err.
 # SKIP_BUILD=1 skips rebuilds and fails if artifacts are missing or stale.
 
 # Exit 1 when $1 is not on PATH (used before go / other toolchain calls).
@@ -8,19 +8,6 @@ need_cmd() {
     err "missing command: $1"
     exit 1
   }
-}
-
-# Resolve TSX_BIN to the workspace or PATH tsx; exit 1 if neither exists.
-ensure_tsx() {
-  if [[ -x "$TSX_BIN" ]]; then
-    return 0
-  fi
-  if command -v tsx >/dev/null 2>&1; then
-    TSX_BIN="$(command -v tsx)"
-    return 0
-  fi
-  err "tsx not found — run: npm install"
-  exit 1
 }
 
 # True when $1 is missing/non-executable, or any Go source under $2 is newer than $1.
@@ -80,7 +67,10 @@ ensure_go_bridge() {
     err "Go bridge binary missing or stale: $GO_BRIDGE_BIN (SKIP_BUILD=1)"
     exit 1
   fi
-  need_cmd go
+  if ! command -v go >/dev/null 2>&1; then
+    err "go not on PATH. Build with: (cd apps/bridge-go && go build -o bin/bridge-go ./cmd/bridge)"
+    exit 1
+  fi
   log "building Go bridge → $GO_BRIDGE_BIN"
   mkdir -p "$(dirname "$GO_BRIDGE_BIN")"
   (cd "$ROOT/apps/bridge-go" && go build -o bin/bridge-go ./cmd/bridge)

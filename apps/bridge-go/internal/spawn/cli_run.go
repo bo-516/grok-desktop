@@ -12,8 +12,7 @@ import (
 )
 
 // CliRunResult is the outcome of one one-shot `grok <args…>` invocation.
-// Mirrors the Node bridge's cliRunner.CliRunResult so Environment / CLI
-// channel consumers see the same shape whether the host is Node or Go.
+// CLI channel consumers read Code, Stdout, Stderr, and JSON from this shape.
 type CliRunResult struct {
 	// Code is the process exit code. nil when the process was killed before
 	// reporting a code (timeout path returns an error instead of a result).
@@ -31,8 +30,8 @@ type CliRunResult struct {
 // and returns when the child exits or timeoutMs elapses.
 //
 // cwd is the workspace directory (empty keeps the bridge process cwd). env is
-// the full process environment — one-shot CLI commands mirror Node's
-// cliRunner (no whitelist filter); agent stdio still uses FilterEnvForGrokChild.
+// the full process environment — one-shot CLI commands pass that env through
+// (no whitelist filter); agent stdio still uses FilterEnvForGrokChild.
 //
 // On timeout the child is SIGTERM'd and an error is returned so the CLI channel
 // can surface a clear failure rather than a partial capture. On spawn failure

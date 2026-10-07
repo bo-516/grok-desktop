@@ -10,21 +10,25 @@ import (
 	"strings"
 )
 
-// BridgeImpl selects which bridge binary/script the shell spawns.
+// BridgeImpl is the bridge the shell spawns. Only Go remains.
 // Cold-switch only: change config (or GROK_DESKTOP_BRIDGE) and restart.
 type BridgeImpl string
 
 const (
-	// BridgeImplNode runs apps/bridge via node/tsx (oracle / fallback).
-	BridgeImplNode BridgeImpl = "node"
 	// BridgeImplGo runs apps/bridge-go. Product default when env/config omit impl.
+	// The value "node" is rejected; it used to select a removed Node process.
 	BridgeImplGo BridgeImpl = "go"
 )
+
+// nodeBridgeRemoved is the stderr sentence for an explicit Node selection.
+// ParseBridgeImpl and StartBridge both return this exact text.
+const nodeBridgeRemoved = "node bridge was removed; unset GROK_DESKTOP_BRIDGE or set it to go"
 
 // Config is the thin shell user configuration.
 // Only bridge selection is required for cold-switch; more fields may land later.
 type Config struct {
-	// BridgeImpl is "node" or "go". Env GROK_DESKTOP_BRIDGE overrides file.
+	// BridgeImpl is "go". Env GROK_DESKTOP_BRIDGE overrides file.
+	// "node" is a hard error (the Node bridge process is gone).
 	BridgeImpl BridgeImpl `json:"bridge.impl"`
 }
 
@@ -34,24 +38,25 @@ func DefaultConfig() Config {
 }
 
 // ParseBridgeImpl normalizes a raw string to BridgeImpl.
-// Empty string is the product default (Go). Non-empty values that are not
-// "node" or "go" return an error so a typo cannot silently pick Node.
+// Empty string and "go" are the product default. "node" returns
+// nodeBridgeRemoved so a leftover config cannot start a process.
+// Any other non-empty value returns an error so a typo cannot be ignored.
 func ParseBridgeImpl(raw string) (BridgeImpl, error) {
 	v := strings.ToLower(strings.TrimSpace(raw))
 	switch v {
 	case "", string(BridgeImplGo):
 		return BridgeImplGo, nil
-	case string(BridgeImplNode):
-		return BridgeImplNode, nil
+	case "node":
+		return "", fmt.Errorf("%s", nodeBridgeRemoved)
 	default:
-		return "", fmt.Errorf("invalid bridge.impl %q (want node|go)", raw)
+		return "", fmt.Errorf("invalid bridge.impl %q (want go)", raw)
 	}
 }
 
 // ResolveBridgeImpl applies env override then config file then default (Go).
 // Env GROK_DESKTOP_BRIDGE always wins when set and non-empty.
 // cfg is the value loaded from the user config file (may be zero).
-// Empty cfg.BridgeImpl selects Go — Node is never implied.
+// Empty cfg.BridgeImpl selects Go. "node" is never implied and is an error.
 // Returns the selected impl or an error if env/config value is illegal.
 func ResolveBridgeImpl(envValue string, cfg Config) (BridgeImpl, error) {
 	if strings.TrimSpace(envValue) != "" {

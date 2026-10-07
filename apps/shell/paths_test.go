@@ -132,11 +132,11 @@ func TestResolveBridgeLaunchCwd_CheckoutIsRepoRoot(t *testing.T) {
 func writeRepoMarker(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
-	marker := filepath.Join(repo, "apps", "bridge", "src")
+	marker := filepath.Join(repo, "apps", "bridge-go", "cmd", "bridge")
 	if err := os.MkdirAll(marker, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(marker, "server.ts"), []byte("// marker\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(marker, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return repo
