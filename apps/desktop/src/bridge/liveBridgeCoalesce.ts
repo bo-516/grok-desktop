@@ -159,9 +159,10 @@ export function createStreamCoalescer(
   function runFrame(): void {
     frame.cancel = null;
     const due = [...pending].filter(([, entry]) => entry.lane === "frame");
-    for (const [sessionId] of due) {
-      // Re-check: an earlier emit may have flushed this entry re-entrantly.
-      if (pending.get(sessionId)?.lane === "frame") {
+    for (const [sessionId, entry] of due) {
+      // Same entry only: an earlier emit may have flushed it re-entrantly, and
+      // a re-deferred one waits for the next frame (≤ 1 notify per frame).
+      if (pending.get(sessionId) === entry) {
         emitEntry(sessionId);
       }
     }
