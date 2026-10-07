@@ -111,6 +111,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   restartNotice: null,
 
   hydrateCatalog: () => {
+    // Clears the legacy localStorage blob and starts empty. The connect path
+    // fills the rail from ~/.grok/sessions; do not paint a cached list first.
     const catalog = loadCatalogFromStorage();
     set({
       catalog,

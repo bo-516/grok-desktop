@@ -1,6 +1,7 @@
 /**
  * Session catalog: persist + group by project (Codex-style mission control).
- * Pure helpers — no React. Storage is localStorage in the browser.
+ * Pure helpers — no React. The rail list is read from ~/.grok/sessions,
+ * not from localStorage.
  *
  * Implementation is split by domain; this file re-exports the public API.
  */

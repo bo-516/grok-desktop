@@ -1,6 +1,7 @@
 /**
- * Catalog localStorage load/save + hydrate (titles / empty-ghost prune).
- * Pure helpers except browser localStorage access.
+ * Catalog title hydrate and the legacy storage key.
+ * The rail list is not stored here. `loadCatalogFromStorage` only deletes
+ * the old blob so a previous version cannot paint deleted chats.
  */
 
 import {
@@ -10,7 +11,6 @@ import {
   tagSeedUserMessages,
   type SessionState,
 } from "@grok-desktop/acp-core";
-import { migrateCatalogToCurrent } from "./sessionCatalogMigration";
 import {
   NO_PROJECT_KEY,
   SESSION_STORAGE_KEY,
@@ -106,61 +106,40 @@ export function normalizeCatalog(catalog: SessionRecord[]): SessionRecord[] {
 }
 
 /**
- * Load catalog from localStorage (browser). SSR/Node → empty.
- * Runs v1→v2 provenance migration before title prune so untagged child
- * ghosts are hidden from the rail without deleting drill-down history.
- * @returns Normalized catalog; also rewrites storage when ghosts are pruned.
+ * Drop any leftover rail cache and return an empty catalog.
+ * The rail is filled from ~/.grok/sessions on connect, then refreshed while
+ * idle. Reading this key painted chats whose folders had already been deleted.
+ * @returns Always []. Also removes {@link SESSION_STORAGE_KEY} when storage exists.
  */
 export function loadCatalogFromStorage(): SessionRecord[] {
-  if (typeof localStorage === "undefined") {
-    return [];
-  }
-  try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw) as SessionRecord[];
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    const migrated = migrateCatalogToCurrent(parsed).catalog;
-    const normalized = normalizeCatalog(migrated);
-    // Persist cleaned catalog so ghost sessions disappear after refresh.
-    try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(normalized));
-    } catch {
-      /* ignore */
-    }
-    return normalized;
-  } catch {
-    return [];
-  }
+  forgetCatalogStorage();
+  return [];
 }
 
 /**
- * Persist catalog to localStorage.
- * @param catalog Records to serialize. Quota / private mode failures are
- *   observable via console.warn (once per failure) rather than silent swallow;
- *   eviction strategy is out of scope for this path.
+ * Remove the legacy catalog blob. Safe when storage is missing or private.
+ * Called on every cold open so a previous version's cache cannot come back.
  */
-export function saveCatalogToStorage(catalog: SessionRecord[]): void {
+export function forgetCatalogStorage(): void {
   if (typeof localStorage === "undefined") {
     return;
   }
   try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(catalog));
-  } catch (err) {
-    // QuotaExceededError / private mode — surface once so operators notice.
-    const name =
-      err && typeof err === "object" && "name" in err
-        ? String((err as { name: unknown }).name)
-        : "Error";
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(
-      `[session-catalog] localStorage.setItem failed (${name}): ${message}`,
-    );
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    /* private mode */
   }
+}
+
+/**
+ * No-op. The session rail is not cached in localStorage.
+ * Call sites still invoke this after in-memory catalog updates; the argument
+ * is the catalog they would have written. Disk under ~/.grok/sessions is the
+ * list the next launch and the idle refresh read.
+ * @param _catalog Ignored. Kept so existing call sites stay source-compatible.
+ */
+export function saveCatalogToStorage(_catalog: SessionRecord[]): void {
+  /* disk is the source of truth */
 }
 
 /**

@@ -115,7 +115,10 @@ export type TimeGroup = {
   sessions: SessionRecord[];
 };
 
-/** localStorage key for the persisted catalog JSON array. */
+/**
+ * Legacy localStorage key for the rail JSON array.
+ * Startup removes it. New launches do not write it.
+ */
 export const SESSION_STORAGE_KEY = "grok-desktop.session-catalog.v1";
 
 /**
