@@ -13,6 +13,10 @@ export type {
 export { PreviewDiffView } from "./PreviewDiffView";
 export { PreviewDiffWidget } from "./PreviewDiffWidget";
 export type { PreviewDiffWidgetProps } from "./PreviewDiffWidget";
+export { usePreviewDiffWidget } from "./usePreviewDiffWidget";
+export type { PreviewDiffWidgetModel } from "./usePreviewDiffWidget";
+export { PreviewDiffMenuView } from "./PreviewDiffMenuView";
+export type { PreviewDiffMenuViewProps } from "./PreviewDiffMenuView";
 export { PreviewCodeView } from "./PreviewCodeView";
 export { PreviewCodeWidget } from "./PreviewCodeWidget";
 export type { PreviewCodeWidgetProps } from "./PreviewCodeWidget";

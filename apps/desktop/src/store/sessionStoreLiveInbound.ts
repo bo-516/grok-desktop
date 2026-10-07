@@ -1,166 +1,40 @@
 /**
  * Inbound SessionState routing: heal → provenance gate → child/pending or catalog.
  * Whitelist (I2): only local/resumed/disk enter catalog; wire stays pending.
+ *
+ * Steps live in sessionStoreInboundAdmission (heal, roles, isolation) and
+ * sessionStoreInboundCatalog (catalog upsert); this module orders them and
+ * owns the canvas-follow write. The slice types live in sessionStoreLiveSlice
+ * and are re-exported here so existing imports keep working.
  */
 
-import type { AgentMode, SessionState } from "@grok-desktop/acp-core";
-import { loadWorkspacePrefs } from "../lib/workspacePrefs";
-import {
-  catalogRefsEqual,
-  normalizeCatalogRow,
-  upsertFromLiveState,
-} from "./sessionCatalog";
-import {
-  healSessionTimeline,
-  persistNormalizedCatalog,
-} from "./sessionStoreSupport";
-import { pinModeHoldOnCanvas, type HeldPrompt } from "./sessionStoreModeHoldCanvas";
+import type { SessionState } from "@grok-desktop/acp-core";
+import { isUserFacingProvenance, stampProvenance } from "./sessionProvenance";
+import { pinModeHoldOnCanvas } from "./sessionStoreModeHoldCanvas";
 import {
   mergeCanvasInbound,
-  preserveLocalUserMedia,
   resolveCanvasFollow,
 } from "./sessionStoreLiveFollow";
 import {
-  mergeRoles,
-  promoteChildToCatalog,
-  retroTagCatalogRoles,
-  rolesFromSubagents,
-  terminalChildSessionIds,
-  type SessionRoleIndex,
-} from "./sessionRoles";
-import {
-  isUserFacingProvenance,
-  putPendingSession,
-  stampProvenance,
-  stampProvenanceMany,
-  type SessionProvenanceIndex,
-} from "./sessionProvenance";
-import {
-  claimPendingAsChildren,
-  promotePendingToCatalog,
-} from "./sessionStorePending";
+  admitInboundRoles,
+  healInboundSession,
+  isolateInboundSession,
+} from "./sessionStoreInboundAdmission";
+import { upsertInboundCatalog } from "./sessionStoreInboundCatalog";
 import { admitForceNewSessionFromInfo as admitForceNewSessionFromInfoImpl } from "./sessionStoreForceNew";
-import {
-  isolatedInboundOutcome,
-  noteInboundStatus,
-  type InboundOutcome,
-} from "./sessionTurnEdge";
-import type { ConnectionMode, LiveHandle } from "./sessionStoreLiveTypes";
-import type {
-  EnvironmentInfo,
-  PoolEntry,
-} from "../bridge/liveBridgeTypes";
-import type { SessionRecord } from "./sessionCatalogTypes";
-import type { PromptQueueItem } from "@/lib/promptQueue";
+import { noteInboundStatus, type InboundOutcome } from "./sessionTurnEdge";
+import type { GetState, SetState } from "./sessionStoreLiveSlice";
 
 export { promotePendingToCatalog } from "./sessionStorePending";
 export { shouldStampLocalFromForceNewInfo } from "./sessionProvenance";
 export type { InboundOutcome } from "./sessionTurnEdge";
-
-/** Minimal store slice for inbound apply + startLiveBridge. */
-export type LiveStoreSlice = {
-  session: SessionState;
-  connectionMode: ConnectionMode;
-  bridgeInfo: string;
-  lastError: string | null;
-  live: LiveHandle | null;
-  catalog: SessionRecord[];
-  activeSessionId: string | null;
-  viewingSessionId: string | null;
-  /** Open subagent flag. Disk refresh clears this when that id is gone. */
-  viewingSubagent?: boolean;
-  /** Parent of the open subagent. Cleared with viewingSubagent on that refresh. */
-  viewingParentSessionId?: string;
-  /** Resident process summaries in the pool (rail status lights). */
-  poolEntries: PoolEntry[];
-  /** CLI / login probe; null means not received yet. */
-  environment: EnvironmentInfo | null;
-  /**
-   * Login flag written by both the environment probe and the 3s `auth_state`
-   * poll; null until one of them answers. Optional so older call sites that
-   * build a slice literal still type-check.
-   */
-  authed?: boolean | null;
-  /** Queued user prompts while streaming (session-scoped items). */
-  promptQueue: PromptQueueItem[];
-  /** SPAWN restart banner (J-06). */
-  restartNotice: string | null;
-  /**
-   * True after New chat until first send or selectSession.
-   * Optional so older call sites still type-check.
-   */
-  localDraft?: boolean;
-  /**
-   * True while first send of a New chat draft is forceNew-creating.
-   * Optional so older call sites still type-check.
-   */
-  creatingSession?: boolean;
-  /**
-   * In-flight mode switch target. Inbound frames must not paint over it.
-   * Optional so older call sites still type-check.
-   */
-  pendingMode?: AgentMode | null;
-  /** Prompt painted locally while session/set_mode is still running. */
-  heldPrompt?: HeldPrompt | null;
-  /**
-   * Uncached session waiting for session/load replay to land.
-   * Optional so older call sites still type-check.
-   */
-  restoringSessionId?: string | null;
-  /**
-   * childSessionId → { parentSessionId, sessionKind }.
-   * Live first-hand from subagent cards; also rebuilt from catalog on hydrate.
-   */
-  sessionRoles?: SessionRoleIndex;
-  /**
-   * In-memory reduce buffers for known child sessions (not persisted).
-   * Streaming updates land here so the rail catalog stays still.
-   */
-  childSessions?: Record<string, SessionState>;
-  /**
-   * sessionId → provenance (local/resumed/disk/child/wire).
-   * Wire is default; only user-facing provenances enter the catalog.
-   */
-  sessionProvenance?: SessionProvenanceIndex;
-  /**
-   * Unproven wire-only session buffers (not persisted). Claimed by spawn,
-   * sessions_list, or disconnect/hide flush.
-   */
-  pendingSessions?: Record<string, SessionState>;
-  /** Oldest-first order of pendingSessions keys (for bounded eviction). */
-  pendingSessionOrder?: string[];
-  /**
-   * Monotonic counter bumped only when catalog row identity set changes in a
-   * way that affects openable-child Sets (Agents rail deps).
-   */
-  catalogRevision?: number;
-};
-
-export type SetState = (
-  partial:
-    | Partial<LiveStoreSlice>
-    | ((state: LiveStoreSlice) => Partial<LiveStoreSlice>),
-) => void;
-export type GetState = () => LiveStoreSlice;
+export type {
+  GetState,
+  LiveStoreSlice,
+  SetState,
+} from "./sessionStoreLiveSlice";
 
 export { healSessionTimeline } from "./sessionStoreSupport";
-
-/**
- * Parent id → workspace from catalog rows (for child noProject heal).
- * @param catalog Current catalog.
- * @returns Map of session id to non-empty workspace.
- */
-function parentWorkspaceMap(
-  catalog: SessionRecord[],
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const rec of catalog) {
-    if (rec.workspace.trim()) {
-      out[rec.id] = rec.workspace;
-    }
-  }
-  return out;
-}
 
 /**
  * Stamp `local` from forceNew ready-info; re-admits pending if needed.
@@ -208,168 +82,34 @@ export function applyInboundSession(
   session: SessionState,
   opts?: { recency?: "live" | "passive" },
 ): InboundOutcome {
-  /** Snapshot with legacy duplicate seed rows normalized before routing. */
-  const healedTimeline = healSessionTimeline(session);
-  // User chose "work without a project": bridge still has a default
-  // cwd for the agent process, but do not let that overwrite the UI
-  // selection or catalog grouping a few seconds later.
-  const healedBase = loadWorkspacePrefs().noProject
-    ? { ...healedTimeline, workspace: "" }
-    : healedTimeline;
-  /**
-   * Live reduce only has text echoes of prompts; optimistic paint already
-   * holds image ContentBlocks. Merge media onto the same-session canvas
-   * before catalog upsert so thumbs survive mid-turn and disk cache.
-   */
-  const healed = preserveLocalUserMedia(healedBase, get().session);
-
-  // Parent subagents are the first-hand role source (before sessions_list).
-  const prevRoles = get().sessionRoles ?? {};
-  const roles = mergeRoles(prevRoles, rolesFromSubagents(healed));
+  /** Healed snapshot (prefs workspace + preserved local media). */
+  const healed = healInboundSession(session, get().session);
+  /** Roles / provenance / pending / child buffers after spawn claims. */
+  const admission = admitInboundRoles(get(), healed);
   const viewing = get().viewingSessionId;
-
-  // Child stamps from roles; forceNew `local` is stamped only from bridge
-  // `info` (session <id> ready) — never from empty inbound state frames
-  // (wire children share that empty-timeline shape and would hijack New chat).
-  let provenance = stampProvenanceMany(
-    get().sessionProvenance ?? {},
-    Object.keys(roles),
-    "child",
-  );
-
-  let pending = get().pendingSessions ?? {};
-  let pendingOrder = get().pendingSessionOrder ?? [];
-  let childSessions = { ...(get().childSessions ?? {}) };
-
-  // Spawn claim: pending id that just got a role → child buffer.
-  {
-    const claimed = claimPendingAsChildren(
-      pending,
-      pendingOrder,
-      childSessions,
-      roles,
-      provenance,
-    );
-    pending = claimed.pending;
-    pendingOrder = claimed.order;
-    childSessions = claimed.childSessions;
-    provenance = claimed.provenance;
-  }
-
-  const isKnownChild = Boolean(roles[healed.id]);
+  const isKnownChild = Boolean(admission.roles[healed.id]);
   const viewingThisChild = viewing !== null && viewing === healed.id;
-  const userFacing = isUserFacingProvenance(provenance[healed.id]);
+  const userFacing = isUserFacingProvenance(admission.provenance[healed.id]);
 
   // Unproven wire id (and known children not being viewed): isolate — no catalog.
   if (!userFacing && !viewingThisChild) {
-    if (isKnownChild) {
-      childSessions = { ...childSessions, [healed.id]: healed };
-      // Retro-tag any catalog row already created out of order for this child.
-      const parentWs = parentWorkspaceMap(get().catalog);
-      const tagged = retroTagCatalogRoles(get().catalog, roles, parentWs);
-      const catalogChanged = tagged !== get().catalog;
-      if (catalogChanged) {
-        const healedRows = tagged.map((r) =>
-          roles[r.id] ? normalizeCatalogRow(r) : r,
-        );
-        persistNormalizedCatalog(healedRows);
-        set({
-          sessionRoles: roles,
-          sessionProvenance: provenance,
-          childSessions,
-          pendingSessions: pending,
-          pendingSessionOrder: pendingOrder,
-          catalog: healedRows,
-          catalogRevision: (get().catalogRevision ?? 0) + 1,
-        });
-        return isolatedInboundOutcome(healed.id);
-      }
-      set({
-        sessionRoles: roles,
-        sessionProvenance: provenance,
-        childSessions,
-        pendingSessions: pending,
-        pendingSessionOrder: pendingOrder,
-      });
-      return isolatedInboundOutcome(healed.id);
-    }
-
-    // Wire-only: pending isolation (never localStorage until claimed).
-    const put = putPendingSession(pending, healed.id, healed, pendingOrder);
-    pending = put.pending;
-    pendingOrder = put.order;
-    let catalog = get().catalog;
-    let rev = get().catalogRevision ?? 0;
-    if (put.evictId && put.evicted) {
-      // Flush-before-evict so capacity cannot drop a real multi-client session.
-      provenance = stampProvenance(provenance, put.evictId, "disk");
-      catalog = promotePendingToCatalog(catalog, put.evicted);
-      rev += 1;
-      persistNormalizedCatalog(catalog);
-    }
-    set({
-      sessionRoles: roles,
-      sessionProvenance: provenance,
-      childSessions,
-      pendingSessions: pending,
-      pendingSessionOrder: pendingOrder,
-      ...(catalog !== get().catalog
-        ? { catalog, catalogRevision: rev }
-        : {}),
-    });
-    return isolatedInboundOutcome(healed.id);
+    return isolateInboundSession(set, get, healed, admission, isKnownChild);
   }
 
   // User-facing (or viewed child): catalog path.
-  // Ensure child role still stamps when viewing a child mid-stream.
-  if (isKnownChild) {
-    provenance = stampProvenance(provenance, healed.id, "child");
-  }
-
+  const { roles, pending, pendingOrder, childSessions } = admission;
   const prevCatalog = get().catalog;
-  let catalog = upsertFromLiveState(
+  const { catalog, provenance } = upsertInboundCatalog({
     prevCatalog,
     healed,
-    Date.now(),
-    opts?.recency ? { recency: opts.recency } : undefined,
-  );
-  // Retro-tag siblings that may already sit in the catalog without kind.
-  const parentWs = parentWorkspaceMap(catalog);
-  catalog = retroTagCatalogRoles(catalog, roles, parentWs);
-  // Promote terminal children buffered from earlier streaming frames.
-  for (const childId of terminalChildSessionIds(healed)) {
-    const buffered = childSessions[childId];
-    const role = roles[childId];
-    if (!buffered || !role) {
-      continue;
-    }
-    catalog = promoteChildToCatalog(
-      catalog,
-      buffered,
-      role,
-      healed.workspace || parentWs[role.parentSessionId] || "",
-    );
-    delete childSessions[childId];
-    // Terminal promote keeps the row in catalog for L3 but rail still hides
-    // subagent kinds; provenance stays child.
-    provenance = stampProvenance(provenance, childId, "child");
-  }
-  // Hot path: only re-heal rows that changed identity (id present in roles
-  // or the upserted parent), not a full normalizeCatalog walk.
-  if (catalog !== prevCatalog) {
-    catalog = catalog.map((rec) => {
-      if (rec.id === healed.id || roles[rec.id]) {
-        return normalizeCatalogRow(rec);
-      }
-      return rec;
-    });
-  }
-  // Reuse prior array reference when every slot is the same object (no churn).
-  if (catalogRefsEqual(prevCatalog, catalog)) {
-    catalog = prevCatalog;
-  } else {
-    persistNormalizedCatalog(catalog);
-  }
+    roles,
+    childSessions,
+    // Ensure child role still stamps when viewing a child mid-stream.
+    provenance: isKnownChild
+      ? stampProvenance(admission.provenance, healed.id, "child")
+      : admission.provenance,
+    recency: opts?.recency,
+  });
 
   /** Last canvas-owned live id, used only before an explicit selection exists. */
   const active = get().activeSessionId;
