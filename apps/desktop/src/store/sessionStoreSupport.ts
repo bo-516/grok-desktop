@@ -93,8 +93,9 @@ export const INITIAL_SESSION = createSessionState({
 });
 
 /**
- * Persist an already-normalized catalog without running normalizeCatalog again.
- * Hot path (inbound updates) must use this after a single normalize at the call site.
+ * In-memory catalog hook kept for call sites. Does not write localStorage.
+ * Hot path (inbound updates) still calls this after a single normalize; the
+ * rail membership comes from ~/.grok/sessions on connect and idle refresh.
  * @param catalog Catalog that has already been through normalizeCatalog (or is known clean).
  */
 export function persistNormalizedCatalog(catalog: SessionRecord[]): void {
@@ -117,9 +118,9 @@ export function healSessionTimeline(session: SessionState): SessionState {
 }
 
 /**
- * Normalize then persist the session catalog (cold paths: hydrate, filter-only, remote merge).
+ * Normalize the catalog for callers that still share one code path with the
+ * old persist step. Does not write localStorage.
  * @param catalog Latest catalog; weak-titled empty sessions are pruned first.
- *   Storage failures (e.g. private mode) are warned by the lower layer.
  * @returns void; callers should still write the same normalized result into Zustand.
  */
 export function persistCatalog(catalog: SessionRecord[]): void {
@@ -128,8 +129,8 @@ export function persistCatalog(catalog: SessionRecord[]): void {
 }
 
 /**
- * Force any pending throttled catalog write to disk immediately.
- * Call on session switch / disconnect so the latest rail snapshot is not lost.
+ * Former flush of a throttled localStorage write. No-op.
+ * Call sites on session switch / disconnect still invoke it.
  */
 export function flushCatalogPersist(): void {
   flushCatalogNow();

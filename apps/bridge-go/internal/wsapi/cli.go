@@ -314,9 +314,9 @@ func stringsTrim(s string) string {
 // other project's history (same reasoning as the Node cliCommands.sessionsList).
 //
 // Unlike Node there is no `grok sessions list` fallback — this path is disk
-// only — so an unreadable or absent tree yields an empty list. That is safe:
-// mergeRemoteSessionsIntoCatalog leaves the local catalog untouched on empty
-// input, so a bad read can never wipe the rail.
+// only. A missing sessions directory is an empty list (the desktop drops
+// rows that are gone). A read error is returned so a bad stat cannot be
+// mistaken for "every session was deleted".
 func sessionsList() (any, error) {
 	rows, err := session.ListSessionsFromDisk(sessionsListLimit, "", "")
 	if err != nil {

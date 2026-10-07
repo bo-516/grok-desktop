@@ -11,12 +11,14 @@ import {
   shouldArmBridgeReconnect,
   startBridgeReconnectLoop,
 } from "../../lib/bridgeReconnect";
+import { isSubagentSessionKind } from "../../lib/sessionActions";
 import { setAttentionBadge } from "../../lib/dockBadge";
 import { rememberModelCatalog } from "../../store/modelCatalogStore";
 import { useSessionStore } from "../../store/sessionStore";
 
 /**
- * Hydrate catalog, resume last session, refresh env, dock/OS attention badge,
+ * Clear the legacy catalog cache, connect, then open the newest on-disk chat
+ * once the first sessions_list lands. Refresh env, dock/OS attention badge,
  * retry the live bridge every 3s while `connectionMode` is disconnected, and
  * re-probe login every 3s while it is live.
  * @param args Session status fields used for notifications and badge count.
@@ -35,13 +37,17 @@ export function useShellSessionLifecycle(args: {
 }): void {
   const hydrateCatalog = useSessionStore((s) => s.hydrateCatalog);
   const selectSession = useSessionStore((s) => s.selectSession);
-  const reconnect = useSessionStore((s) => s.reconnect);
   const ensureConnected = useSessionStore((s) => s.ensureConnected);
+  const catalogRevision = useSessionStore((s) => s.catalogRevision);
+  const viewingSessionId = useSessionStore((s) => s.viewingSessionId);
+  const localDraft = useSessionStore((s) => s.localDraft);
   const refreshEnvironment = useSessionStore((s) => s.refreshEnvironment);
   const refreshAuth = useSessionStore((s) => s.refreshAuth);
   const authed = useSessionStore((s) => s.authed);
   const live = useSessionStore((s) => s.live);
   const autoStarted = useRef(false);
+  /** Set once the cold open has chosen a disk chat, or the user acted first. */
+  const openedFromDisk = useRef(false);
 
   useEffect(() => {
     hydrateCatalog();
@@ -52,14 +58,36 @@ export function useShellSessionLifecycle(args: {
       return;
     }
     autoStarted.current = true;
-    const cat = useSessionStore.getState().catalog;
-    const last = cat[0];
-    if (last) {
-      selectSession(last.id);
-    } else {
-      void reconnect().catch(() => undefined);
+    // Connect only. Selecting from an empty catalog used to forceNew a ghost chat.
+    void ensureConnected().catch(() => undefined);
+  }, [ensureConnected]);
+
+  useEffect(() => {
+    if (openedFromDisk.current) {
+      return;
     }
-  }, [reconnect, selectSession]);
+    if (localDraft || viewingSessionId) {
+      openedFromDisk.current = true;
+      return;
+    }
+    if (args.connectionMode !== "live-bridge") {
+      return;
+    }
+    const first = useSessionStore
+      .getState()
+      .catalog.find((row) => !isSubagentSessionKind(row.sessionKind));
+    if (!first) {
+      return;
+    }
+    openedFromDisk.current = true;
+    selectSession(first.id);
+  }, [
+    args.connectionMode,
+    catalogRevision,
+    localDraft,
+    selectSession,
+    viewingSessionId,
+  ]);
 
   useEffect(() => {
     if (args.connectionMode === "live-bridge") {

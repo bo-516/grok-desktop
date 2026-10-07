@@ -36,6 +36,10 @@ import {
   flushPendingSessionsToCatalog,
   schedulePendingSessionsSync as schedulePendingSyncImpl,
 } from "./sessionStorePending";
+import {
+  armCatalogRefresh,
+  stopCatalogRefresh,
+} from "./sessionStoreCatalogPoll";
 import { syncCatalogFromBridge } from "./sessionStoreSync";
 import { beginLiveSessionStart } from "./sessionStoreLiveStart";
 import { rememberSlashCatalog } from "@/lib/slashCatalog";
@@ -267,6 +271,7 @@ export async function startLiveBridgeSession(
         },
         onClose: () => {
           stopPoolPoll();
+          stopCatalogRefresh();
           cancelPendingSessionsSync();
           forgetAllTurnEdges();
           set((s) => {
@@ -315,6 +320,7 @@ export async function startLiveBridgeSession(
       // Event-driven onPool is primary; adaptive poll keeps streaming "N running"
       // honest if a push is missed (stream end / exit without ACP, partial WS drop).
       startPoolPoll(() => bridge.listPool(), () => get().poolEntries);
+      armCatalogRefresh(get, () => syncCatalogFromBridge(bridge, set, get));
       // Pull every workspace's sessions into the rail catalog (F-SESS-07).
       void syncCatalogFromBridge(bridge, set, get).then(() => {
         // After cold sync, reclassify any pending that arrived during connect.
@@ -322,6 +328,7 @@ export async function startLiveBridgeSession(
       });
     } catch (e) {
       stopPoolPoll();
+      stopCatalogRefresh();
       if (!stillCurrent()) {
         throw e;
       }

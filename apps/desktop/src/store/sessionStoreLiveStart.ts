@@ -9,6 +9,7 @@ import type { StartOpts as BridgeStartOpts } from "../bridge/liveBridge";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
 import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
 import { resolveResumeCanvasStatus } from "./sessionStoreSupport";
+import { stopCatalogRefresh } from "./sessionStoreCatalogPoll";
 import { stopPoolPoll } from "./sessionStorePoolPoll";
 import type { GetState, SetState } from "./sessionStoreLiveInbound";
 import type { LiveHandle } from "./sessionStoreLiveTypes";
@@ -39,7 +40,7 @@ export type LiveSessionStartArgs = {
  * Paint a cold resume from disk when the canvas is empty, then session/start.
  * Disk history is painted before grok-build so Restoring is not gated on
  * initialize. A stale select returns without throwing. A closed socket marks
- * the store disconnected and throws.
+ * the store disconnected, stops the idle rail refresh, and throws.
  * @param set Zustand set from startLiveBridgeSession.
  * @param get Zustand get from startLiveBridgeSession.
  * @param live Open bridge handle; ready has already been awaited.
@@ -118,6 +119,8 @@ export async function beginLiveSessionStart(
   const started = live.start(startOpts);
   if (!started) {
     stopPoolPoll();
+    // Same disconnect as onClose: do not keep listing ~/.grok/sessions.
+    stopCatalogRefresh();
     if (!stillCurrent()) {
       throw new Error("bridge WebSocket not open");
     }

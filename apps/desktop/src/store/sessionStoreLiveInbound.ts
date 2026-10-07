@@ -67,6 +67,10 @@ export type LiveStoreSlice = {
   catalog: SessionRecord[];
   activeSessionId: string | null;
   viewingSessionId: string | null;
+  /** Open subagent flag. Disk refresh clears this when that id is gone. */
+  viewingSubagent?: boolean;
+  /** Parent of the open subagent. Cleared with viewingSubagent on that refresh. */
+  viewingParentSessionId?: string;
   /** Resident process summaries in the pool (rail status lights). */
   poolEntries: PoolEntry[];
   /** CLI / login probe; null means not received yet. */

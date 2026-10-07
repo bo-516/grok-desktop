@@ -50,6 +50,8 @@ func DecodeWorkspaceDirName(encodedDirName string) string {
 
 // ListSessionsFromDisk walks ~/.grok/sessions and returns catalog rows.
 // limit defaults to 500 (max 2000); cwdFilter scopes to one absolute workspace.
+// A missing sessions root is an empty slice. Any other error reading that
+// root is returned so the desktop does not treat a bad stat as "deleted".
 func ListSessionsFromDisk(limit int, cwdFilter, grokHome string) ([]DiskSessionRow, error) {
 	if limit <= 0 {
 		limit = 500
@@ -63,7 +65,13 @@ func ListSessionsFromDisk(limit int, cwdFilter, grokHome string) ([]DiskSessionR
 	sessionsRoot := filepath.Join(grokHome, "sessions")
 	workspaceDirs, err := os.ReadDir(sessionsRoot)
 	if err != nil {
-		return []DiskSessionRow{}, nil
+		// Missing tree is an empty rail. Any other error must surface so the
+		// desktop keeps its in-memory list instead of treating a bad read as
+		// "the user deleted every session".
+		if os.IsNotExist(err) {
+			return []DiskSessionRow{}, nil
+		}
+		return nil, err
 	}
 	filterCwd := strings.TrimRight(cwdFilter, `/\`)
 	var rows []DiskSessionRow
