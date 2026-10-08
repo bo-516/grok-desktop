@@ -1,5 +1,6 @@
 /**
- * Slim top chrome (IA): session identity + sync + context-drawer toggle + session ⋯.
+ * Slim top chrome (IA): session identity + git branch chip + sync +
+ * context-drawer toggle + session ⋯.
  * Mode lives in Composer; drawers live in sidebar footer + ⌘K.
  */
 
@@ -10,6 +11,7 @@ import {
   titleFromSessionState,
 } from "@grok-desktop/acp-core";
 import { useSessionStore } from "../store/sessionStore";
+import { GitBranchChipWidget } from "./git";
 import { useCopyFeedback } from "./shared";
 import { SessionMenuWidget } from "./SessionMenuWidget";
 
@@ -55,7 +57,8 @@ export type TopNavWidgetProps = {
 };
 
 /**
- * Stateful top chrome: title, short session id, sync, context drawer, menu.
+ * Stateful top chrome: title, short session id, git branch chip, sync,
+ * context drawer, menu.
  * The sessions hamburger mounts only when the left rail is off-canvas.
  * When viewing a harness subagent, shows a breadcrumb back to the parent.
  * The id chip stays visible when a long Goal path would otherwise eat the bar,
@@ -138,6 +141,7 @@ export function TopNavWidget(props: TopNavWidgetProps) {
             </button>
           ) : null}
         </span>
+        <GitBranchChipWidget />
         <span
           className={cs("top-nav-sync", {
             "top-nav-sync-live":
