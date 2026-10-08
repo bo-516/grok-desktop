@@ -84,12 +84,19 @@ func TestTryParseJSONEmpty(t *testing.T) {
 	}
 }
 
+// fakeCliTimeoutMs bounds success-path RunGrokCli calls against a freshly
+// written fake grok. The fake answers at once, so a generous cap never slows
+// the suite; it only absorbs macOS's first-exec scan of a new executable,
+// which took over 5s while the whole Go suite ran in parallel.
+// TestRunGrokCliTimeout keeps its own short timeout.
+const fakeCliTimeoutMs = 60_000
+
 func TestRunGrokCliJSONSuccess(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeGrok(t, dir, "json")
 	t.Setenv("GROK_BIN", bin)
 
-	result, err := RunGrokCli([]string{"inspect", "--json"}, "", 5_000)
+	result, err := RunGrokCli([]string{"inspect", "--json"}, "", fakeCliTimeoutMs)
 	if err != nil {
 		t.Fatalf("RunGrokCli: %v", err)
 	}
@@ -110,7 +117,7 @@ func TestRunGrokCliFailExit(t *testing.T) {
 	bin := writeFakeGrok(t, dir, "fail")
 	t.Setenv("GROK_BIN", bin)
 
-	result, err := RunGrokCli([]string{"inspect"}, "", 5_000)
+	result, err := RunGrokCli([]string{"inspect"}, "", fakeCliTimeoutMs)
 	if err != nil {
 		t.Fatalf("non-zero exit should still return result, got err: %v", err)
 	}
@@ -149,7 +156,7 @@ func TestRunGrokCliNdjson(t *testing.T) {
 	bin := writeFakeGrok(t, dir, "ndjson")
 	t.Setenv("GROK_BIN", bin)
 
-	result, err := RunGrokCli([]string{"inspect"}, "", 5_000)
+	result, err := RunGrokCli([]string{"inspect"}, "", fakeCliTimeoutMs)
 	if err != nil {
 		t.Fatalf("RunGrokCli: %v", err)
 	}

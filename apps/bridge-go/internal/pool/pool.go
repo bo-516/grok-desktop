@@ -88,6 +88,9 @@ type RuntimePool struct {
 	pendingSpawns int
 	// disposed is set by DisposeAll so waiters exit instead of blocking forever.
 	disposed bool
+	// lastStamp is the newest LastUsed handed out by nextUseStampLocked.
+	// Zero until the first Insert/Touch.
+	lastStamp int64
 }
 
 // NewRuntimePool creates a pool with at least capacity 1.
@@ -127,14 +130,32 @@ func (p *RuntimePool) Has(sessionID string) bool {
 	return ok
 }
 
-// Touch updates lastUsed for LRU bookkeeping.
+// Touch marks a session as just used for LRU bookkeeping (strictly newer
+// than any earlier Insert/Touch; see nextUseStampLocked).
 // @param sessionID Target; no-op when missing.
 func (p *RuntimePool) Touch(sessionID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if rt, ok := p.m[sessionID]; ok {
-		rt.LastUsed = time.Now().UnixMilli()
+		rt.LastUsed = p.nextUseStampLocked()
 	}
+}
+
+// nextUseStampLocked returns a LastUsed stamp newer than every earlier one.
+// It is wall-clock Unix milliseconds when the clock has moved on, otherwise
+// the previous stamp + 1, so two inserts/touches in the same millisecond still
+// have a strict LRU order (earlier use is older) instead of tying and leaving
+// the victim to map iteration order. Stamps may run a few ms ahead of the
+// wall clock under bursts; they are only compared with each other.
+// Caller must hold p.mu.
+// @returns Strictly increasing stamp in (approximate) Unix milliseconds.
+func (p *RuntimePool) nextUseStampLocked() int64 {
+	now := time.Now().UnixMilli()
+	if now <= p.lastStamp {
+		now = p.lastStamp + 1
+	}
+	p.lastStamp = now
+	return now
 }
 
 // BeginSpawn reserves a pool slot before spawning a child process.
@@ -162,7 +183,8 @@ func (p *RuntimePool) CancelSpawn() {
 }
 
 // Insert adds or replaces a runtime; reclaims idle LRU when over capacity.
-// Consumes one pending spawn reservation when present.
+// Consumes one pending spawn reservation when present, and stamps LastUsed
+// as the newest use.
 // When full and all busy, waits for room (same policy as BeginSpawn).
 // @param runtime Handle after handshake (SessionID must be the real ACP id).
 // @returns nil on success; error only when disposed while waiting.
@@ -182,7 +204,7 @@ func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 	if err := p.waitForCapacityForInsertLocked(); err != nil {
 		return err
 	}
-	runtime.LastUsed = time.Now().UnixMilli()
+	runtime.LastUsed = p.nextUseStampLocked()
 	p.m[runtime.SessionID] = runtime
 	return nil
 }
