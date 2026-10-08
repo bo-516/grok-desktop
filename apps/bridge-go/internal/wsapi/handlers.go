@@ -13,6 +13,7 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/reverse"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/userterm"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
@@ -268,6 +269,16 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 	}
 }
 
+// handleStart opens or resumes a session. An optional `worktree` object
+// (`name` and `ref` strings, both optional) creates a grok worktree first
+// and spawns the agent there. A missing or null worktree field does not
+// create one. A non-object, or a name/ref that starts with "-" or contains
+// a newline, fails the start. Create failures propagate and do not fall
+// back to the source checkout.
+//
+// @param msg Decoded client frame. cwd, alwaysApprove, forceNew, resumeId,
+// seed, and spawnConfig keep their previous meaning.
+// @returns The start error, including worktree parse and create failures.
 func (h *Handlers) handleStart(msg map[string]any) error {
 	cwd := h.State.DefaultListCwd
 	if cwd == "" {
@@ -295,16 +306,14 @@ func (h *Handlers) handleStart(msg map[string]any) error {
 	if raw, ok := msg["spawnConfig"]; ok && raw != nil {
 		spawnConfig = parseSpawnConfig(raw)
 	}
-	return session.StartOrResume(h.lifecycleDeps(), struct {
-		Cwd           string
-		AlwaysApprove bool
-		ResumeID      string
-		Seed          *acp.SessionState
-		ForceNew      bool
-		SpawnConfig   *pool.SessionSpawnConfig
-	}{
+	wtReq, err := worktree.ParseRequest(msg["worktree"])
+	if err != nil {
+		return err
+	}
+	return session.StartOrResume(h.lifecycleDeps(), session.StartOpts{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: resumeID,
 		Seed: seed, ForceNew: forceNew, SpawnConfig: spawnConfig,
+		Worktree: wtReq,
 	})
 }
 

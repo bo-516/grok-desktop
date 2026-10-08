@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
 // roomPollInterval is how often waiters recheck for idle reclaim while full.
@@ -62,6 +63,10 @@ type PooledRuntime struct {
 	Billing     func() (any, error)
 	ForkSession func(sourceCwd, newCwd string) (any, error)
 	Dispose     func()
+	// Worktree is set when this session runs inside a grok worktree.
+	// Nil for a normal checkout. Crash recovery copies it so a restart
+	// does not create a second worktree. List copies the value onto PoolEntry.
+	Worktree *worktree.Info
 }
 
 // PoolEntry is the UI rail summary for one resident process.
@@ -71,6 +76,10 @@ type PoolEntry struct {
 	Status    SessionStatus `json:"status"`
 	LastUsed  int64         `json:"lastUsed"`
 	Live      bool          `json:"live"`
+	// Worktree is the create result (path, branch, source repo). Omitted
+	// when the session is not in a worktree. The desktop groups the rail
+	// row under SourceRepo and shows Branch on the session row.
+	Worktree *worktree.Info `json:"worktree,omitempty"`
 }
 
 // RuntimePool is a capacity-bounded map of live session runtimes.
@@ -257,6 +266,8 @@ func (p *RuntimePool) SessionStates() []acp.SessionState {
 }
 
 // List returns pool summary sorted by lastUsed ascending (LRU first).
+// Each entry's Worktree is a snapshot copy so a later recovery mutation
+// does not change a slice the caller already holds. Nil stays nil.
 func (p *RuntimePool) List() []PoolEntry {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -266,12 +277,18 @@ func (p *RuntimePool) List() []PoolEntry {
 		if rt.GetStatus != nil {
 			status = rt.GetStatus()
 		}
+		var wtCopy *worktree.Info
+		if rt.Worktree != nil {
+			cloned := *rt.Worktree
+			wtCopy = &cloned
+		}
 		entries = append(entries, PoolEntry{
 			SessionID: rt.SessionID,
 			Cwd:       rt.Cwd,
 			Status:    status,
 			LastUsed:  rt.LastUsed,
 			Live:      true,
+			Worktree:  wtCopy,
 		})
 	}
 	// Simple insertion sort by lastUsed.

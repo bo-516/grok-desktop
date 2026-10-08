@@ -8,6 +8,7 @@ import type { SessionState } from "@grok-desktop/acp-core";
 import type { StartOpts as BridgeStartOpts } from "../bridge/liveBridge";
 import { sessionHasConversationContent } from "@/lib/sessionContent";
 import { hydrateViewingSessionFromDisk } from "./sessionStoreHistory";
+import { peekPendingWorktreeStart } from "@/lib/worktreeChatPending";
 import { resolveResumeCanvasStatus } from "./sessionStoreSupport";
 import { stopCatalogRefresh } from "./sessionStoreCatalogPoll";
 import { stopPoolPoll } from "./sessionStorePoolPoll";
@@ -109,12 +110,16 @@ export async function beginLiveSessionStart(
     sessionHasConversationContent(painted.timeline)
       ? painted
       : seed;
+  // Only the forceNew that actually starts a draft reads the composer
+  // option. Resume and reconnect leave it in place for a later new chat.
+  const worktree = forceNew ? peekPendingWorktreeStart() : undefined;
   const startOpts: BridgeStartOpts = {
     alwaysApprove,
     cwd,
     resumeId: forceNew ? undefined : resumeId,
     seed: forceNew ? undefined : seedForStart,
     forceNew,
+    worktree,
   };
   const started = live.start(startOpts);
   if (!started) {

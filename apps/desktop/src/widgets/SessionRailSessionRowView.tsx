@@ -21,6 +21,7 @@ import {
 } from "react";
 import { ShinyText } from "@/components/react-bits";
 import { railSessionTitle } from "@/lib/sessionTitleEdit";
+import { formatWorktreeIndicator } from "@/lib/worktreeChat";
 import {
   formatRelativeTime,
   type SessionRecord,
@@ -30,6 +31,7 @@ import {
   type SessionRowActivity,
 } from "./SessionRailSessionTrailView";
 import { SessionRailSessionTitleView } from "./SessionRailSessionTitleView";
+import { SessionRailWorktreeMarkView } from "./SessionRailWorktreeMarkView";
 
 /** dataTransfer type so drops only accept session-rail rows. */
 const SESSION_DRAG_MIME = "application/x-grok-session-id";
@@ -159,6 +161,8 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
   const activity = sessionRowActivity(liveStatus, isLiveActive);
   /** Friendly rail label; locked custom names skip the weak-title rewrite. */
   const titleLabel = railSessionTitle(rec);
+  /** Branch chip. Empty hides it so a normal chat stays title-only. */
+  const worktreeLabel = formatWorktreeIndicator(rec.worktree);
   /** Compact relative time for the resting meta (`now` / `12m` / `1d`). */
   const timeLabel = formatRelativeTime(rec.updatedAt);
   /**
@@ -281,14 +285,21 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
       }}
       onKeyDown={handleKeyDown}
     >
-      <SessionRailSessionTitleView
-        label={titleLabel}
-        rawTitle={rec.title}
-        editing={editing}
-        onBeginRename={() => onBeginRename?.()}
-        onCommitRename={(nextTitle) => onCommitRename?.(nextTitle)}
-        onCancelRename={() => onCancelRename?.()}
-      />
+      <div className="sess-title-line">
+        <div className="sess-title-slot">
+          <SessionRailSessionTitleView
+            label={titleLabel}
+            rawTitle={rec.title}
+            editing={editing}
+            onBeginRename={() => onBeginRename?.()}
+            onCommitRename={(nextTitle) => onCommitRename?.(nextTitle)}
+            onCancelRename={() => onCancelRename?.()}
+          />
+        </div>
+        {editing || !worktreeLabel ? null : (
+          <SessionRailWorktreeMarkView label={worktreeLabel} />
+        )}
+      </div>
       {editing ? null : (
         <SessionRailSessionTrailView
           pinned={pinned}

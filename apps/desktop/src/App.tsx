@@ -26,6 +26,7 @@ import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { SessionWindowWidget } from "@/widgets/sessionWindow";
 import { buildConfirmPrompt } from "./lib/confirmAction";
+import { worktreeRemovePrompt } from "./lib/worktreeChat";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
 import type { ContextRailId } from "./widgets/shell/shellPanels";
 
@@ -69,6 +70,15 @@ export function App() {
       : null;
   const rewindPrompt =
     shell.confirm?.kind === "rewind" ? rewindConfirm(true) : null;
+  const worktreeConfirm =
+    shell.confirm?.kind === "worktree_rm" ? shell.confirm : null;
+  const worktreePrompt = worktreeConfirm
+    ? worktreeRemovePrompt(
+        worktreeConfirm.label,
+        worktreeConfirm.blocked,
+        worktreeConfirm.reason,
+      )
+    : null;
 
   return (
     <div
@@ -83,6 +93,9 @@ export function App() {
         onClose={() => shell.setRailOpen(false)}
         onCollapse={shell.collapseSidebar}
         onRequestDelete={shell.requestDelete}
+        onRequestRemoveWorktree={(target) => {
+          void shell.requestRemoveWorktree(target);
+        }}
         liveCount={shell.liveCount}
       />
 
@@ -204,6 +217,30 @@ export function App() {
                 shell.removeSession(id);
               },
             );
+          }}
+        />
+      ) : null}
+      {worktreePrompt && worktreeConfirm ? (
+        <ConfirmDialogView
+          open
+          title={worktreePrompt.title}
+          subject={worktreePrompt.subject}
+          details={worktreePrompt.details}
+          confirmLabel={worktreePrompt.confirmLabel}
+          cancelLabel={worktreePrompt.cancelLabel}
+          danger
+          blocked={worktreeConfirm.blocked}
+          onCancel={shell.clearConfirm}
+          onConfirm={() => {
+            const current = worktreeConfirm;
+            shell.clearConfirm();
+            if (current.blocked) {
+              return;
+            }
+            shell.closeLiveSession(current.sessionId);
+            // A non-zero code leaves the directory. The catalog row stays
+            // either way; a failed rm is not surfaced in this slice.
+            void shell.runCli("worktree_rm", { name: current.rmName });
           }}
         />
       ) : null}

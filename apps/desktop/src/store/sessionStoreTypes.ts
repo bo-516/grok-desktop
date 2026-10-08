@@ -218,6 +218,13 @@ export type SessionStore = {
   /** Last SPAWN restart notice for UI banner (J-06). */
   restartNotice: string | null;
   clearRestartNotice: () => void;
+  /**
+   * Close one live agent process without deleting the catalog row.
+   * Used before `worktree_rm` so the directory is not held open.
+   * A missing id or a down bridge is a no-op.
+   * @param id ACP session id.
+   */
+  closeLiveSession: (id: string) => void;
   /** Run one-shot CLI channel via live bridge. */
   runCli: (
     command: string,

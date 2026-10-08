@@ -40,6 +40,12 @@ export type ConfirmDialogViewProps = {
   onConfirm: () => void;
   /** Fired from Cancel, Escape, or backdrop click. */
   onCancel: () => void;
+  /**
+   * Hide the confirm button. Used when a worktree removal is refused
+   * (uncommitted changes, or the dirty check itself failed). Dismiss
+   * still runs `onCancel`.
+   */
+  blocked?: boolean;
 };
 
 /**
@@ -60,6 +66,7 @@ export function ConfirmDialogView(props: ConfirmDialogViewProps) {
     danger,
     onConfirm,
     onCancel,
+    blocked = false,
   } = props;
   const panelRef = useRef<HTMLDivElement>(null);
   /** Element that held focus before this confirm opened. */
@@ -182,16 +189,18 @@ export function ConfirmDialogView(props: ConfirmDialogViewProps) {
             >
               {cancelLabel ?? "Cancel"}
             </button>
-            <button
-              type="button"
-              className={cs("btn", {
-                "btn-danger": isDanger,
-                "btn-primary": !isDanger,
-              })}
-              onClick={onConfirm}
-            >
-              {confirmLabel ?? "Confirm"}
-            </button>
+            {blocked ? null : (
+              <button
+                type="button"
+                className={cs("btn", {
+                  "btn-danger": isDanger,
+                  "btn-primary": !isDanger,
+                })}
+                onClick={onConfirm}
+              >
+                {confirmLabel ?? "Confirm"}
+              </button>
+            )}
           </div>
         </div>
       </FadeContent>

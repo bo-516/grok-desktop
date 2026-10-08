@@ -13,7 +13,15 @@
  * wired). The row widget owns the menu roots and open state.
  */
 
-import { AppWindow, Ellipsis, PencilLine, Pin, PinOff, Trash2 } from "lucide-react";
+import {
+  AppWindow,
+  Ellipsis,
+  GitBranch,
+  PencilLine,
+  Pin,
+  PinOff,
+  Trash2,
+} from "lucide-react";
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -47,6 +55,11 @@ export type SessionRailSessionMenuItemsViewProps = {
   onOpenInWindow?: () => void;
   /** Delete (through the shell's confirm when wired). */
   onRemove: () => void;
+  /**
+   * Remove this chat's worktree (shell confirm). Missing hides the row,
+   * including when the chat is not in a worktree.
+   */
+  onRemoveWorktree?: () => void;
 };
 
 /**
@@ -87,8 +100,15 @@ export function SessionRailSessionMenuButtonView(props: {
 export function SessionRailSessionMenuItemsView(
   props: SessionRailSessionMenuItemsViewProps,
 ) {
-  const { kind, pinned, onRename, onTogglePin, onOpenInWindow, onRemove } =
-    props;
+  const {
+    kind,
+    pinned,
+    onRename,
+    onTogglePin,
+    onOpenInWindow,
+    onRemove,
+    onRemoveWorktree,
+  } = props;
   /** Row primitive for this menu kind (same props on both). */
   const Item = kind === "dropdown" ? DropdownMenuItem : ContextMenuItem;
   /** Separator primitive for this menu kind. */
@@ -120,6 +140,12 @@ export function SessionRailSessionMenuItemsView(
           <AppWindow strokeWidth={1.75} aria-hidden="true" />
           Open in new window
           <Shortcut>{openShortcut}</Shortcut>
+        </Item>
+      ) : null}
+      {onRemoveWorktree ? (
+        <Item onSelect={onRemoveWorktree}>
+          <GitBranch strokeWidth={1.75} aria-hidden="true" />
+          Remove worktree…
         </Item>
       ) : null}
       <Separator />

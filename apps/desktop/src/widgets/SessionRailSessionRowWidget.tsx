@@ -54,6 +54,11 @@ export type SessionRailSessionRowWidgetProps = Omit<
   onTogglePin: () => void;
   /** Delete this session (the rail hook routes it through the confirm). */
   onRemove: () => void;
+  /**
+   * Remove the worktree after the shell confirms. Missing hides the menu
+   * row (the chat is not in a worktree, or no confirm hook is wired).
+   */
+  onRemoveWorktree?: () => void;
 };
 
 /**
@@ -66,7 +71,7 @@ export type SessionRailSessionRowWidgetProps = Omit<
 function SessionRailSessionRowWidgetInner(
   props: SessionRailSessionRowWidgetProps,
 ) {
-  const { onTogglePin, onRemove, ...rowProps } = props;
+  const { onTogglePin, onRemove, onRemoveWorktree, ...rowProps } = props;
   const { rec, pinned, editing = false, onBeginRename } = rowProps;
   /** Rail title; names the ⋯ chip and the right-click menu. */
   const titleLabel = railSessionTitle(rec);
@@ -116,6 +121,19 @@ function SessionRailSessionRowWidgetInner(
   };
 
   /**
+   * Remove worktree after the menu releases focus, same as Delete, so the
+   * confirm dialog can restore focus to the opener on dismiss.
+   */
+  const handleRemoveWorktree = onRemoveWorktree
+    ? () => {
+        pendingPickRef.current = {
+          run: onRemoveWorktree,
+          skipFocusReturn: false,
+        };
+      }
+    : undefined;
+
+  /**
    * Radix close-focus hook shared by both menus. Fires after the closed
    * menu unmounted and released its trap — the first moment a parked pick
    * can move focus and keep it. With nothing parked, Radix restores focus
@@ -162,6 +180,7 @@ function SessionRailSessionRowWidgetInner(
             onTogglePin={onTogglePin}
             onOpenInWindow={handleOpenWindow}
             onRemove={handleRemove}
+            onRemoveWorktree={handleRemoveWorktree}
           />
         </ContextMenuContent>
       </ContextMenu>
@@ -176,6 +195,7 @@ function SessionRailSessionRowWidgetInner(
           onTogglePin={onTogglePin}
           onOpenInWindow={handleOpenWindow}
           onRemove={handleRemove}
+          onRemoveWorktree={handleRemoveWorktree}
         />
       </DropdownMenuContent>
     </DropdownMenu>

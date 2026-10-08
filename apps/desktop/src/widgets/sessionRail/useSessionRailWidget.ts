@@ -5,10 +5,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import {
-  collapseWorkspacePreview,
-  expandWorkspacePreview,
-} from "@/lib/sessionRailPreview";
+import { formatWorktreeIndicator, type WorktreeRemoveTarget } from "@/lib/worktreeChat";
 import {
   applyWorkspaceSessionOrder,
   isPreviewExpanded,
@@ -19,7 +16,6 @@ import {
   orderGroupsBySessionPin,
   orderSessionsByPin,
   saveSessionRailPrefs,
-  toggleCollapsedWorkspace,
   togglePinnedSession,
   type SessionRailPrefs,
 } from "@/lib/sessionRailPrefs";
@@ -31,7 +27,9 @@ import {
   type SessionRecord,
 } from "@/store/sessionCatalog";
 import { useSessionStore } from "@/store/sessionStore";
+import { useRailFolderActions } from "./useRailFolderActions";
 import { useRailProjectRemoval } from "./useRailProjectRemoval";
+import { useWorktreeSourceIndex } from "./useWorktreeSourceIndex";
 
 export type SessionRailWidgetProps = {
   /**
@@ -40,6 +38,12 @@ export type SessionRailWidgetProps = {
    * @param title Display title for the confirm dialog.
    */
   onRequestDelete?: (id: string, title: string) => void;
+  /**
+   * Remove the session's worktree through the shell confirm.
+   * Missing hides the menu row. The rail does not call `worktree_rm` itself.
+   * @param target Session id, checkout path, rm argument, and chip label.
+   */
+  onRequestRemoveWorktree?: (target: WorktreeRemoveTarget) => void;
   /**
    * Overlay open flag. When `sidebarDocked` is false the rail is off-canvas
    * until this is true; when docked the flag is ignored (rail always shows).
@@ -138,6 +142,12 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
       commitRailPrefs,
       poolStatusById,
     });
+  /** Rows with source-repo overlay so worktrees group under the project. */
+  const catalogForGroups = useWorktreeSourceIndex(
+    visibleCatalog,
+    runCli,
+    connectionMode === "live-bridge",
+  );
 
   /**
    * Workspace-folder groups: project-name first-char order stays fixed.
@@ -148,7 +158,7 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
    * removed project folders are already gone from `visibleCatalog`.
    */
   const { groups, noProjectSessions } = useMemo(() => {
-    const filtered = filterCatalogForSessionRail(visibleCatalog, query);
+    const filtered = filterCatalogForSessionRail(catalogForGroups, query);
     // Unfiled chats are their own rail section, never a pseudo folder.
     const { noProject, withProject } = splitNoProjectSessions(filtered);
     return {
@@ -164,7 +174,7 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
       ),
     };
   }, [
-    visibleCatalog,
+    catalogForGroups,
     query,
     railPrefs.pinnedSessions,
     railPrefs.sessionOrderByWorkspace,
@@ -218,43 +228,8 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
     [props, selectSession],
   );
 
-  /**
-   * Toggle collapse for a workspace group header click.
-   * Persists to localStorage (and memory cache) so the folder does not
-   * re-expand on remount / reload.
-   * @param workspace Absolute path key for the group.
-   */
-  const onToggleCollapse = useCallback(
-    (workspace: string) => {
-      commitRailPrefs((prev) => toggleCollapsedWorkspace(prev, workspace));
-    },
-    [commitRailPrefs],
-  );
-
-  /**
-   * Reveal sessions past the preview cap for one project ("Show more").
-   * Persisted so remount keeps the full list open until "Show less"
-   * or the folder is collapsed.
-   * @param workspace Absolute path key for the group.
-   */
-  const onExpandPreview = useCallback(
-    (workspace: string) => {
-      commitRailPrefs((prev) => expandWorkspacePreview(prev, workspace));
-    },
-    [commitRailPrefs],
-  );
-
-  /**
-   * Restore the preview cap for one project ("Show less").
-   * Persisted so remount does not re-open the full list.
-   * @param workspace Absolute path key for the group.
-   */
-  const onCollapsePreview = useCallback(
-    (workspace: string) => {
-      commitRailPrefs((prev) => collapseWorkspacePreview(prev, workspace));
-    },
-    [commitRailPrefs],
-  );
+  const { onToggleCollapse, onExpandPreview, onCollapsePreview } =
+    useRailFolderActions(commitRailPrefs);
 
   /**
    * Toggle pin so one chat sticks above auto/drag-sorted peers in its
@@ -310,6 +285,8 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
           : rec.status);
       const isProcessLive =
         Boolean(pooled) || (rec.id === activeSessionId && live);
+      const worktree = rec.worktree;
+      const askRemoveWorktree = props.onRequestRemoveWorktree;
       return {
         rec,
         selected: rec.id === selectedId,
@@ -320,6 +297,18 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
         onTogglePin: () => onTogglePin(rec.id),
         onReorder: (fromId: string, toId: string) =>
           onReorderSession(workspace, orderedIds, fromId, toId),
+        onRemoveWorktree:
+          worktree && askRemoveWorktree
+            ? () => {
+                askRemoveWorktree({
+                  sessionId: rec.id,
+                  path: worktree.path,
+                  rmName: worktree.id || worktree.path,
+                  label:
+                    formatWorktreeIndicator(worktree) || worktree.path,
+                });
+              }
+            : undefined,
         onRemove: () => {
           if (props.onRequestDelete) {
             props.onRequestDelete(rec.id, rec.title);

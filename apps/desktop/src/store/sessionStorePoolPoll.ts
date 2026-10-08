@@ -36,11 +36,16 @@ let lastPoolFingerprint = "";
 /**
  * Compact pool row fingerprint for shallow write gating.
  * @param entries Pool entries from bridge.
- * @returns Stable string of sessionId|status|live triples.
+ * Includes the worktree path so a badge that arrives on a later pool
+ * frame is not dropped when status and liveness are unchanged.
+ * @returns Stable string of sessionId|status|live|worktreePath tuples.
  */
 export function poolEntriesFingerprint(entries: PoolEntry[]): string {
   return entries
-    .map((e) => `${e.sessionId}|${e.status}|${e.live ? 1 : 0}`)
+    .map(
+      (e) =>
+        `${e.sessionId}|${e.status}|${e.live ? 1 : 0}|${e.worktree?.path ?? ""}`,
+    )
     .join(";");
 }
 

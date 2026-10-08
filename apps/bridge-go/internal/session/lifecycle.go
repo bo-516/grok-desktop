@@ -7,6 +7,7 @@ import (
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
 // HandlerState is focused session + default list cwd for the bridge.
@@ -25,87 +26,36 @@ type LifecycleDeps struct {
 	BroadcastPool func()
 }
 
-type lifecycleFingerprint struct {
-	status  acp.SessionStatus
-	permKey string
-	model   string
-	mode    string
-	id      string
-}
-
-func lifecycleFP(session acp.SessionState) lifecycleFingerprint {
-	permKey := ""
-	if session.PendingPermission != nil {
-		tcID := ""
-		if session.PendingPermission.ToolCall != nil {
-			if v, ok := session.PendingPermission.ToolCall["toolCallId"].(string); ok {
-				tcID = v
-			}
-		}
-		permKey = fmt.Sprintf("%v:%s", session.PendingPermission.RequestID, tcID)
-	}
-	return lifecycleFingerprint{
-		status: session.Status, permKey: permKey,
-		model: session.Model, mode: session.Mode, id: session.ID,
-	}
-}
-
-func lifecycleChanged(prev *lifecycleFingerprint, next lifecycleFingerprint) bool {
-	if prev == nil {
-		return true
-	}
-	return prev.status != next.status ||
-		prev.permKey != next.permKey ||
-		prev.model != next.model ||
-		prev.mode != next.mode ||
-		prev.id != next.id
-}
-
-// broadcastPoolFocus tells the UI a resident session is focused without wiping
-// client-side timeline. Go SessionState.timeline is always empty, so a full
-// `state` hydrate on pool hit blanks catalog-seeded history after refresh.
-// Prefer session_lifecycle (+ info) unless the snapshot somehow carries body.
-func broadcastPoolFocus(deps LifecycleDeps, session acp.SessionState, info string) {
-	if len(session.Timeline) > 0 {
-		deps.Broadcast(map[string]any{"type": "state", "session": session})
-	} else {
-		msg := map[string]any{
-			"type":      "session_lifecycle",
-			"sessionId": session.ID,
-			"status":    session.Status,
-			"model":     session.Model,
-			"mode":      session.Mode,
-		}
-		if session.PendingPermission != nil {
-			msg["pendingPermission"] = session.PendingPermission
-		} else {
-			msg["pendingPermission"] = nil
-		}
-		deps.Broadcast(msg)
-	}
-	if info != "" {
-		deps.Broadcast(map[string]any{
-			"type": "info", "message": info, "sessionId": session.ID,
-		})
-	}
-	deps.BroadcastPool()
-}
-
 // StartOrResume acquires a pool slot or reuses a live session (relay freeze).
 // Unexpected agent exit triggers seed-based session/load recovery.
-func StartOrResume(deps LifecycleDeps, opts struct {
-	Cwd           string
-	AlwaysApprove bool
-	ResumeID      string
-	Seed          *acp.SessionState
-	ForceNew      bool
-	SpawnConfig   *pool.SessionSpawnConfig
-}) error {
+// A Worktree request creates the checkout before any spawn. Create failure
+// returns immediately and does not start the agent in the source checkout.
+// DefaultListCwd stays the source repository when the session is a worktree.
+// ExistingWorktree on crash recovery reuses that checkout.
+//
+// @param deps Pool, State, SessionSeeds, Broadcast, and BroadcastPool must
+// be non-nil. A nil State panics; callers always pass the handler state.
+// @param opts See StartOpts. A worktree request with a resume id and
+// ForceNew false is an error.
+// @returns nil after the runtime is inserted, or after a live session is
+// reused. Error when the cwd cannot be resolved, the worktree cannot be
+// created, or the agent fails to spawn. A worktree created by this call
+// is left on disk when spawn fails; the error includes its path.
+func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 	cwd, err := filepath.Abs(opts.Cwd)
 	if err != nil {
 		return err
 	}
+	agentCwd, wtInfo, createdNow, err := prepareWorktreeStart(cwd, &opts)
+	if err != nil {
+		return err
+	}
 	deps.State.DefaultListCwd = cwd
+	if wtInfo != nil && wtInfo.SourceRepo != "" {
+		if src, absErr := filepath.Abs(wtInfo.SourceRepo); absErr == nil {
+			deps.State.DefaultListCwd = src
+		}
+	}
 
 	// Resume already in pool: zero spawn.
 	if opts.ResumeID != "" && !opts.ForceNew && deps.Pool.Has(opts.ResumeID) {
@@ -159,7 +109,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	}
 
 	runtime, err := CreateSessionRuntime(CreateRuntimeOpts{
-		Cwd:           cwd,
+		Cwd:           agentCwd,
 		AlwaysApprove: opts.AlwaysApprove,
 		ResumeID:      resumeID,
 		Seed:          seed,
@@ -300,10 +250,12 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 				}
 			}
 			var spawnConfig *pool.SessionSpawnConfig
+			var existingWT *worktree.Info
 			exitCwd := deps.State.DefaultListCwd
 			if rt := deps.Pool.Get(sessionID); rt != nil {
 				spawnConfig = rt.SpawnConfig
 				exitCwd = rt.Cwd
+				existingWT = rt.Worktree
 			}
 			if seedPtr != nil && seedPtr.Workspace != "" {
 				exitCwd = seedPtr.Workspace
@@ -324,22 +276,15 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 			})
 			deps.BroadcastPool()
 			go func() {
-				err := StartOrResume(deps, struct {
-					Cwd           string
-					AlwaysApprove bool
-					ResumeID      string
-					Seed          *acp.SessionState
-					ForceNew      bool
-					SpawnConfig   *pool.SessionSpawnConfig
-				}{
+				err := StartOrResume(deps, StartOpts{
 					Cwd: exitCwd, AlwaysApprove: deps.AlwaysApprove,
 					ResumeID: sessionID, Seed: seedPtr, ForceNew: false,
-					SpawnConfig: spawnConfig,
+					SpawnConfig: spawnConfig, ExistingWorktree: existingWT,
 				})
 				if err != nil {
 					deps.Broadcast(map[string]any{
-						"type": "error",
-						"message": "crash recovery failed: " + err.Error(),
+						"type":      "error",
+						"message":   "crash recovery failed: " + err.Error(),
 						"sessionId": sessionID,
 					})
 					deps.BroadcastPool()
@@ -349,13 +294,15 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	})
 	if err != nil {
 		deps.Pool.CancelSpawn()
-		return err
+		return worktreeStartError(err, wtInfo, createdNow)
 	}
 
+	// Stamp before Insert so the first pool broadcast includes the worktree.
+	runtime.Worktree = wtInfo
 	if err := deps.Pool.Insert(runtime); err != nil {
 		// Insert already consumed the BeginSpawn reservation; just dispose the child.
 		runtime.Dispose()
-		return err
+		return worktreeStartError(err, wtInfo, createdNow)
 	}
 	deps.State.FocusedSessionID = runtime.SessionID
 	initial := runtime.GetSessionState()
@@ -379,6 +326,15 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 }
 
 // RestartSession restarts a session process with new SPAWN config then session/load.
+// An existing worktree is passed through and is not created again. The agent
+// cwd stays that worktree; DefaultListCwd stays its source repository.
+//
+// @param deps Same requirements as StartOrResume.
+// @param sessionID Session to restart. Unknown ids still attempt a start
+// from DefaultListCwd or the seed workspace.
+// @param spawnConfig Replacement SPAWN flags. Nil keeps the previous config.
+// @param approve Always-approve for the new process.
+// @returns The start error, or nil after the info frame is broadcast.
 func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.SessionSpawnConfig, approve bool) error {
 	existing := deps.Pool.Get(sessionID)
 	var seed *acp.SessionState
@@ -392,9 +348,11 @@ func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.Sess
 	}
 	cwd := deps.State.DefaultListCwd
 	var prevSpawn *pool.SessionSpawnConfig
+	var existingWT *worktree.Info
 	if existing != nil {
 		cwd = existing.Cwd
 		prevSpawn = existing.SpawnConfig
+		existingWT = existing.Worktree
 		deps.Pool.Close(sessionID)
 	} else if seed != nil && seed.Workspace != "" {
 		cwd = seed.Workspace
@@ -403,22 +361,15 @@ func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.Sess
 	if cfg == nil {
 		cfg = prevSpawn
 	}
-	if err := StartOrResume(deps, struct {
-		Cwd           string
-		AlwaysApprove bool
-		ResumeID      string
-		Seed          *acp.SessionState
-		ForceNew      bool
-		SpawnConfig   *pool.SessionSpawnConfig
-	}{
+	if err := StartOrResume(deps, StartOpts{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: sessionID, Seed: seed,
-		ForceNew: false, SpawnConfig: cfg,
+		ForceNew: false, SpawnConfig: cfg, ExistingWorktree: existingWT,
 	}); err != nil {
 		return err
 	}
 	deps.Broadcast(map[string]any{
-		"type": "info",
-		"message": fmt.Sprintf("restarted session %s with updated SPAWN settings", sessionID),
+		"type":      "info",
+		"message":   fmt.Sprintf("restarted session %s with updated SPAWN settings", sessionID),
 		"sessionId": sessionID,
 	})
 	return nil
