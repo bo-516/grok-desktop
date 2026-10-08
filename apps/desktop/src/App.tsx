@@ -22,6 +22,7 @@ import {
 } from "@/widgets/lazyPanels";
 import { UpdateNoticeWidget } from "@/widgets/updateNotice";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
+import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
@@ -134,6 +135,7 @@ export function App() {
             <UpdateNoticeWidget />
             <TimelineWidget />
             <ComposerWidget />
+            <TerminalPanelWidget />
           </section>
 
           <ContextDrawerWidget

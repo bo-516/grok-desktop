@@ -12,6 +12,10 @@ import type {
   SessionStatus,
   SessionUpdate,
 } from "@grok-desktop/acp-core";
+import type {
+  LiveBridgeTerminal,
+  TerminalServerMsg,
+} from "./liveBridgeTerminalTypes";
 
 /** Workspace-relative paths scanned by the real bridge for `@` completion. */
 export type WorkspaceEntry = {
@@ -207,7 +211,9 @@ export type BridgeServerMsg =
       availableModels?: AvailableModel[];
       configOptions?: unknown[];
       error?: string;
-    };
+    }
+  /** Integrated terminal frames (see liveBridgeTerminalTypes). */
+  | TerminalServerMsg;
 
 /**
  * Correlated reply for `read_model_catalog`.
@@ -379,6 +385,8 @@ export type LiveBridgeHandle = {
    * @param cwd Optional workspace passed to the probe child.
    */
   readModelCatalog: (cwd?: string) => Promise<ModelCatalogReply>;
+  /** Integrated terminal panel: PTY shells owned by this socket. */
+  terminal: LiveBridgeTerminal;
   close: () => void;
   ready: Promise<void>;
 };
