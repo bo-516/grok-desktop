@@ -70,6 +70,10 @@ describe("terminalTabs", () => {
       "Disconnected: Bridge disconnected",
     );
     assert.equal(terminalExitDetail({ reason: "error", exitCode: null }), "Error");
-    assert.match(terminalExitBanner({ reason: "exited", exitCode: 2 }), /^\r\n\u001b\[2m\[Process exited with code 2\]\u001b\[0m\r\n$/);
+    const esc = String.fromCharCode(27);
+    assert.equal(
+      terminalExitBanner({ reason: "exited", exitCode: 2 }),
+      `\r\n${esc}[2m[Process exited with code 2]${esc}[0m\r\n`,
+    );
   });
 });
