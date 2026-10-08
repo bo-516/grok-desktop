@@ -18,6 +18,7 @@ import {
   type SetState,
 } from "./sessionStoreLiveInbound";
 import { applyLiveInboundSession } from "./sessionStoreLiveApply";
+import { applyBridgeProvenance } from "./sessionStoreBridgeProvenance";
 import { applyAuthProbe, authedFromEnvironment } from "./sessionStoreAuth";
 import {
   noteModeReadyInfo,
@@ -42,7 +43,9 @@ import {
 } from "./sessionStoreCatalogPoll";
 import { syncCatalogFromBridge } from "./sessionStoreSync";
 import { beginLiveSessionStart } from "./sessionStoreLiveStart";
+import { shouldFollowSession } from "./sessionStoreLiveFollow";
 import { rememberSlashCatalog } from "@/lib/slashCatalog";
+import { stampCatalogWorktrees } from "@/lib/worktreeChatCatalog";
 import { rememberModelCatalog } from "@/store/modelCatalogStore";
 import {
   persistNormalizedCatalog,
@@ -204,12 +207,33 @@ export async function startLiveBridgeSession(
             schedulePendingSessionsSync(b, set, get);
           }
         },
+        /**
+         * Stream coalescing lane: the canvas-owned session paints per frame,
+         * others on the background lane. A New chat draft (not yet creating)
+         * owns no stream, matching resolveCanvasFollow.
+         * @param sessionId Wire session id.
+         * @returns True when the session would repaint the canvas.
+         */
+        isForegroundSession: (sessionId) => {
+          const s = get();
+          if (s.localDraft && !s.creatingSession) {
+            return false;
+          }
+          return shouldFollowSession(
+            s.viewingSessionId,
+            s.activeSessionId,
+            sessionId,
+          );
+        },
         onPool: (entries) => {
           if (poolFingerprintUnchanged(entries)) {
             return;
           }
           set((s) => ({
             poolEntries: entries,
+            // Stamp path/branch/source onto catalog rows. Entries without
+            // a worktree leave existing badges alone.
+            catalog: stampCatalogWorktrees(s.catalog, entries),
             // Reconnect / select often seeds idle before list_pool lands.
             // Promote Working when the viewed process is still busy.
             session: applyPoolBusyToSession(
@@ -236,12 +260,19 @@ export async function startLiveBridgeSession(
         onAuthState: (auth) => {
           applyAuthProbe(set, get, auth);
         },
-        onInfo: (message, sessionId) => {
+        // Bridge-asserted child / own-start facts, ahead of the frame's paint.
+        onProvenance: (sessionId, provenance) => {
+          applyBridgeProvenance(set, get, sessionId, provenance);
+        },
+        onInfo: (message, sessionId, meta) => {
           set({ bridgeInfo: message, lastError: null });
           // forceNew: stamp local only for ready contract
           // `session <id> ready` (+ optional models=…). Recovery/ops info with
-          // a sessionId must not become sticky local mid-forceNew.
-          admitForceNewSessionFromInfo(set, get, sessionId, message);
+          // a sessionId must not become sticky local mid-forceNew. When the
+          // bridge asserts provenance, only this window's own start counts.
+          if (!meta?.provenance || meta.provenance.own) {
+            admitForceNewSessionFromInfo(set, get, sessionId, message);
+          }
           // `mode set to plan` means session/set_mode returned. Release a held prompt.
           noteModeReadyInfo(set, get, message, sessionId);
         },

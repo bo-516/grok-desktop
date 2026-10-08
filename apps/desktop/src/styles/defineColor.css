@@ -363,6 +363,41 @@
   /* VS Code leaves separators at editor foreground; body text is our stand-in. */
   --color-code-punctuation: var(--color-text-primary);
 
+  /*
+   * Integrated terminal (xterm.js, dark). Read at runtime by
+   * src/lib/terminalTheme.ts via getComputedStyle; every token is registered
+   * as <color> (@property block at the end of this file) so formulas compute
+   * to concrete colors xterm can parse. Surface / ink / selection follow the
+   * app ladder and retint with the palette; the 16-color ANSI set is VS Code
+   * Dark+'s terminal palette (fixed literals so `ls --color` stays legible
+   * under every palette).
+   */
+  --color-terminal-bg: var(--color-bg-timeline);
+  --color-terminal-fg: var(--color-text-primary);
+  --color-terminal-cursor: var(--color-text-primary);
+  --color-terminal-cursor-accent: var(--color-bg-timeline);
+  --color-terminal-selection: color-mix(in oklch, var(--seed-ink) 24%, transparent);
+  --color-terminal-selection-inactive: color-mix(in oklch, var(--seed-ink) 12%, transparent);
+  --color-terminal-scrollbar: color-mix(in oklch, var(--seed-ink) 16%, transparent);
+  --color-terminal-scrollbar-hover: color-mix(in oklch, var(--seed-ink) 26%, transparent);
+  --color-terminal-scrollbar-active: color-mix(in oklch, var(--seed-ink) 34%, transparent);
+  --color-terminal-ansi-black: #000000;
+  --color-terminal-ansi-red: #cd3131;
+  --color-terminal-ansi-green: #0dbc79;
+  --color-terminal-ansi-yellow: #e5e510;
+  --color-terminal-ansi-blue: #2472c8;
+  --color-terminal-ansi-magenta: #bc3fbc;
+  --color-terminal-ansi-cyan: #11a8cd;
+  --color-terminal-ansi-white: #e5e5e5;
+  --color-terminal-ansi-bright-black: #666666;
+  --color-terminal-ansi-bright-red: #f14c4c;
+  --color-terminal-ansi-bright-green: #23d18b;
+  --color-terminal-ansi-bright-yellow: #f5f543;
+  --color-terminal-ansi-bright-blue: #3b8eea;
+  --color-terminal-ansi-bright-magenta: #d670d6;
+  --color-terminal-ansi-bright-cyan: #29b8db;
+  --color-terminal-ansi-bright-white: #ffffff;
+
   /* Modes follow brand ink */
   --color-mode-ask: color-mix(in oklch, var(--seed-ink) 72%, transparent);
   --color-mode-plan: color-mix(in oklch, var(--seed-ink) 72%, transparent);
@@ -749,6 +784,28 @@ html[data-theme="light"] {
   --color-code-punctuation: var(--color-text-primary);
 
   /*
+   * Integrated terminal (light): surface/ink tokens inherit the light ladder
+   * from the :root formulas; only the ANSI set is swapped for VS Code
+   * Light+'s terminal palette (dark-on-white contrast).
+   */
+  --color-terminal-ansi-black: #000000;
+  --color-terminal-ansi-red: #cd3131;
+  --color-terminal-ansi-green: #00bc00;
+  --color-terminal-ansi-yellow: #949800;
+  --color-terminal-ansi-blue: #0451a5;
+  --color-terminal-ansi-magenta: #bc05bc;
+  --color-terminal-ansi-cyan: #0598bc;
+  --color-terminal-ansi-white: #555555;
+  --color-terminal-ansi-bright-black: #666666;
+  --color-terminal-ansi-bright-red: #cd3131;
+  --color-terminal-ansi-bright-green: #14ce14;
+  --color-terminal-ansi-bright-yellow: #b5ba00;
+  --color-terminal-ansi-bright-blue: #0451a5;
+  --color-terminal-ansi-bright-magenta: #bc05bc;
+  --color-terminal-ansi-bright-cyan: #0598bc;
+  --color-terminal-ansi-bright-white: #a5a5a5;
+
+  /*
    * Shadows: soft drop on bordered panels (menus already draw a hairline).
    * Composer card uses transparent border, so its shadow includes a 1px ring
    * so the white dock reads against the soft canvas.
@@ -923,3 +980,39 @@ html[data-theme="light"][data-palette="gray"] {
   --seed-on-brand: #ffffff;
   --scheme-brand-in-surface: 4%;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Integrated terminal tokens registered as <color>.
+ *
+ * xterm.js paints on its own surface and needs concrete colors. An
+ * unregistered custom property computes to its unresolved token text
+ * (`color-mix(…)`), which xterm cannot parse. Registering the
+ * --color-terminal-* tokens makes getComputedStyle return resolved colors
+ * (rgb() / oklch() / color()), which src/lib/terminalTheme.ts converts to
+ * sRGB. Initial values are only fallbacks for a missing declaration.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+@property --color-terminal-bg { syntax: "<color>"; inherits: true; initial-value: #000000; }
+@property --color-terminal-fg { syntax: "<color>"; inherits: true; initial-value: #e5e5e5; }
+@property --color-terminal-cursor { syntax: "<color>"; inherits: true; initial-value: #e5e5e5; }
+@property --color-terminal-cursor-accent { syntax: "<color>"; inherits: true; initial-value: #000000; }
+@property --color-terminal-selection { syntax: "<color>"; inherits: true; initial-value: #808080; }
+@property --color-terminal-selection-inactive { syntax: "<color>"; inherits: true; initial-value: #808080; }
+@property --color-terminal-scrollbar { syntax: "<color>"; inherits: true; initial-value: #808080; }
+@property --color-terminal-scrollbar-hover { syntax: "<color>"; inherits: true; initial-value: #808080; }
+@property --color-terminal-scrollbar-active { syntax: "<color>"; inherits: true; initial-value: #808080; }
+@property --color-terminal-ansi-black { syntax: "<color>"; inherits: true; initial-value: #000000; }
+@property --color-terminal-ansi-red { syntax: "<color>"; inherits: true; initial-value: #cd3131; }
+@property --color-terminal-ansi-green { syntax: "<color>"; inherits: true; initial-value: #0dbc79; }
+@property --color-terminal-ansi-yellow { syntax: "<color>"; inherits: true; initial-value: #e5e510; }
+@property --color-terminal-ansi-blue { syntax: "<color>"; inherits: true; initial-value: #2472c8; }
+@property --color-terminal-ansi-magenta { syntax: "<color>"; inherits: true; initial-value: #bc3fbc; }
+@property --color-terminal-ansi-cyan { syntax: "<color>"; inherits: true; initial-value: #11a8cd; }
+@property --color-terminal-ansi-white { syntax: "<color>"; inherits: true; initial-value: #e5e5e5; }
+@property --color-terminal-ansi-bright-black { syntax: "<color>"; inherits: true; initial-value: #666666; }
+@property --color-terminal-ansi-bright-red { syntax: "<color>"; inherits: true; initial-value: #f14c4c; }
+@property --color-terminal-ansi-bright-green { syntax: "<color>"; inherits: true; initial-value: #23d18b; }
+@property --color-terminal-ansi-bright-yellow { syntax: "<color>"; inherits: true; initial-value: #f5f543; }
+@property --color-terminal-ansi-bright-blue { syntax: "<color>"; inherits: true; initial-value: #3b8eea; }
+@property --color-terminal-ansi-bright-magenta { syntax: "<color>"; inherits: true; initial-value: #d670d6; }
+@property --color-terminal-ansi-bright-cyan { syntax: "<color>"; inherits: true; initial-value: #29b8db; }
+@property --color-terminal-ansi-bright-white { syntax: "<color>"; inherits: true; initial-value: #ffffff; }

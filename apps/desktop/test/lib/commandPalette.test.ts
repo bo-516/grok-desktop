@@ -78,6 +78,13 @@ describe("commandPalette", () => {
     assert.ok(!actions.some((a) => a.runValue === "open_tasks"));
   });
 
+  it("offers open in a new window for the current chat", () => {
+    const actions = defaultPaletteActions();
+    const open = actions.find((a) => a.runValue === "open_in_window");
+    assert.equal(open?.kind, "action");
+    assert.equal(open?.label, "Open in new window");
+  });
+
   it("prefills /model and /effort instead of sending them as prompts", () => {
     const actions = defaultPaletteActions();
     assert.ok(actions.some((a) => a.runValue === "prefill_model"));

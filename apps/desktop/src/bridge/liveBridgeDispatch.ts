@@ -12,6 +12,17 @@
  *
  * Window timers live in liveBridgeReplay; handler-only messages route through
  * liveBridgeNotices. This module keeps the reduce buckets and SessionState routing.
+ *
+ * Live streaming (opt-in `coalesce`, on in connectLiveBridge): each
+ * session_update still reduces immediately, but the store notify is
+ * coalesced by liveBridgeCoalesce (per frame / background lane). Urgent
+ * transitions notify at once, and every other notify this module makes
+ * (state, lifecycle, replay boundaries, notices) first drains pending ones
+ * so the store sees bucket changes in arrival order.
+ *
+ * Bridge stream positions (epoch/seq) and provenance are checked first by
+ * liveBridgeStreamControl: duplicates drop, a gap drains the coalescer and
+ * requests `resync`, whose frames re-enter here in order.
  */
 
 import type { SessionState } from "@grok-desktop/acp-core";
@@ -30,7 +41,13 @@ import {
   type ReplayDispatchClock,
 } from "./liveBridgeReplay";
 import { routeBridgeNotice } from "./liveBridgeNotices";
+import {
+  createStreamCoalescer,
+  needsImmediateFlush,
+  type LiveStreamCoalesceOpts,
+} from "./liveBridgeCoalesce";
 import type { BridgeServerMsg, LiveBridgeHandlers } from "./liveBridgeTypes";
+import { createStreamControl } from "./liveBridgeStreamControl";
 
 export { REPLAY_TIMEOUT_MS, type ReplayDispatchClock };
 
@@ -44,6 +61,19 @@ export type LiveBridgeDispatchOpts = {
   clock?: ReplayDispatchClock;
   /** Override replay silence timeout (default REPLAY_TIMEOUT_MS). */
   replayTimeoutMs?: number;
+  /**
+   * Coalesce live stream notifies (connectLiveBridge always passes it).
+   * Omitted → every session_update notifies synchronously, which unit
+   * tests rely on to observe each frame.
+   */
+  coalesce?: LiveStreamCoalesceOpts;
+  /**
+   * Send `resync` / `get_state` for the sequence gate (connectLiveBridge
+   * passes its socket send). Omitted → gaps re-anchor locally only.
+   */
+  sendRequest?: (msg: Record<string, unknown>) => boolean;
+  /** Override the resync answer timeout (liveBridgeStreamGate default). */
+  resyncTimeoutMs?: number;
 };
 
 /**
@@ -69,12 +99,27 @@ export type LiveBridgeDispatch = {
    * Call on socket close / hard error.
    */
   flushAllReplays: () => void;
-  /** Drop reduce buckets (socket close). */
+  /**
+   * Emit every coalesced stream notify now (socket close, session switch,
+   * disconnect). No-op without `coalesce` or when nothing is pending.
+   */
+  flushPendingUpdates: () => void;
+  /** Drop reduce buckets (socket close); flushes pending notifies first. */
   clearBuckets: () => void;
+  /** Test/observe: session ids with a coalesced notify still pending. */
+  pendingUpdateIds: () => string[];
   /** Test/observe: session ids currently inside a replay window. */
   replayingSessionIds: () => string[];
   /** Test/observe: reduce bucket for a session id. */
   bucketFor: (sessionId: string) => SessionReduceBucket;
+  /**
+   * Remember a `start` request id sent on this connection, so the bridge's
+   * echo marks that session's provenance `own`.
+   * @param startId Client-generated id included in the start message.
+   */
+  noteOwnStart: (startId: string) => void;
+  /** Test/observe: stream keys with a resync in flight. */
+  pendingResyncs: () => string[];
 };
 
 /**
@@ -92,6 +137,19 @@ export function createLiveBridgeDispatch(
     clock: opts.clock,
     timeoutMs: opts.replayTimeoutMs ?? REPLAY_TIMEOUT_MS,
     onFlush: paintFlushedReplay,
+  });
+  /** Live stream coalescer; null keeps the synchronous notify path. */
+  const stream = opts.coalesce
+    ? createStreamCoalescer({ ...opts.coalesce, emit: emitCoalesced })
+    : null;
+  /** Provenance + seq/epoch gate (duplicates drop, gaps resync, fallback). */
+  const control = createStreamControl({
+    handlers,
+    clock: opts.clock,
+    send: opts.sendRequest,
+    flush: () => stream?.flushAll(),
+    replay: (frame) => handleServerMsg(frame),
+    resyncTimeoutMs: opts.resyncTimeoutMs,
   });
 
   /**
@@ -146,11 +204,48 @@ export function createLiveBridgeDispatch(
   }
 
   /**
+   * Relay notify: onSessionUpdate when wired, else the onState paint path
+   * (skipped for deduped frames, which changed nothing).
+   * @param sessionId Wire session id (meta for the store).
+   * @param session Post-reduce state to paint.
+   * @param eventId Wire eventId, when the frame carried one.
+   * @param applied False when dedupe dropped the frame.
+   */
+  function notifySessionUpdate(
+    sessionId: string,
+    session: SessionState,
+    eventId: string | undefined,
+    applied: boolean,
+  ): void {
+    if (handlers.onSessionUpdate) {
+      handlers.onSessionUpdate(session, { sessionId, eventId, applied });
+    } else if (applied) {
+      handlers.onState(session);
+    }
+  }
+
+  /**
+   * Coalescer emit: paint the bucket's *current* state, so seeds / hydrates
+   * that landed after the defer are included rather than overwritten.
+   * @param sessionId Session whose notify is due.
+   * @param eventId Latest eventId folded into the notify.
+   */
+  function emitCoalesced(sessionId: string, eventId: string | undefined): void {
+    notifySessionUpdate(sessionId, bucketFor(sessionId).state, eventId, true);
+  }
+
+  /**
    * Handle one server message. Returns true when consumed by this dispatcher.
    * @param msg Decoded bridge message.
    */
   function handleServerMsg(msg: BridgeServerMsg): boolean {
+    // Sequence seam: resync answers, duplicates and gap frames stop here.
+    if (control.intercept(msg)) {
+      return true;
+    }
     if (msg.type === "state") {
+      // Drain pending notifies first (also covers the "__pending__" re-key).
+      stream?.flushAll();
       // Authoritative hydrate: replace client reduce bucket then notify store.
       const sid = msg.session.id || "__pending__";
       const bucket = bucketFor(sid);
@@ -196,6 +291,8 @@ export function createLiveBridgeDispatch(
     }
 
     if (msg.type === "replay_begin") {
+      // Paint pending chunks before the window opens and the body resets.
+      stream?.flushAll();
       replayWindows.arm(msg.sessionId);
       // Load replay re-applies the full transcript. Drop catalog seed body so
       // chunks are not double-appended on top of the cache (identity merge is
@@ -238,20 +335,19 @@ export function createLiveBridgeDispatch(
       if (replayWindows.isOpen(msg.sessionId)) {
         return true;
       }
-      if (handlers.onSessionUpdate) {
-        handlers.onSessionUpdate(next, {
-          sessionId: msg.sessionId,
-          eventId: msg.eventId,
-          applied,
-        });
+      if (!stream) {
+        notifySessionUpdate(msg.sessionId, next, msg.eventId, applied);
+      } else if (needsImmediateFlush(before, next)) {
+        stream.emitNow(msg.sessionId, msg.eventId);
       } else if (applied) {
-        // Default: same paint path as full state when store did not wire relay.
-        handlers.onState(next);
+        // Deduped frames changed nothing; only real changes wait for a frame.
+        stream.defer(msg.sessionId, msg.eventId);
       }
       return true;
     }
 
     if (msg.type === "replay_end") {
+      stream?.flushAll();
       const bucket = bucketFor(msg.sessionId);
       if (msg.sessionId && !bucket.state.id) {
         bucket.state = { ...bucket.state, id: msg.sessionId };
@@ -285,17 +381,17 @@ export function createLiveBridgeDispatch(
         model: msg.model,
         mode: msg.mode,
       });
-      if (handlers.onSessionUpdate) {
-        handlers.onSessionUpdate(next, {
-          sessionId: msg.sessionId,
-          applied: true,
-        });
+      // Lifecycle is always urgent (status / permission / model / mode).
+      if (stream) {
+        stream.emitNow(msg.sessionId, undefined);
       } else {
-        handlers.onState(next);
+        notifySessionUpdate(msg.sessionId, next, undefined, true);
       }
       return true;
     }
 
+    // Notices (errors, info, pool, …) run after every pending paint.
+    stream?.flushAll();
     // Hard error: if session-scoped and replaying, flush that window (I4)
     // before the error handler runs.
     if (msg.type === "error" && msg.sessionId && replayWindows.isOpen(msg.sessionId)) {
@@ -308,10 +404,20 @@ export function createLiveBridgeDispatch(
     handleServerMsg,
     seedSession,
     flushAllReplays: replayWindows.flushAll,
-    clearBuckets: () => {
-      reduceBuckets.clear();
+    flushPendingUpdates: () => {
+      stream?.flushAll();
     },
+    clearBuckets: () => {
+      // Never let a later emit read a freshly emptied bucket.
+      stream?.flushAll();
+      reduceBuckets.clear();
+      // Positions describe these buckets; they go together.
+      control.clear();
+    },
+    pendingUpdateIds: () => stream?.pendingIds() ?? [],
     replayingSessionIds: replayWindows.openIds,
     bucketFor,
+    noteOwnStart: control.noteOwnStart,
+    pendingResyncs: control.pendingResyncs,
   };
 }

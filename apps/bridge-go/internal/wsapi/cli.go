@@ -9,6 +9,7 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/userprompts"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
 // sessionsListLimit caps rows returned by sessions_list. Mirrors the Node
@@ -145,6 +146,15 @@ func dispatchCliCommand(command string, args map[string]any, cwd string, onAuthL
 			maxAge = "7d"
 		}
 		return worktreeGc(maxAge, cwd)
+	case "workspace_git":
+		// path overrides the frame cwd so the rail can probe a session
+		// directory that is not the focused project. Empty uses cwd.
+		// Not-a-repo is data (isRepo false), not an error.
+		target := stringArg(args, "path")
+		if target == "" {
+			target = cwd
+		}
+		return worktree.Inspect(target)
 	case "models_list":
 		return modelsList()
 	case "memory_clear":

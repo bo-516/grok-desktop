@@ -8,6 +8,9 @@ Go implementation of the grok-desktop local bridge. This is the only bridge proc
 - Does **not** port timeline reduce; forwards raw `session_update` to the UI
 - Session ops (`set_model`, `set_mode`, `compact`, `token_usage`, `fork_session`) and the CLI channel are the product protocol
 - `check_environment` marks `ok=false` when `grok --version` is missing, unparseable, below `0.9.0`, or silent for 15s (reported as a timeout, not as unparseable), even if the user is logged in
+- Every failed probe carries a structured `failureKind` (`not_installed`, `bin_invalid`, `probe_timeout`, `version_unreadable`, `too_old`, `signed_out`) plus the install / update commands for the host (`setup`); the desktop branches on these, never on `message`
+- `grok_setup_run {runId, action: "install"|"update"}` runs the official installer (`curl -fsSL https://x.ai/cli/install.sh | bash`, Windows `irm https://x.ai/cli/install.ps1 | iex`) or `grok update` and streams `grok_setup_started` / `grok_setup_output` / `grok_setup_exit`; the client sends only the action, never a command line. `grok_setup_cancel {runId}` stops it
+- `grok_bin_get` / `grok_bin_set {path}` read and validate the custom grok path, stored in `<UserConfigDir>/grok-desktop/grok-cli.json` and re-read on every spawn (no restart)
 
 ## Build
 
@@ -54,7 +57,7 @@ ws://127.0.0.1:<port>?token=<token>
 | `BRIDGE_CWD` | monorepo root in a checkout; `<Documents>/Grok` when packaged | Default workspace |
 | `BRIDGE_ALWAYS_APPROVE` | unset | `1` → auto-approve tool permission with `allow_once` |
 | `BRIDGE_POOL_CAPACITY` | `8` | Max concurrent agent processes (1–16); full+busy waits for a free slot |
-| `GROK_BIN` | `~/.grok/bin/grok` or `PATH` | grok CLI path |
+| `GROK_BIN` | custom path from Settings, then `~/.grok/bin/grok` (`grok.exe` on Windows), then `PATH` | grok CLI path; wins over the Settings path, and a missing / non-executable value is an error rather than a fallback |
 | `XAI_API_KEY` | — | Auth source for agent + environment probe |
 
 Missing `Origin` is allowed (non-browser clients). Illegal Origin → **403**. Missing/wrong token → **401**.
@@ -95,7 +98,10 @@ internal/session/    disk list, workspace entries, crash recovery seeds
 | bridge → UI | `session_update` | raw ACP update + optional `eventId` |
 | bridge → UI | `session_lifecycle` | status / permission / model / mode without full timeline |
 | bridge → UI | `state` | hydrate only (start, reconnect, get_state, permission) |
-| UI → bridge | `get_state` | on-demand full snapshot |
+| UI → bridge | `get_state` | on-demand full snapshot (carries `epoch` + `headSeq`) |
+| UI → bridge | `resync` | `{sessionId, epoch, fromSeq}` → `resync_result` (`ok` + frames verbatim, or `too_old` / `epoch_mismatch`) |
+
+Per-session frames (`session_update`, `session_lifecycle`, `state`, `replay_*`) carry `epoch` (one per agent runtime; a respawn / reload is a new epoch) and `seq` (monotonic per session + epoch, from 1). A bounded ring (1024 frames / 4 MiB per stream, `internal/sessionstream`) serves `resync`. Hydrate frames also carry `provenance` (`started` + echoed `startId`, `resumed`, or `child` + `parentSessionId` from an explicit `subagent_spawned` link).
 
 ## Session ops & CLI channel
 

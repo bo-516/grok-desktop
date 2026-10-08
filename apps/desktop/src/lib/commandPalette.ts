@@ -74,6 +74,13 @@ export function defaultPaletteActions(): PaletteItem[] {
       runValue: "new_chat",
     },
     {
+      id: "action:open-window",
+      kind: "action",
+      label: "Open in new window",
+      description: "View this chat in a second window",
+      runValue: "open_in_window",
+    },
+    {
       id: "action:settings",
       kind: "setting",
       label: "Open settings",

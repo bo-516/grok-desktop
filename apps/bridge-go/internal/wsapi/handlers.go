@@ -12,6 +12,9 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/reverse"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/userterm"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
@@ -25,6 +28,12 @@ type Handlers struct {
 	SessionSeeds  sync.Map
 	Send          func(ws *websocket.Conn, msg map[string]any)
 	Broadcast     func(msg map[string]any)
+	// Terminals owns the user's interactive PTY terminals (terminal_* messages);
+	// killed on socket disconnect, close_session and Server.Close.
+	Terminals *userterm.Manager
+	// Streams stamps per-session frames (epoch/seq), serves `resync` and
+	// holds provenance. Set by NewServer; nil keeps the unstamped relay.
+	Streams *sessionstream.Hub
 }
 
 // NewHandlers constructs bridge handlers bound to pool and I/O closures.
@@ -36,7 +45,7 @@ func NewHandlers(
 	send func(ws *websocket.Conn, msg map[string]any),
 	broadcast func(msg map[string]any),
 ) *Handlers {
-	return &Handlers{
+	h := &Handlers{
 		Pool:          p,
 		AlwaysApprove: alwaysApprove,
 		DefaultCwd:    defaultCwd,
@@ -47,6 +56,8 @@ func NewHandlers(
 		Send:      send,
 		Broadcast: broadcast,
 	}
+	h.Terminals = newTerminalManager(h)
+	return h
 }
 
 // BroadcastPool sends the current pool summary to all clients.
@@ -62,6 +73,7 @@ func (h *Handlers) lifecycleDeps() session.LifecycleDeps {
 		SessionSeeds:  &h.SessionSeeds,
 		Broadcast:     h.Broadcast,
 		BroadcastPool: h.BroadcastPool,
+		Streams:       h.Streams,
 	}
 }
 
@@ -103,6 +115,18 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		h.Send(ws, map[string]any{"type": "pool", "entries": h.Pool.List()})
 		return nil
 
+	// CLI onboarding: run the official installer / `grok update` with live
+	// output, and the custom grok binary path setting (grok_setup.go,
+	// grok_bin_setting.go).
+	case "grok_setup_run":
+		return h.handleGrokSetupRun(ws, msg)
+	case "grok_setup_cancel":
+		return h.handleGrokSetupCancel(msg)
+	case "grok_bin_get":
+		return h.handleGrokBinGet(ws, msg)
+	case "grok_bin_set":
+		return h.handleGrokBinSet(ws, msg)
+
 	case "get_state":
 		sessionID, _ := msg["sessionId"].(string)
 		rt, err := session.RequireSessionRuntime(h.Pool, h.State.FocusedSessionID, sessionID)
@@ -110,8 +134,14 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 			h.Send(ws, map[string]any{"type": "error", "message": err.Error(), "sessionId": sessionID})
 			return nil
 		}
-		h.Send(ws, map[string]any{"type": "state", "session": rt.GetSessionState()})
+		// Snapshot carries epoch/headSeq so a client falling back from a
+		// failed resync can re-anchor its stream position.
+		h.sendStateSnapshot(ws, rt.GetSessionState())
 		return nil
+
+	// Catch up one (session, epoch) stream after a client-detected gap.
+	case "resync":
+		return h.handleResync(ws, msg)
 
 	case "list_workspace_entries":
 		requestID, _ := msg["requestId"].(string)
@@ -143,6 +173,8 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		closed := h.Pool.Close(sessionID)
 		// Drop crash-recovery seed so long-running bridges do not retain timelines forever.
 		h.SessionSeeds.Delete(sessionID)
+		// User terminals opened for this session die with it.
+		h.Terminals.CloseSession(sessionID)
 		if h.State.FocusedSessionID == sessionID {
 			list := h.Pool.List()
 			h.State.FocusedSessionID = ""
@@ -182,7 +214,18 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 			return err
 		}
 		h.Pool.Touch(rt.SessionID)
-		return rt.RespondPermission(optionID)
+		// A second window answering the same prompt must not write another
+		// JSON-RPC response (RespondPermission drops that under its mutex)
+		// and must not broadcast "No pending permission request" into the
+		// window that already cleared the dialog. The clear itself is the
+		// state broadcast emitState already sent to every socket.
+		if permErr := rt.RespondPermission(optionID); permErr != nil {
+			h.Send(ws, map[string]any{
+				"type": "error", "message": permErr.Error(), "sessionId": rt.SessionID,
+			})
+			return nil
+		}
+		return nil
 
 	case "set_model":
 		return h.handleSetModel(ws, msg)
@@ -224,6 +267,11 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 	case "cli":
 		return h.handleCli(ws, msg)
 
+	// Integrated terminal panel: PTY-backed user shells (see terminal.go).
+	case "terminal_create", "terminal_input", "terminal_resize",
+		"terminal_ack", "terminal_kill", "terminal_list":
+		return h.handleTerminal(ws, typ, msg)
+
 	default:
 		if typ == "" {
 			return fmt.Errorf("missing message type")
@@ -232,6 +280,16 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 	}
 }
 
+// handleStart opens or resumes a session. An optional `worktree` object
+// (`name` and `ref` strings, both optional) creates a grok worktree first
+// and spawns the agent there. A missing or null worktree field does not
+// create one. A non-object, or a name/ref that starts with "-" or contains
+// a newline, fails the start. Create failures propagate and do not fall
+// back to the source checkout.
+//
+// @param msg Decoded client frame. cwd, alwaysApprove, forceNew, resumeId,
+// seed, and spawnConfig keep their previous meaning.
+// @returns The start error, including worktree parse and create failures.
 func (h *Handlers) handleStart(msg map[string]any) error {
 	cwd := h.State.DefaultListCwd
 	if cwd == "" {
@@ -259,16 +317,16 @@ func (h *Handlers) handleStart(msg map[string]any) error {
 	if raw, ok := msg["spawnConfig"]; ok && raw != nil {
 		spawnConfig = parseSpawnConfig(raw)
 	}
-	return session.StartOrResume(h.lifecycleDeps(), struct {
-		Cwd           string
-		AlwaysApprove bool
-		ResumeID      string
-		Seed          *acp.SessionState
-		ForceNew      bool
-		SpawnConfig   *pool.SessionSpawnConfig
-	}{
+	wtReq, err := worktree.ParseRequest(msg["worktree"])
+	if err != nil {
+		return err
+	}
+	// Client-generated id echoed in the new session's provenance.
+	startID, _ := msg["startId"].(string)
+	return session.StartOrResume(h.lifecycleDeps(), session.StartOpts{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: resumeID,
 		Seed: seed, ForceNew: forceNew, SpawnConfig: spawnConfig,
+		Worktree: wtReq, StartID: startID,
 	})
 }
 

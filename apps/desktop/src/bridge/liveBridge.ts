@@ -5,12 +5,16 @@
  *
  * Relay protocol: hot-path streaming arrives as session_update; this client reduces
  * via applySessionUpdate + eventId set dedupe and surfaces SessionState to handlers.
+ * Those notifies are coalesced per animation frame (liveBridgeCoalesce); close()
+ * and socket close / error flush pending ones first.
  */
 
 import type { SessionState } from "@grok-desktop/acp-core";
 import { createLiveBridgeDispatch } from "./liveBridgeDispatch";
 import { createLiveBridgeFs } from "./liveBridgeFs";
+import { createLiveBridgeGrokSetup } from "./liveBridgeGrokSetup";
 import { createLiveBridgeModelCatalog } from "./liveBridgeModelCatalog";
+import { createLiveBridgeTerminal } from "./liveBridgeTerminal";
 import type {
   AuthProbe,
   BridgeServerMsg,
@@ -44,6 +48,18 @@ export {
 } from "./liveBridgeDispatch";
 export { makeAgentChunkUpdates } from "./liveBridgeFixtures";
 
+/**
+ * Client-generated `start` request id. Unique across windows (random UUID
+ * when available, else time + random), opaque to the bridge.
+ * @returns A fresh id string.
+ */
+function createStartId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `start-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 type PendingCli = {
   resolve: (result: CliChannelResult) => void;
   reject: (error: Error) => void;
@@ -61,8 +77,16 @@ export function connectLiveBridge(
 ): LiveBridgeHandle {
   const ws = new WebSocket(url);
   const pendingCli = new Map<string, PendingCli>();
-  /** Relay reduce + load-replay batching (shipped path; unit-tested via createLiveBridgeDispatch). */
-  const dispatch = createLiveBridgeDispatch({ handlers });
+  /**
+   * Relay reduce + load-replay batching + live stream coalescing (shipped
+   * path; unit-tested via createLiveBridgeDispatch with a fake scheduler).
+   */
+  const dispatch = createLiveBridgeDispatch({
+    handlers,
+    coalesce: { isForeground: handlers.isForegroundSession },
+    // Seq gate requests (`resync`, fallback `get_state`) go out on this socket.
+    sendRequest: (message) => send(message),
+  });
   const readyCallbacks: {
     resolve?: () => void;
     reject?: (error: Error) => void;
@@ -83,6 +107,10 @@ export function connectLiveBridge(
 
   const fsApi = createLiveBridgeFs(send);
   const catalogApi = createLiveBridgeModelCatalog(send);
+  /** Integrated terminal channel (PTY shells owned by this socket). */
+  const terminalChannel = createLiveBridgeTerminal(send);
+  /** CLI onboarding: setup runs + custom grok path (own correlation maps). */
+  const grokSetup = createLiveBridgeGrokSetup(send);
 
   function rejectCliRequests(error: Error): void {
     for (const pending of pendingCli.values()) {
@@ -99,6 +127,10 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     catalogApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
+    terminalChannel.closeAll(`WebSocket error: ${url}`);
+    grokSetup.failAll(`WebSocket error connecting to ${url}`);
+    // Land coalesced chunks before the error paints.
+    dispatch.flushPendingUpdates();
     // I4: do not leave sessions muted if error aborts a load window.
     dispatch.flushAllReplays();
     readyCallbacks.reject?.(new Error(`WebSocket error connecting to ${url}`));
@@ -108,6 +140,10 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
     catalogApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
+    terminalChannel.closeAll("Bridge disconnected");
+    grokSetup.failAll("Bridge WebSocket closed");
+    // No lost final chunk: emit coalesced notifies before onClose.
+    dispatch.flushPendingUpdates();
     // I4: force-close any open replay windows before clearing buckets.
     dispatch.flushAllReplays();
     dispatch.clearBuckets();
@@ -124,6 +160,12 @@ export function connectLiveBridge(
       return;
     }
     if (catalogApi.handleServerMsg(msg)) {
+      return;
+    }
+    if (terminalChannel.handleServerMsg(msg)) {
+      return;
+    }
+    if (grokSetup.handleServerMsg(msg)) {
       return;
     }
     if (dispatch.handleServerMsg(msg)) {
@@ -170,20 +212,29 @@ export function connectLiveBridge(
 
   return {
     ready,
+    flushPendingUpdates: dispatch.flushPendingUpdates,
     start: (opts) => {
       // Prefill client reduce from catalog seed so Go pool-hit (empty timeline)
       // + later live chunks append instead of replacing painted history.
       if (opts?.seed?.id) {
         dispatch.seedSession(opts.seed);
       }
+      // Echoed in the new session's provenance: lets this window (and only
+      // this window) recognise the session its own start created.
+      const startId = createStartId();
+      dispatch.noteOwnStart(startId);
       return send({
         type: "start",
+        startId,
         cwd: opts?.cwd,
         alwaysApprove: opts?.alwaysApprove ?? false,
         resumeId: opts?.resumeId,
         seed: opts?.seed,
         forceNew: opts?.forceNew,
         spawnConfig: opts?.spawnConfig,
+        // Undefined is omitted by JSON.stringify, so a normal start does
+        // not send a worktree field. `{}` still creates one.
+        worktree: opts?.worktree,
       });
     },
     /**
@@ -299,7 +350,11 @@ export function connectLiveBridge(
     },
     cli,
     readModelCatalog: catalogApi.readModelCatalog,
+    terminal: terminalChannel.api,
+    grokSetup: grokSetup.api,
     close: () => {
+      // Land coalesced chunks while the store still treats the bridge as live.
+      dispatch.flushPendingUpdates();
       try {
         ws.close();
       } catch {

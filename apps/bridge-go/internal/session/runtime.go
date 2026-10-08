@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
@@ -132,7 +133,15 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 	}
 
 	terminals := reverse.NewTerminalRegistry()
-	sessionIDHint := opts.ResumeID
+	// idHint is the best-known session id for frames that arrive without one.
+	// State callbacks and the handshake write it while transport goroutines
+	// (stderr, close, updates) read it, so it lives in an atomic.Value.
+	var idHint atomic.Value
+	idHint.Store(opts.ResumeID)
+	sessionIDHint := func() string {
+		v, _ := idHint.Load().(string)
+		return v
+	}
 
 	autoPerm := ""
 	if opts.AlwaysApprove {
@@ -146,7 +155,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		AutoPermissionOption: autoPerm,
 		OnStateChange: func(session acp.SessionState) {
 			if session.ID != "" {
-				sessionIDHint = session.ID
+				idHint.Store(session.ID)
 			}
 			if opts.OnState != nil {
 				opts.OnState(session)
@@ -155,7 +164,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		OnSessionUpdate: func(update map[string]any, sessionID string, eventID string) {
 			id := sessionID
 			if id == "" {
-				id = sessionIDHint
+				id = sessionIDHint()
 			}
 			if opts.OnSessionUpdate != nil {
 				opts.OnSessionUpdate(update, id, eventID)
@@ -164,7 +173,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		OnReplayBegin: func(sessionID string) {
 			id := sessionID
 			if id == "" {
-				id = sessionIDHint
+				id = sessionIDHint()
 			}
 			if opts.OnReplayBegin != nil {
 				opts.OnReplayBegin(id)
@@ -173,7 +182,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
 			id := sessionID
 			if id == "" {
-				id = sessionIDHint
+				id = sessionIDHint()
 			}
 			if opts.OnReplayEnd != nil {
 				opts.OnReplayEnd(id, updates, status, model, mode, count, bytes, elapsedMs)
@@ -182,7 +191,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		OnStderr: func(text string) {
 			_, _ = os.Stderr.WriteString(text)
 			if opts.OnStderr != nil {
-				opts.OnStderr(text, sessionIDHint)
+				opts.OnStderr(text, sessionIDHint())
 			}
 		},
 		OnAgentRequest: func(method string, id any, params any) (any, error) {
@@ -200,7 +209,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 	// Process exit callback (transport close also fires).
 	proc.Transport.OnClose(func(code *int) {
 		if opts.OnProcessExit != nil {
-			opts.OnProcessExit(sessionIDHint, code)
+			opts.OnProcessExit(sessionIDHint(), code)
 		}
 	})
 
@@ -236,7 +245,7 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 		return nil, err
 	}
 
-	sessionIDHint = hs.SessionID
+	idHint.Store(hs.SessionID)
 	if opts.OnInfo != nil {
 		if hs.Resumed {
 			opts.OnInfo(fmt.Sprintf("resumed session %s", hs.SessionID), hs.SessionID)

@@ -32,6 +32,8 @@ Every version: [Releases](https://github.com/bo-516/grok-desktop/releases).
 > ```
 >
 > No terminal? Double-click once, then allow it under **System Settings → Privacy & Security → Open Anyway** — Control-clicking the app no longer gets around this on Sequoia and later.
+>
+> **Signed releases skip that step.** A build produced with Apple Developer ID credentials is notarized and stapled; Gatekeeper opens it directly. A Windows build produced with `WINDOWS_SIGN_PFX` is Authenticode-signed, so SmartScreen does not block `grok-desktop.exe`. Until those credentials are configured, releases stay ad-hoc / unsigned and the steps above still apply. Details: [`apps/shell/README.md`](apps/shell/README.md#code-signing).
 
 **First, install the agent.** The app is a window onto the real `grok` CLI, so it has to be on PATH (or at `~/.grok/bin/grok`) and signed in with `grok login` — or set `XAI_API_KEY`. Without it the bridge starts and the UI shows an auth banner.
 
@@ -146,7 +148,7 @@ bash scripts/build-release.sh          # both targets → release/
 bash scripts/build-release.sh mac      # or: windows
 ```
 
-Produces `release/Grok-Desktop-macos-universal.zip` (ad-hoc signed `.app`, arm64 + x86_64) and `release/Grok-Desktop-windows-amd64.zip`.
+Produces `release/Grok-Desktop-macos-universal.zip` (universal `.app`, arm64 + x86_64) and `release/Grok-Desktop-windows-amd64.zip`. With no signing credentials the `.app` is ad-hoc signed and the Windows exes are unsigned. Set `MACOS_SIGN_IDENTITY` (plus a notarytool keychain profile or `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`) or `WINDOWS_SIGN_PFX` to sign; see [`apps/shell/README.md`](apps/shell/README.md#code-signing).
 
 Every bundle carries **two** binaries: the Wails shell (with the Vite build embedded) and the Go bridge it spawns as a child process. The shell looks for the bridge in `Contents/Resources` on macOS and next to its own `.exe` on Windows — see [`apps/shell/paths.go`](apps/shell/paths.go).
 

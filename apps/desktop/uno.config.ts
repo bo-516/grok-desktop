@@ -123,6 +123,7 @@ export default defineConfig({
     "uno/shortcuts.preview.ts",
     "uno/shortcuts.code.ts",
     "uno/shortcuts.doc.ts",
+    "uno/shortcuts.terminal.ts",
     "uno/shortcuts.git.ts",
     "uno/shortcuts.review.ts",
   ],

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
 // roomPollInterval is how often waiters recheck for idle reclaim while full.
@@ -67,6 +68,10 @@ type PooledRuntime struct {
 	// when the runtime does not expose it (callers must report "not available").
 	XaiRequest func(method string, params map[string]any) (any, error)
 	Dispose    func()
+	// Worktree is set when this session runs inside a grok worktree.
+	// Nil for a normal checkout. Crash recovery copies it so a restart
+	// does not create a second worktree. List copies the value onto PoolEntry.
+	Worktree *worktree.Info
 }
 
 // PoolEntry is the UI rail summary for one resident process.
@@ -76,6 +81,10 @@ type PoolEntry struct {
 	Status    SessionStatus `json:"status"`
 	LastUsed  int64         `json:"lastUsed"`
 	Live      bool          `json:"live"`
+	// Worktree is the create result (path, branch, source repo). Omitted
+	// when the session is not in a worktree. The desktop groups the rail
+	// row under SourceRepo and shows Branch on the session row.
+	Worktree *worktree.Info `json:"worktree,omitempty"`
 }
 
 // RuntimePool is a capacity-bounded map of live session runtimes.
@@ -93,6 +102,9 @@ type RuntimePool struct {
 	pendingSpawns int
 	// disposed is set by DisposeAll so waiters exit instead of blocking forever.
 	disposed bool
+	// lastStamp is the newest LastUsed handed out by nextUseStampLocked.
+	// Zero until the first Insert/Touch.
+	lastStamp int64
 }
 
 // NewRuntimePool creates a pool with at least capacity 1.
@@ -132,14 +144,32 @@ func (p *RuntimePool) Has(sessionID string) bool {
 	return ok
 }
 
-// Touch updates lastUsed for LRU bookkeeping.
+// Touch marks a session as just used for LRU bookkeeping (strictly newer
+// than any earlier Insert/Touch; see nextUseStampLocked).
 // @param sessionID Target; no-op when missing.
 func (p *RuntimePool) Touch(sessionID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if rt, ok := p.m[sessionID]; ok {
-		rt.LastUsed = time.Now().UnixMilli()
+		rt.LastUsed = p.nextUseStampLocked()
 	}
+}
+
+// nextUseStampLocked returns a LastUsed stamp newer than every earlier one.
+// It is wall-clock Unix milliseconds when the clock has moved on, otherwise
+// the previous stamp + 1, so two inserts/touches in the same millisecond still
+// have a strict LRU order (earlier use is older) instead of tying and leaving
+// the victim to map iteration order. Stamps may run a few ms ahead of the
+// wall clock under bursts; they are only compared with each other.
+// Caller must hold p.mu.
+// @returns Strictly increasing stamp in (approximate) Unix milliseconds.
+func (p *RuntimePool) nextUseStampLocked() int64 {
+	now := time.Now().UnixMilli()
+	if now <= p.lastStamp {
+		now = p.lastStamp + 1
+	}
+	p.lastStamp = now
+	return now
 }
 
 // BeginSpawn reserves a pool slot before spawning a child process.
@@ -167,7 +197,8 @@ func (p *RuntimePool) CancelSpawn() {
 }
 
 // Insert adds or replaces a runtime; reclaims idle LRU when over capacity.
-// Consumes one pending spawn reservation when present.
+// Consumes one pending spawn reservation when present, and stamps LastUsed
+// as the newest use.
 // When full and all busy, waits for room (same policy as BeginSpawn).
 // @param runtime Handle after handshake (SessionID must be the real ACP id).
 // @returns nil on success; error only when disposed while waiting.
@@ -187,7 +218,7 @@ func (p *RuntimePool) Insert(runtime *PooledRuntime) error {
 	if err := p.waitForCapacityForInsertLocked(); err != nil {
 		return err
 	}
-	runtime.LastUsed = time.Now().UnixMilli()
+	runtime.LastUsed = p.nextUseStampLocked()
 	p.m[runtime.SessionID] = runtime
 	return nil
 }
@@ -262,6 +293,8 @@ func (p *RuntimePool) SessionStates() []acp.SessionState {
 }
 
 // List returns pool summary sorted by lastUsed ascending (LRU first).
+// Each entry's Worktree is a snapshot copy so a later recovery mutation
+// does not change a slice the caller already holds. Nil stays nil.
 func (p *RuntimePool) List() []PoolEntry {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -271,12 +304,18 @@ func (p *RuntimePool) List() []PoolEntry {
 		if rt.GetStatus != nil {
 			status = rt.GetStatus()
 		}
+		var wtCopy *worktree.Info
+		if rt.Worktree != nil {
+			cloned := *rt.Worktree
+			wtCopy = &cloned
+		}
 		entries = append(entries, PoolEntry{
 			SessionID: rt.SessionID,
 			Cwd:       rt.Cwd,
 			Status:    status,
 			LastUsed:  rt.LastUsed,
 			Live:      true,
+			Worktree:  wtCopy,
 		})
 	}
 	// Simple insertion sort by lastUsed.

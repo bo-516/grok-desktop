@@ -9,10 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/grokbin"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/spawn"
 )
 
@@ -63,6 +65,17 @@ type EnvironmentInfo struct {
 	OK              bool    `json:"ok"`
 	Message         string  `json:"message"`
 	PoolCapacity    int     `json:"poolCapacity"`
+	// FailureKind is the structured reason OK is false (Failure* constants in
+	// environment_failure.go); empty when OK.
+	FailureKind string `json:"failureKind"`
+	// MinVersion is the CLI floor this bridge enforces (minGrokVersion).
+	MinVersion string `json:"minVersion"`
+	// GrokPathSource says which rule found GrokPath (env / setting / default /
+	// path); empty when no binary was located.
+	GrokPathSource string `json:"grokPathSource"`
+	// Setup lists the install / update commands offered on this host. The
+	// desktop shows them verbatim and runs them only through grok_setup_run.
+	Setup grokbin.Plans `json:"setup"`
 }
 
 // AuthProbe is the cheap auth-only subset of EnvironmentInfo, sent as the
@@ -257,6 +270,7 @@ func grokVersionTimedOut(timeout time.Duration, min string) versionSupport {
 // then login. A logged-in user with grok < 0.9.0, an unparseable version, or a
 // `grok --version` that outlives versionProbeTimeout still gets ok=false; the
 // timeout has its own message so a slow CLI is not reported as unparseable.
+// Every failure also carries a FailureKind so the UI never parses Message.
 // The version probe can block for up to versionProbeTimeout (+ ~1s pipe
 // drain), so run it off any path that must answer quickly.
 //
@@ -267,41 +281,42 @@ func CheckEnvironment(poolCapacity int) EnvironmentInfo {
 		poolCapacity = PoolCapacityFromEnv()
 	}
 	authed, authSource, authPath := ProbeAuthSource()
-	bin, err := spawn.ResolveGrokBin()
-	if err != nil {
-		return EnvironmentInfo{
-			GrokPath: nil, Version: nil, Authed: authed, AuthSource: authSource,
-			AuthPathChecked: authPath, OK: false,
-			Message: err.Error(), PoolCapacity: poolCapacity,
-		}
+	info := EnvironmentInfo{
+		Authed: authed, AuthSource: authSource, AuthPathChecked: authPath,
+		PoolCapacity: poolCapacity, MinVersion: minGrokVersion,
 	}
-	grokPath := bin
-	version, timedOut := ReadGrokVersion(bin, versionProbeTimeout)
+	loc, err := grokbin.Locate()
+	if err != nil {
+		info.Message = err.Error()
+		info.FailureKind = locateFailureKind(err)
+		info.Setup = grokbin.PlansFor(runtime.GOOS, "")
+		return info
+	}
+	grokPath := loc.Path
+	info.GrokPath = &grokPath
+	info.GrokPathSource = string(loc.Source)
+	info.Setup = grokbin.PlansFor(runtime.GOOS, loc.Path)
+	version, timedOut := ReadGrokVersion(loc.Path, versionProbeTimeout)
+	info.Version = version
 	support := grokVersionSupported(version, minGrokVersion)
 	if timedOut {
 		support = grokVersionTimedOut(versionProbeTimeout, minGrokVersion)
 	}
 	if !support.OK {
-		return EnvironmentInfo{
-			GrokPath: &grokPath, Version: version, Authed: authed, AuthSource: authSource,
-			AuthPathChecked: authPath, OK: false,
-			Message: support.Message, PoolCapacity: poolCapacity,
-		}
+		info.Message = support.Message
+		info.FailureKind = versionFailureKind(timedOut, support)
+		return info
 	}
 	if !authed {
-		return EnvironmentInfo{
-			GrokPath: &grokPath, Version: version, Authed: false, AuthSource: "none",
-			AuthPathChecked: authPath, OK: false,
-			Message:      "No grok login detected: run `grok login` or set the XAI_API_KEY environment variable",
-			PoolCapacity: poolCapacity,
-		}
+		info.AuthSource = "none"
+		info.Message = "No grok login detected: run `grok login` or set the XAI_API_KEY environment variable"
+		info.FailureKind = FailureSignedOut
+		return info
 	}
-	msg := "grok ready · auth=" + authSource
+	info.OK = true
+	info.Message = "grok ready · auth=" + authSource
 	if version != nil {
-		msg = "grok ready · " + *version + " · auth=" + authSource
+		info.Message = "grok ready · " + *version + " · auth=" + authSource
 	}
-	return EnvironmentInfo{
-		GrokPath: &grokPath, Version: version, Authed: true, AuthSource: authSource,
-		AuthPathChecked: authPath, OK: true, Message: msg, PoolCapacity: poolCapacity,
-	}
+	return info
 }
