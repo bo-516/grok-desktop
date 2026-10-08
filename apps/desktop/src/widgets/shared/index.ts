@@ -18,6 +18,14 @@ export { MentionTextView } from "./stateless/MentionTextView";
 export { PathLabelView } from "./stateless/PathLabelView";
 export type { PathLabelViewProps } from "./stateless/PathLabelView";
 export { useCodeHighlight } from "./useCodeHighlight";
+export {
+  CodeHighlightVisibilityContext,
+  CodeHighlightVisibilityProvider,
+} from "./codeHighlightVisibility";
+export type {
+  CodeHighlightVisibility,
+  CodeHighlightVisibilityProviderProps,
+} from "./codeHighlightVisibility";
 export { CodeLineView } from "./stateless/CodeLineView";
 export type { CodeLineViewProps } from "./stateless/CodeLineView";
 export { MarkdownCodeWidget } from "./MarkdownCodeWidget";

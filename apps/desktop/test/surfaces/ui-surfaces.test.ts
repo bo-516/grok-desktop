@@ -33,12 +33,16 @@ describe("UI surface presence", () => {
     assert.match(thought, /data-kind="thought"|dataKind="thought"/);
     assert.match(tool, /data-kind="tool"/);
     assert.match(timeline, /toolCalls/);
+    // Rows are a memoized widget; the kind switch lives on the row view.
+    const row = readSrc("widgets/timeline/TimelineUnitRowView.tsx");
+    assert.match(timeline, /TimelineUnitRowWidget/);
     // User bubble: text + image thumbs via UserMessageView; never paint
     // ContentBlock.type names (resource embeds used to leak "resource").
-    assert.match(timeline, /UserMessageView/);
+    assert.match(row, /UserMessageView/);
     // Residual work units share TurnStepView (no parallel agent/thought/tool tree).
-    assert.match(timeline, /TurnStepView/);
+    assert.match(row, /TurnStepView/);
     assert.doesNotMatch(timeline, /ThoughtGroupView|ToolGroupView|ThoughtWidget|ToolCardView/);
+    assert.doesNotMatch(row, /ThoughtGroupView|ToolGroupView|ThoughtWidget|ToolCardView/);
     const userMsg = readSrc("widgets/timeline/UserMessageView.tsx");
     assert.match(userMsg, /userTextFromBlocks|userImagesFromBlocks/);
     assert.match(userMsg, /data-kind="user"/);
@@ -834,13 +838,15 @@ describe("UI surface presence", () => {
     const menu = readSrc("widgets/SessionMenuWidget.tsx");
     assert.match(menu, /forkSession|runSessionMenuAction/);
     const timeline = readSrc("widgets/timeline/TimelineView.tsx");
+    const row = readSrc("widgets/timeline/TimelineUnitRowView.tsx");
     const hook = readSrc("widgets/timeline/useTimelineWidget.ts");
     const model = readSrc("widgets/timeline/useTimelineModel.ts");
     const pipeline = readSrc("lib/timelinePipeline.ts");
     assert.match(pipeline, /buildTimelineRenderUnits/);
     assert.match(hook, /useTimelineModel/);
     assert.match(model, /buildTimelineRenderUnits/);
-    assert.match(timeline, /TurnBlockWidget|TurnStepView/);
+    assert.match(model, /reuseTimelineRenderUnits/);
+    assert.match(row, /TurnBlockWidget|TurnStepView/);
     // Residual tool/thought groups must not keep a parallel JSX tree.
     assert.doesNotMatch(timeline, /ToolGroupView|ThoughtGroupView/);
     assert.doesNotMatch(timeline, /groupTimelineProcess|ProcessGroupView/);
@@ -1826,11 +1832,13 @@ describe("UI surface presence", () => {
   it("mention chips are one shared model across composer, history, and menu", () => {
     const composerInput = readSrc("widgets/composer/ComposerInputView.tsx");
     const timeline = readSrc("widgets/timeline/TimelineView.tsx");
+    const row = readSrc("widgets/timeline/TimelineUnitRowView.tsx");
     const userMsg = readSrc("widgets/timeline/UserMessageView.tsx");
     assert.match(composerInput, /from "@\/lib\/mentionTokens"/);
     assert.match(composerInput, /splitMentionTokens/);
     // History mention chips live on UserMessageView (text half of user turns).
-    assert.match(timeline, /UserMessageView/);
+    assert.match(row, /UserMessageView/);
+    assert.match(timeline, /TimelineUnitRowWidget/);
     assert.match(userMsg, /MentionTextView/);
     assert.match(userMsg, /from "@\/widgets\/shared"/);
     assert.equal(
@@ -1847,6 +1855,7 @@ describe("UI surface presence", () => {
     assert.match(menu, /MentionIconView/);
     assert.doesNotMatch(chip, /<svg/);
     assert.doesNotMatch(timeline, /<svg/);
+    assert.doesNotMatch(row, /<svg/);
     assert.doesNotMatch(userMsg, /<svg/);
 
     const base = readSrc("styles/base.css");
