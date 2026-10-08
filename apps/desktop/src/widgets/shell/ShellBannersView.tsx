@@ -13,12 +13,15 @@ export type ShellBannersViewProps = {
   authOk: boolean;
   /** Auth failure message from environment probe. */
   authMessage?: string;
+  /**
+   * Button matched to the failure kind (Sign in / Retry / Set up grok… /
+   * Update grok…); null shows the message without a button.
+   */
+  envAction: { label: string; onAction: () => void } | null;
   /** SPAWN / restart notice text; null hides. */
   restartNotice: string | null;
   /** Session waiting on a permission modal. */
   waitingPermission: boolean;
-  /** Run auth login CLI. */
-  onLogin: () => void;
   /** Dismiss restart banner. */
   onDismissRestart: () => void;
 };
@@ -41,9 +44,15 @@ export function ShellBannersView(props: ShellBannersViewProps) {
         <div className="banner banner-danger history-banner" role="alert">
           {props.authMessage ??
             "Auth missing — run `grok login` or set XAI_API_KEY"}
-          <button type="button" className="btn-ghost" onClick={props.onLogin}>
-            Login
-          </button>
+          {props.envAction ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={props.envAction.onAction}
+            >
+              {props.envAction.label}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {props.restartNotice ? (

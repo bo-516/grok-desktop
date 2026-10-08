@@ -3,13 +3,12 @@ package spawn
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/grokbin"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/envfilter"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/jsonrpc"
 )
@@ -46,27 +45,19 @@ type Process struct {
 	disposeOnce sync.Once
 }
 
-// ResolveGrokBin finds the grok executable: GROK_BIN, ~/.grok/bin/grok, or PATH "grok".
-// Returns an error when none of the candidates exist (except bare "grok" which is deferred to exec).
+// ResolveGrokBin finds the grok executable via grokbin.Locate: GROK_BIN, the
+// custom path saved from Settings, ~/.grok/bin/grok (grok.exe on Windows),
+// then PATH. The settings file is re-read on every call, so a new custom path
+// applies to the next spawn without restarting the bridge.
+//
+// @returns The executable path, or a *grokbin.LocateError when grok is not
+// installed or an explicit path (GROK_BIN / setting) is unusable.
 func ResolveGrokBin() (string, error) {
-	home, _ := os.UserHomeDir()
-	candidates := []string{}
-	if v := os.Getenv("GROK_BIN"); v != "" {
-		candidates = append(candidates, v)
+	loc, err := grokbin.Locate()
+	if err != nil {
+		return "", err
 	}
-	if home != "" {
-		candidates = append(candidates, filepath.Join(home, ".grok", "bin", "grok"))
-	}
-	candidates = append(candidates, "grok")
-	for _, c := range candidates {
-		if c == "grok" {
-			return c, nil
-		}
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			return c, nil
-		}
-	}
-	return "", fmt.Errorf("grok binary not found (set GROK_BIN or install CLI)")
+	return loc.Path, nil
 }
 
 // BuildGrokAgentArgs builds argv for `grok [global…] agent [agent…] stdio`.

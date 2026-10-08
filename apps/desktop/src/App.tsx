@@ -129,7 +129,7 @@ export function App() {
               waitingPermission={
                 shell.session.status === "waiting_permission"
               }
-              onLogin={() => void shell.authLogin()}
+              envAction={gate.bannerAction}
               onDismissRestart={shell.clearRestartNotice}
             />
             {/* Startup GitHub release notice. Own state; not shell chrome state. */}
@@ -173,13 +173,9 @@ export function App() {
       </div>
 
       {shell.session.pendingPermission ? <PermissionModalView /> : null}
-      {/* Signed-out gate — portaled to <body>, so the `inert` shell above it
-          cannot swallow the one control the user still needs. */}
-      <LoginGateView
-        open={gate.open}
-        busy={gate.busy}
-        onLogin={gate.onLogin}
-      />
+      {/* Onboarding / signed-out gate — portaled to <body>, so the `inert`
+          shell above it cannot swallow the controls the user still needs. */}
+      <LoginGateView {...gate.view} />
       <SessionWindowWidget />
       <CommandPaletteWidget
         open={shell.paletteOpen}

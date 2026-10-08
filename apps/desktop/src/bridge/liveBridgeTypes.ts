@@ -16,6 +16,12 @@ import type {
   LiveBridgeTerminal,
   TerminalServerMsg,
 } from "./liveBridgeTerminalTypes";
+import type {
+  GrokFailureKind,
+  GrokPathSource,
+  GrokSetupApi,
+  GrokSetupPlans,
+} from "./liveBridgeGrokSetupTypes";
 
 /** Workspace-relative paths scanned by the real bridge for `@` completion. */
 export type WorkspaceEntry = {
@@ -67,6 +73,14 @@ export type EnvironmentInfo = {
   ok: boolean;
   message: string;
   poolCapacity: number;
+  /** Structured reason ok is false; "" when ready. Absent from old bridges. */
+  failureKind?: GrokFailureKind;
+  /** CLI version floor the bridge enforces (e.g. "0.9.0"). */
+  minVersion?: string;
+  /** Which rule located grokPath. */
+  grokPathSource?: GrokPathSource;
+  /** Install / update commands offered on the bridge host. */
+  setup?: GrokSetupPlans;
 };
 
 /**
@@ -387,6 +401,8 @@ export type LiveBridgeHandle = {
   readModelCatalog: (cwd?: string) => Promise<ModelCatalogReply>;
   /** Integrated terminal panel: PTY shells owned by this socket. */
   terminal: LiveBridgeTerminal;
+  /** grok CLI onboarding: installer / update runs and the custom grok path. */
+  grokSetup: GrokSetupApi;
   close: () => void;
   ready: Promise<void>;
 };
