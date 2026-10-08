@@ -3,7 +3,8 @@
  *
  * - {@link SessionRailSessionMenuButtonView}: the row's ⋯ chip, a
  *   DropdownMenu trigger (renders inside the row's trailing slot).
- * - {@link SessionRailSessionMenuItemsView}: Rename, Pin / Unpin, Delete…
+ * - {@link SessionRailSessionMenuItemsView}: Rename, Pin / Unpin,
+ *   Open in new window, Delete…
  *   — one list rendered into either the DropdownMenu (⋯) or the
  *   ContextMenu (right-click), so both menus always match.
  *
@@ -12,16 +13,19 @@
  * wired). The row widget owns the menu roots and open state.
  */
 
-import { Ellipsis, PencilLine, Pin, PinOff, Trash2 } from "lucide-react";
+import { AppWindow, Ellipsis, PencilLine, Pin, PinOff, Trash2 } from "lucide-react";
 import {
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
 } from "@/components/ui/context-menu";
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { sessionWindowShortcutLabel } from "@/lib/sessionWindow";
 
 /** Which Radix menu the item list renders into. */
 export type SessionRowMenuKind = "dropdown" | "context";
@@ -36,6 +40,11 @@ export type SessionRailSessionMenuItemsViewProps = {
   onRename?: () => void;
   /** Toggle this chat's pin within its project. */
   onTogglePin: () => void;
+  /**
+   * Open this chat in a second window. Missing hides the row (callers that
+   * have no session id should omit it).
+   */
+  onOpenInWindow?: () => void;
   /** Delete (through the shell's confirm when wired). */
   onRemove: () => void;
 };
@@ -78,14 +87,22 @@ export function SessionRailSessionMenuButtonView(props: {
 export function SessionRailSessionMenuItemsView(
   props: SessionRailSessionMenuItemsViewProps,
 ) {
-  const { kind, pinned, onRename, onTogglePin, onRemove } = props;
+  const { kind, pinned, onRename, onTogglePin, onOpenInWindow, onRemove } =
+    props;
   /** Row primitive for this menu kind (same props on both). */
   const Item = kind === "dropdown" ? DropdownMenuItem : ContextMenuItem;
   /** Separator primitive for this menu kind. */
   const Separator =
     kind === "dropdown" ? DropdownMenuSeparator : ContextMenuSeparator;
+  /** Shortcut hint primitive for this menu kind. */
+  const Shortcut =
+    kind === "dropdown" ? DropdownMenuShortcut : ContextMenuShortcut;
   /** Glyph for the pin row: the action it performs, not the current state. */
   const PinGlyph = pinned ? PinOff : Pin;
+  /** Display-only hint. The key is bound on the window, not by the menu. */
+  const openShortcut = sessionWindowShortcutLabel(
+    typeof navigator === "undefined" ? "" : navigator.platform,
+  );
   return (
     <>
       {onRename ? (
@@ -98,6 +115,13 @@ export function SessionRailSessionMenuItemsView(
         <PinGlyph strokeWidth={1.75} aria-hidden="true" />
         {pinned ? "Unpin" : "Pin to top"}
       </Item>
+      {onOpenInWindow ? (
+        <Item onSelect={onOpenInWindow}>
+          <AppWindow strokeWidth={1.75} aria-hidden="true" />
+          Open in new window
+          <Shortcut>{openShortcut}</Shortcut>
+        </Item>
+      ) : null}
       <Separator />
       <Item variant="destructive" onSelect={onRemove}>
         <Trash2 strokeWidth={1.75} aria-hidden="true" />

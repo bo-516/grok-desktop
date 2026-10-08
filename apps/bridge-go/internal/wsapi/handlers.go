@@ -190,7 +190,18 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 			return err
 		}
 		h.Pool.Touch(rt.SessionID)
-		return rt.RespondPermission(optionID)
+		// A second window answering the same prompt must not write another
+		// JSON-RPC response (RespondPermission drops that under its mutex)
+		// and must not broadcast "No pending permission request" into the
+		// window that already cleared the dialog. The clear itself is the
+		// state broadcast emitState already sent to every socket.
+		if permErr := rt.RespondPermission(optionID); permErr != nil {
+			h.Send(ws, map[string]any{
+				"type": "error", "message": permErr.Error(), "sessionId": rt.SessionID,
+			})
+			return nil
+		}
+		return nil
 
 	case "set_model":
 		return h.handleSetModel(ws, msg)

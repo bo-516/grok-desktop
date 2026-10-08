@@ -24,6 +24,7 @@ import { UpdateNoticeWidget } from "@/widgets/updateNotice";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
 import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
+import { SessionWindowWidget } from "@/widgets/sessionWindow";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
 import type { ContextRailId } from "./widgets/shell/shellPanels";
@@ -179,6 +180,7 @@ export function App() {
         busy={gate.busy}
         onLogin={gate.onLogin}
       />
+      <SessionWindowWidget />
       <CommandPaletteWidget
         open={shell.paletteOpen}
         onClose={() => shell.setPaletteOpen(false)}
