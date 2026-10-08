@@ -3,6 +3,8 @@
  * Owns width drag local state; commits to previewStore on pointer-up.
  * Body is driven by usePreviewSource from the active PreviewTarget.
  * File click-to-refresh keeps the last paint and frosts it (PreviewFileStackView).
+ * Changeset targets in a git repository render the git change list (git diff
+ * is the source of truth); outside a repo the tool-card change list remains.
  */
 
 import cs from "classnames";
@@ -23,10 +25,12 @@ import {
   usePreviewStore,
   type PreviewTarget,
 } from "@/store/previewStore";
+import { useGitStore } from "@/store/gitStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { useCopyFeedback } from "@/widgets/shared";
 import type { CopyCursorPoint } from "./CopiedCursorFlashView";
 import { DiffReviewWidget } from "./DiffReviewWidget";
+import { GitChangeListWidget } from "./GitChangeListWidget";
 import { PreviewChangeListView } from "./PreviewChangeListView";
 import { PreviewFileStackView } from "./PreviewFileStackView";
 import { PreviewFileWidget } from "./PreviewFileWidget";
@@ -56,6 +60,8 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
   const source = usePreviewSource(target);
   /** Workspace root shortens the head path only; empty keeps it absolute. */
   const workspace = useSessionStore((s) => s.session.workspace);
+  /** Git snapshot for the workspace; decides git vs tool-card change lists. */
+  const gitStatus = useGitStore((s) => s.byCwd[workspace ?? ""]?.status ?? null);
   const { copiedKey, copy } = useCopyFeedback();
 
   /** Live drag width; null when not dragging. */
@@ -75,6 +81,12 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
 
   const width = dragWidth ?? storedWidth;
   const isOverlay = props.effectiveLayout === "overlay";
+  /** Changeset target rendered from git (null → tool-card / other bodies). */
+  const gitTarget =
+    target?.kind === "changeset" && gitStatus?.isRepo === true ? target : null;
+  /** Changeset outside a repo: explain why the list comes from tool calls. */
+  const notRepo =
+    target?.kind === "changeset" && gitStatus !== null && !gitStatus.isRepo;
 
   const handleClose = useCallback(() => {
     closePreview();
@@ -125,7 +137,9 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
   // Push padding / top-nav rail width are driven by App via --rail-right-width
   // on main-column (shell.railWidthPx). This drawer only owns its own width style.
 
-  const head = headFromSource(source, target);
+  const head: ReturnType<typeof headFromSource> = gitTarget
+    ? { title: "Changes", subtitle: "Git working tree" }
+    : headFromSource(source, target);
   // Only file/diff heads carry a path; "Changes" and placeholders stay plain text.
   const headDisplay = head.path
     ? toPathDisplay(head.path, workspace)
@@ -187,11 +201,22 @@ export function PreviewDrawerWidget(props: PreviewDrawerWidgetProps) {
         onClose={handleClose}
       />
       <div className="context-drawer-body preview-body">
-        <PreviewBody
-          source={source}
-          onOpenFile={(path) => openPreview({ kind: "file", path })}
-          onFileToolbarChange={setFileToolbar}
-        />
+        {gitTarget ? (
+          <GitChangeListWidget target={gitTarget} />
+        ) : (
+          <>
+            {notRepo ? (
+              <div className="preview-banner">
+                Not a git repository — showing edits recorded in agent tool calls.
+              </div>
+            ) : null}
+            <PreviewBody
+              source={source}
+              onOpenFile={(path) => openPreview({ kind: "file", path })}
+              onFileToolbarChange={setFileToolbar}
+            />
+          </>
+        )}
       </div>
     </aside>
   );
