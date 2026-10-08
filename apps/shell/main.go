@@ -96,13 +96,19 @@ func run() error {
 	}()
 
 	injectJS := bridgeInjectJS(wsURL, sessionLog)
+	// Registry is bound to the app below, before Run serves asset requests.
+	sessionWindows := newWailsWindowRegistry(injectJS)
 
 	app := application.New(application.Options{
 		Name:        "Grok Desktop",
 		Description: "Desktop ACP client for grok-build",
 		Assets: application.AssetOptions{
-			// UI log POST lands on the same origin as embedded assets.
-			Handler: WithUILogHandler(FrontendAssets(), sessionLog),
+			// UI log POST and session-window POST land on the same origin as assets.
+			// Session windows load /?session=<id>; the middleware still injects on "/".
+			Handler: WithUILogHandler(
+				WithSessionWindowHandler(FrontendAssets(), sessionWindows),
+				sessionLog,
+			),
 			// Inject into <head> before Vite modules so defaultBridgeUrl() sees the global.
 			// WebviewWindowOptions.JS alone is too late on darwin (post-navigation).
 			Middleware: BridgeURLInjectMiddleware(injectJS),
@@ -120,8 +126,10 @@ func run() error {
 			"logDir":     sessionLogDir(sessionLog),
 		},
 	})
+	sessionWindows.bind(app)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:   MainWindowName,
 		Title:  "Grok Desktop",
 		Width:  1280,
 		Height: 840,
