@@ -20,6 +20,7 @@ import {
   LazyPreviewDrawerWidget,
   LazySettingsPanelWidget,
 } from "@/widgets/lazyPanels";
+import { UpdateNoticeWidget } from "@/widgets/updateNotice";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
@@ -129,6 +130,8 @@ export function App() {
               onLogin={() => void shell.authLogin()}
               onDismissRestart={shell.clearRestartNotice}
             />
+            {/* Startup GitHub release notice. Own state; not shell chrome state. */}
+            <UpdateNoticeWidget />
             <TimelineWidget />
             <ComposerWidget />
           </section>
