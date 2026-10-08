@@ -48,6 +48,24 @@ export type EnvBannerActionKind = "login" | "retry" | "setup";
 /** Banner button: what it does and what it says. */
 export type EnvBannerAction = { kind: EnvBannerActionKind; label: string };
 
+/** ESC, the first byte of every terminal escape sequence. */
+const ESC = String.fromCharCode(0x1b);
+
+/** BEL, one of the two OSC terminators. */
+const BEL = String.fromCharCode(0x07);
+
+/**
+ * OSC sequences (window title, hyperlinks): ESC ] … BEL or ESC \.
+ * Built from char codes so the source holds no raw control characters.
+ */
+const OSC_PATTERN = new RegExp(
+  `${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`,
+  "g",
+);
+
+/** CSI sequences (colors, cursor moves): ESC [ params intermediates final. */
+const CSI_PATTERN = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, "g");
+
 /** Max characters of setup-run output kept on screen (the tail survives). */
 export const RUN_LOG_MAX_CHARS = 64_000;
 
@@ -115,9 +133,7 @@ export function envBannerAction(
  * @returns Text without CSI / OSC sequences.
  */
 export function stripAnsi(text: string): string {
-  return text
-    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  return text.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
 }
 
 /**

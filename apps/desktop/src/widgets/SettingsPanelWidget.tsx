@@ -35,6 +35,7 @@ import {
 } from "../lib/settingsDraft";
 import { ConfirmDialogView } from "./ConfirmDialogView";
 import { SidePanelShell } from "./SidePanelShell";
+import { GrokCliSettingsSectionWidget } from "@/widgets/grokCli";
 import {
   SettingsAccountSectionView,
   SettingsAppearanceSectionView,
@@ -298,6 +299,9 @@ export function SettingsPanelWidget(props: {
         />
 
         <SettingsSpawnSectionView draft={draft} onPatchDraft={patchDraft} />
+
+        {/* Custom grok binary path — saved on the bridge, not in the draft. */}
+        <GrokCliSettingsSectionWidget />
 
         <SettingsCompatSectionView
           draft={draft}

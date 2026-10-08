@@ -75,6 +75,25 @@ describe("UI surface presence", () => {
     const banners = readSrc("widgets/shell/ShellBannersView.tsx");
     assert.match(app, /ShellBannersView|useAppShellWidget/);
     assert.match(banners, /authOk|environment|authMessage/);
+    // The banner button follows the failure kind — never a fixed "Login".
+    assert.match(banners, /props\.envAction\.label/);
+    assert.doesNotMatch(banners, />\s*Login\s*</);
+    assert.match(app, /envAction=\{gate\.bannerAction\}/);
+  });
+
+  it("setup commands run only after a confirmation that shows the argv", () => {
+    const run = readSrc("widgets/auth/useGrokSetupRunWidget.ts");
+    const view = readSrc("widgets/auth/OnboardingSetupView.tsx");
+    // One call site, inside the confirm handler.
+    assert.equal(run.split("grokSetup.run(").length - 1, 1);
+    assert.match(run, /const onConfirmRun = useCallback\(\(\) => \{[\s\S]*grokSetup\.run\(/);
+    assert.match(view, /formatArgv\(confirming\.argv\)/);
+    assert.match(view, /Run now/);
+    // The client sends an action id, never a command line.
+    assert.match(
+      readSrc("bridge/liveBridgeGrokSetup.ts"),
+      /send\(\{ type: "grok_setup_run", runId, action \}\)/,
+    );
   });
 
   it("composer has send and cancel/stop and mode control", () => {
@@ -505,7 +524,7 @@ describe("UI surface presence", () => {
     assert.match(shortcuts, /"composer-mode-menu":/);
   });
 
-  it("signed-out gate replaces the whole window with logo + login", () => {
+  it("onboarding / signed-out gate replaces the whole window with logo + step", () => {
     const view = readSrc("widgets/auth/LoginGateView.tsx");
     const hook = readSrc("widgets/auth/useLoginGateWidget.ts");
     const app = readSrc("App.tsx");
@@ -535,9 +554,20 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(view, /useSessionStore/);
     assert.match(hook, /s\.authed/);
     assert.match(hook, /authLogin/);
-    // Unknown auth (null) must not flash the gate on a cold start.
-    assert.match(hook, /authed === false/);
+    // Unknown auth (null) must not flash the gate on a cold start: the step
+    // rule only opens on authed === false or a CLI failure kind.
+    const onboarding = readSrc("lib/grokOnboarding.ts");
+    assert.match(hook, /onboardingStep\(environment, authed\)/);
+    assert.match(onboarding, /authed === false/);
     assert.match(hook, /connectionMode === "live-bridge"/);
+    // Only advisory CLI steps can be set aside; sign-in and a missing CLI
+    // have no way past the gate.
+    assert.match(hook, /isDeferrableStep\(step\)/);
+    const deferrable = onboarding.match(
+      /DEFERRABLE_STEPS[^=]*=[^\]]*\]/,
+    )?.[0];
+    assert.ok(deferrable, "DEFERRABLE_STEPS list");
+    assert.doesNotMatch(deferrable, /signed_out|not_installed|bin_invalid/);
     assert.match(shortcuts, /"login-gate":/);
     assert.match(shortcuts, /"login-gate-logo":/);
   });
