@@ -58,8 +58,11 @@ export type LiveBridgeGrokSetup = {
 export function createLiveBridgeGrokSetup(
   send: (message: unknown) => boolean,
 ): LiveBridgeGrokSetup {
+  /** In-flight setup runs by runId. */
   const runs = new Map<string, PendingRun>();
+  /** In-flight grok_bin requests by requestId. */
   const bins = new Map<string, PendingBin>();
+  /** Monotonic counter for ids minted by this connection. */
   const sequence = { n: 0 };
 
   /** Next unique id with the given prefix. */
@@ -68,6 +71,10 @@ export function createLiveBridgeGrokSetup(
     return `${prefix}-${Date.now().toString(36)}-${sequence.n}`;
   };
 
+  /**
+   * Start a setup run (see GrokSetupApi.run); settles ok=false right away
+   * when the socket is down instead of leaving the promise pending.
+   */
   const run = (action: GrokSetupAction, handlers: GrokSetupRunHandlers) => {
     const runId = nextId("setup");
     const done = new Promise<GrokSetupExit>((resolve) => {
@@ -80,6 +87,11 @@ export function createLiveBridgeGrokSetup(
     return { runId, done };
   };
 
+  /**
+   * Send one grok_bin_get / grok_bin_set frame with a fresh requestId.
+   * @param message Frame without requestId.
+   * @returns The reply; ok=false on timeout or when the socket is down.
+   */
   const binRequest = (message: Record<string, unknown>) =>
     new Promise<GrokBinReply>((resolve) => {
       const requestId = nextId("grokbin");
