@@ -62,7 +62,12 @@ type PooledRuntime struct {
 	// Billing fetches account weekly remaining via `_x.ai/billing`.
 	Billing     func() (any, error)
 	ForkSession func(sourceCwd, newCwd string) (any, error)
-	Dispose     func()
+	// XaiRequest sends one grok-build `_x.ai/*` extension request (method is
+	// the full name, e.g. `_x.ai/rewind/points`) on this session's ACP
+	// connection and returns the decoded result. Used by turn rewind; nil
+	// when the runtime does not expose it (callers must report "not available").
+	XaiRequest func(method string, params map[string]any) (any, error)
+	Dispose    func()
 	// Worktree is set when this session runs inside a grok worktree.
 	// Nil for a normal checkout. Crash recovery copies it so a restart
 	// does not create a second worktree. List copies the value onto PoolEntry.

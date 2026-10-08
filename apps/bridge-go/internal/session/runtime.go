@@ -319,6 +319,11 @@ func CreateSessionRuntime(opts CreateRuntimeOpts) (*pool.PooledRuntime, error) {
 			}
 			return client.ForkSession(hs.SessionID, src, dst)
 		},
+		// Extension passthrough for turn rewind (`_x.ai/rewind/*`); params
+		// already carry the sessionId.
+		XaiRequest: func(method string, params map[string]any) (any, error) {
+			return client.Request(method, params)
+		},
 		Dispose: dispose,
 	}
 	return runtime, nil

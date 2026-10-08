@@ -40,6 +40,10 @@ const (
 // auth_logout disposes the whole runtime pool after a successful CLI call
 // (F-AUTH-07), matching Node handleCli.onAuthLogout.
 //
+// Turn-rewind ids (`rewind_points` / `rewind_files`) need the live session
+// runtime from the pool, so they go to h.dispatchRewindCliCommand (rewind.go)
+// instead of the pool-free dispatchCliCommand.
+//
 // Always returns nil; command failures ride inside the envelope, so returning
 // an error here would double-report them as a second `error` frame.
 func (h *Handlers) handleCli(ws *websocket.Conn, msg map[string]any) error {
@@ -55,7 +59,14 @@ func (h *Handlers) handleCli(ws *websocket.Conn, msg map[string]any) error {
 		h.State.FocusedSessionID = ""
 		h.BroadcastPool()
 	}
-	data, err := dispatchCliCommand(command, args, cwd, onAuthLogout)
+	var data any
+	var err error
+	if isRewindCliCommand(command) {
+		// Turn rewind needs the live session runtime (rewind.go).
+		data, err = h.dispatchRewindCliCommand(command, args)
+	} else {
+		data, err = dispatchCliCommand(command, args, cwd, onAuthLogout)
+	}
 	if err != nil {
 		h.Send(ws, map[string]any{
 			"type": "cli_result",

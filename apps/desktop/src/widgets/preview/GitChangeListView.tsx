@@ -51,11 +51,14 @@ export type GitChangeListViewProps = {
   onFilterChange: (active: boolean) => void;
   /** Body for an expanded file. */
   renderBody: (file: GitDiffFile) => ReactNode;
+  /** Review-comment tray pinned to the bottom (null / omitted → none). */
+  reviewTray?: ReactNode;
 };
 
 /**
  * Scope toggle + turn filter row (goes inside the action bar).
- * @param props Mode, base, filter and handlers.
+ * @param props Mode, base, filter, handlers, and an optional turn action
+ *   (the "Restore" trigger) shown after the filter pill for turn targets.
  * @returns Controls row.
  */
 export function GitChangeScopeView(props: {
@@ -64,6 +67,7 @@ export function GitChangeScopeView(props: {
   turnFilter: GitTurnFilter | null;
   onModeChange: (mode: GitDiffMode) => void;
   onFilterChange: (active: boolean) => void;
+  turnAction?: ReactNode;
 }) {
   const { mode, turnFilter } = props;
   const turnLabel = turnFilter && turnFilter.index > 0 ? `Turn ${turnFilter.index}` : "This turn";
@@ -82,6 +86,7 @@ export function GitChangeScopeView(props: {
           {turnFilter.active ? `${turnLabel} only` : `Show ${turnLabel} only`}
         </button>
       ) : null}
+      {turnFilter ? props.turnAction : null}
     </div>
   );
 }
@@ -164,6 +169,7 @@ export function GitChangeListView(props: GitChangeListViewProps) {
           </DiffFileSectionView>
         );
       })}
+      {props.reviewTray}
     </div>
   );
 }

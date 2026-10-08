@@ -1,15 +1,20 @@
 /**
  * Stateless single structured-diff row: line number(s), semantic +/− mark,
  * highlighted text with optional word emph, and optional run accept/reject.
+ * Inside the git change list (DiffCommentFileContext provided) the row also
+ * carries the line-comment gutter "+" and is followed by its comment slot;
+ * both render nothing elsewhere.
  */
 
 import cs from "classnames";
 import { memo, useEffect, useRef } from "react";
 import type { CodeLine } from "@/lib/codeHighlight";
+import { diffRowKey } from "@/lib/diffChangeRuns";
 import type { DiffRow } from "@/lib/diffCore";
 import { diffRowTokens } from "@/lib/diffLineTokens";
 import type { EmphRange } from "@/lib/diffWordRanges";
 import type { HunkDecision } from "@/lib/diffHunkApply";
+import { DiffCommentGutterWidget, DiffCommentSlotWidget } from "@/widgets/review";
 import { CodeLineView } from "@/widgets/shared";
 
 export type DiffRowViewProps = {
@@ -93,7 +98,8 @@ function formatLineNo(
 
 /**
  * One painted diff row. Memoized: parent re-renders on reveal/decision should
- * not re-paint every unchanged context line.
+ * not re-paint every unchanged context line. Comment chrome lives in context
+ * consumers (gutter / slot), so comment changes repaint only those.
  */
 function DiffRowViewInner(props: DiffRowViewProps) {
   const {
@@ -127,100 +133,104 @@ function DiffRowViewInner(props: DiffRowViewProps) {
   const hasReviewChrome = Boolean(reviewRun);
 
   return (
-    <div
-      ref={rootRef}
-      className={cs("preview-diff-row", {
-        "preview-diff-row-dual": dualGutter,
-        "preview-diff-row-add": row.type === "add",
-        "preview-diff-row-del": row.type === "del",
-        "preview-diff-row-focus": focused,
-        "preview-diff-row-accepted": decision === "accept",
-        "preview-diff-row-rejected": decision === "reject",
-      })}
-      data-type={row.type}
-      data-run-index={reviewRun?.index}
-      data-decision={decision !== "pending" ? decision : undefined}
-      data-relative-line={relativeLineNumbers ? "true" : undefined}
-    >
-      {dualGutter ? (
-        <>
+    <>
+      <div
+        ref={rootRef}
+        className={cs("preview-diff-row group", {
+          "preview-diff-row-dual": dualGutter,
+          "preview-diff-row-add": row.type === "add",
+          "preview-diff-row-del": row.type === "del",
+          "preview-diff-row-focus": focused,
+          "preview-diff-row-accepted": decision === "accept",
+          "preview-diff-row-rejected": decision === "reject",
+        })}
+        data-type={row.type}
+        data-run-index={reviewRun?.index}
+        data-decision={decision !== "pending" ? decision : undefined}
+        data-relative-line={relativeLineNumbers ? "true" : undefined}
+      >
+        <DiffCommentGutterWidget rowKey={diffRowKey(row)} />
+        {dualGutter ? (
+          <>
+            <span
+              className={cs("preview-diff-oldno", {
+                "preview-diff-no-del": row.type === "del",
+              })}
+              title={noTitle}
+            >
+              {formatLineNo(row.oldNo, relativeLineNumbers)}
+            </span>
+            <span
+              className={cs("preview-diff-newno", {
+                "preview-diff-no-add": row.type === "add",
+              })}
+              title={noTitle}
+            >
+              {formatLineNo(row.newNo, relativeLineNumbers)}
+            </span>
+          </>
+        ) : (
           <span
-            className={cs("preview-diff-oldno", {
+            className={cs("preview-diff-no", {
+              "preview-diff-no-add": row.type === "add",
               "preview-diff-no-del": row.type === "del",
             })}
             title={noTitle}
           >
-            {formatLineNo(row.oldNo, relativeLineNumbers)}
+            {formatLineNo(singleNo, relativeLineNumbers)}
           </span>
-          <span
-            className={cs("preview-diff-newno", {
-              "preview-diff-no-add": row.type === "add",
-            })}
-            title={noTitle}
-          >
-            {formatLineNo(row.newNo, relativeLineNumbers)}
-          </span>
-        </>
-      ) : (
+        )}
         <span
-          className={cs("preview-diff-no", {
-            "preview-diff-no-add": row.type === "add",
-            "preview-diff-no-del": row.type === "del",
+          className={cs("preview-diff-mark", {
+            "preview-diff-mark-add": row.type === "add",
+            "preview-diff-mark-del": row.type === "del",
           })}
-          title={noTitle}
         >
-          {formatLineNo(singleNo, relativeLineNumbers)}
+          {diffRowMark(row.type)}
         </span>
-      )}
-      <span
-        className={cs("preview-diff-mark", {
-          "preview-diff-mark-add": row.type === "add",
-          "preview-diff-mark-del": row.type === "del",
-        })}
-      >
-        {diffRowMark(row.type)}
-      </span>
-      <span
-        className={cs("preview-diff-text", {
-          "preview-diff-text-wrap": wrap,
-          "preview-diff-text-nowrap": !wrap,
-          "preview-diff-text-review": hasReviewChrome,
-        })}
-      >
-        <CodeLineView
-          text={row.text}
-          tokens={tokens}
-          emph={emph}
-          emphKind={emphKind}
-        />
-      </span>
-      {reviewRun ? (
-        <span className="preview-diff-run-actions">
-          <button
-            type="button"
-            className={cs("preview-diff-run-btn", {
-              "preview-diff-run-btn-active-accept":
-                reviewRun.decision === "accept",
-            })}
-            aria-pressed={reviewRun.decision === "accept"}
-            onClick={() => reviewRun.onDecide(reviewRun.index, "accept")}
-          >
-            Accept
-          </button>
-          <button
-            type="button"
-            className={cs("preview-diff-run-btn", {
-              "preview-diff-run-btn-active-reject":
-                reviewRun.decision === "reject",
-            })}
-            aria-pressed={reviewRun.decision === "reject"}
-            onClick={() => reviewRun.onDecide(reviewRun.index, "reject")}
-          >
-            Reject
-          </button>
+        <span
+          className={cs("preview-diff-text", {
+            "preview-diff-text-wrap": wrap,
+            "preview-diff-text-nowrap": !wrap,
+            "preview-diff-text-review": hasReviewChrome,
+          })}
+        >
+          <CodeLineView
+            text={row.text}
+            tokens={tokens}
+            emph={emph}
+            emphKind={emphKind}
+          />
         </span>
-      ) : null}
-    </div>
+        {reviewRun ? (
+          <span className="preview-diff-run-actions">
+            <button
+              type="button"
+              className={cs("preview-diff-run-btn", {
+                "preview-diff-run-btn-active-accept":
+                  reviewRun.decision === "accept",
+              })}
+              aria-pressed={reviewRun.decision === "accept"}
+              onClick={() => reviewRun.onDecide(reviewRun.index, "accept")}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className={cs("preview-diff-run-btn", {
+                "preview-diff-run-btn-active-reject":
+                  reviewRun.decision === "reject",
+              })}
+              aria-pressed={reviewRun.decision === "reject"}
+              onClick={() => reviewRun.onDecide(reviewRun.index, "reject")}
+            >
+              Reject
+            </button>
+          </span>
+        ) : null}
+      </div>
+      <DiffCommentSlotWidget row={row} />
+    </>
   );
 }
 

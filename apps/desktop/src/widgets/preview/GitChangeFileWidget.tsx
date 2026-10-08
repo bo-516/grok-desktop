@@ -5,8 +5,9 @@
  * disk reads. Binary / oversized / budget-omitted / content-free changes get
  * an explanatory note instead (with Load / Open actions).
  *
- * Extension point: later per-line actions (comments, revert) can hang off
- * `file` + the recovered texts here without touching the list.
+ * Line comments: when the panel passes its review model and the patch is
+ * complete (absolute line numbers), the diff is wrapped in
+ * DiffCommentFileContext so rows paint the comment gutter / composer.
  */
 
 import { useMemo } from "react";
@@ -14,6 +15,11 @@ import { buildFileDiff } from "@/lib/diffCore";
 import type { DiffViewPrefs } from "@/lib/diffViewPrefs";
 import { patchToTexts } from "@/lib/gitPatch";
 import type { GitDiffFile } from "@/lib/gitTypes";
+import {
+  DiffCommentFileContext,
+  useDiffCommentFileModel,
+  type ReviewCommentsModel,
+} from "@/widgets/review";
 import { PreviewDiffWidget } from "./PreviewDiffWidget";
 
 export type GitChangeFileWidgetProps = {
@@ -29,6 +35,8 @@ export type GitChangeFileWidgetProps = {
   onLoad: (file: GitDiffFile) => void;
   /** Open the file preview. */
   onOpenFile: (absPath: string) => void;
+  /** Panel review-comment model; omitted / null disables line comments. */
+  review?: ReviewCommentsModel | null;
 };
 
 /**
@@ -61,6 +69,15 @@ export function GitChangeFileWidget(props: GitChangeFileWidgetProps) {
     () => buildFileDiff(texts.oldText, texts.newText),
     [texts.oldText, texts.newText],
   );
+  /** Comment model for this file (null → plain diff). */
+  const commentModel = useDiffCommentFileModel({
+    review: props.review ?? null,
+    path: file.path,
+    fileDiff,
+    oldText: texts.oldText,
+    newText: texts.newText,
+    absoluteLines: texts.complete,
+  });
   const open = { label: "Open file", run: () => onOpenFile(absPath) };
   if (file.binary) {
     return <FileNote text="Binary file — no text diff." />;
@@ -81,17 +98,19 @@ export function GitChangeFileWidget(props: GitChangeFileWidgetProps) {
     return <FileNote text={what} />;
   }
   return (
-    <PreviewDiffWidget
-      fileDiff={fileDiff}
-      path={absPath}
-      showPath={false}
-      oldText={texts.oldText}
-      newText={texts.newText}
-      hideToolbar
-      viewPrefs={props.viewPrefs}
-      onViewPrefsChange={props.onViewPrefsChange}
-      relativeLineNumbers={!texts.complete}
-      banner={texts.complete ? null : "Partial diff — showing changed regions only."}
-    />
+    <DiffCommentFileContext.Provider value={commentModel}>
+      <PreviewDiffWidget
+        fileDiff={fileDiff}
+        path={absPath}
+        showPath={false}
+        oldText={texts.oldText}
+        newText={texts.newText}
+        hideToolbar
+        viewPrefs={props.viewPrefs}
+        onViewPrefsChange={props.onViewPrefsChange}
+        relativeLineNumbers={!texts.complete}
+        banner={texts.complete ? null : "Partial diff — showing changed regions only."}
+      />
+    </DiffCommentFileContext.Provider>
   );
 }
