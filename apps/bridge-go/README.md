@@ -95,7 +95,10 @@ internal/session/    disk list, workspace entries, crash recovery seeds
 | bridge → UI | `session_update` | raw ACP update + optional `eventId` |
 | bridge → UI | `session_lifecycle` | status / permission / model / mode without full timeline |
 | bridge → UI | `state` | hydrate only (start, reconnect, get_state, permission) |
-| UI → bridge | `get_state` | on-demand full snapshot |
+| UI → bridge | `get_state` | on-demand full snapshot (carries `epoch` + `headSeq`) |
+| UI → bridge | `resync` | `{sessionId, epoch, fromSeq}` → `resync_result` (`ok` + frames verbatim, or `too_old` / `epoch_mismatch`) |
+
+Per-session frames (`session_update`, `session_lifecycle`, `state`, `replay_*`) carry `epoch` (one per agent runtime; a respawn / reload is a new epoch) and `seq` (monotonic per session + epoch, from 1). A bounded ring (1024 frames / 4 MiB per stream, `internal/sessionstream`) serves `resync`. Hydrate frames also carry `provenance` (`started` + echoed `startId`, `resumed`, or `child` + `parentSessionId` from an explicit `subagent_spawned` link).
 
 ## Session ops & CLI channel
 
