@@ -30,6 +30,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { railSessionTitle } from "@/lib/sessionTitleEdit";
 import {
+  OPEN_SESSION_WINDOW_EVENT,
+  type OpenSessionWindowDetail,
+} from "@/lib/sessionWindow";
+import {
   SessionRailSessionMenuButtonView,
   SessionRailSessionMenuItemsView,
 } from "./SessionRailSessionMenuView";
@@ -98,6 +102,20 @@ function SessionRailSessionRowWidgetInner(
   };
 
   /**
+   * Ask the session-window widget to open this row. Runs from onSelect:
+   * it does not move focus, so it does not need to wait for the menu to close.
+   */
+  const handleOpenWindow = () => {
+    const detail: OpenSessionWindowDetail = {
+      sessionId: rec.id,
+      title: titleLabel,
+    };
+    window.dispatchEvent(
+      new CustomEvent(OPEN_SESSION_WINDOW_EVENT, { detail }),
+    );
+  };
+
+  /**
    * Radix close-focus hook shared by both menus. Fires after the closed
    * menu unmounted and released its trap — the first moment a parked pick
    * can move focus and keep it. With nothing parked, Radix restores focus
@@ -142,6 +160,7 @@ function SessionRailSessionRowWidgetInner(
             pinned={pinned}
             onRename={handleRename}
             onTogglePin={onTogglePin}
+            onOpenInWindow={handleOpenWindow}
             onRemove={handleRemove}
           />
         </ContextMenuContent>
@@ -155,6 +174,7 @@ function SessionRailSessionRowWidgetInner(
           pinned={pinned}
           onRename={handleRename}
           onTogglePin={onTogglePin}
+          onOpenInWindow={handleOpenWindow}
           onRemove={handleRemove}
         />
       </DropdownMenuContent>
