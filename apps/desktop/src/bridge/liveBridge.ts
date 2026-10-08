@@ -46,6 +46,18 @@ export {
 } from "./liveBridgeDispatch";
 export { makeAgentChunkUpdates } from "./liveBridgeFixtures";
 
+/**
+ * Client-generated `start` request id. Unique across windows (random UUID
+ * when available, else time + random), opaque to the bridge.
+ * @returns A fresh id string.
+ */
+function createStartId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `start-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 type PendingCli = {
   resolve: (result: CliChannelResult) => void;
   reject: (error: Error) => void;
@@ -70,6 +82,8 @@ export function connectLiveBridge(
   const dispatch = createLiveBridgeDispatch({
     handlers,
     coalesce: { isForeground: handlers.isForegroundSession },
+    // Seq gate requests (`resync`, fallback `get_state`) go out on this socket.
+    sendRequest: (message) => send(message),
   });
   const readyCallbacks: {
     resolve?: () => void;
@@ -189,8 +203,13 @@ export function connectLiveBridge(
       if (opts?.seed?.id) {
         dispatch.seedSession(opts.seed);
       }
+      // Echoed in the new session's provenance: lets this window (and only
+      // this window) recognise the session its own start created.
+      const startId = createStartId();
+      dispatch.noteOwnStart(startId);
       return send({
         type: "start",
+        startId,
         cwd: opts?.cwd,
         alwaysApprove: opts?.alwaysApprove ?? false,
         resumeId: opts?.resumeId,

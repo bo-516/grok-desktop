@@ -19,6 +19,10 @@
  * transitions notify at once, and every other notify this module makes
  * (state, lifecycle, replay boundaries, notices) first drains pending ones
  * so the store sees bucket changes in arrival order.
+ *
+ * Bridge stream positions (epoch/seq) and provenance are checked first by
+ * liveBridgeStreamControl: duplicates drop, a gap drains the coalescer and
+ * requests `resync`, whose frames re-enter here in order.
  */
 
 import type { SessionState } from "@grok-desktop/acp-core";
@@ -43,6 +47,7 @@ import {
   type LiveStreamCoalesceOpts,
 } from "./liveBridgeCoalesce";
 import type { BridgeServerMsg, LiveBridgeHandlers } from "./liveBridgeTypes";
+import { createStreamControl } from "./liveBridgeStreamControl";
 
 export { REPLAY_TIMEOUT_MS, type ReplayDispatchClock };
 
@@ -62,6 +67,13 @@ export type LiveBridgeDispatchOpts = {
    * tests rely on to observe each frame.
    */
   coalesce?: LiveStreamCoalesceOpts;
+  /**
+   * Send `resync` / `get_state` for the sequence gate (connectLiveBridge
+   * passes its socket send). Omitted → gaps re-anchor locally only.
+   */
+  sendRequest?: (msg: Record<string, unknown>) => boolean;
+  /** Override the resync answer timeout (liveBridgeStreamGate default). */
+  resyncTimeoutMs?: number;
 };
 
 /**
@@ -100,6 +112,14 @@ export type LiveBridgeDispatch = {
   replayingSessionIds: () => string[];
   /** Test/observe: reduce bucket for a session id. */
   bucketFor: (sessionId: string) => SessionReduceBucket;
+  /**
+   * Remember a `start` request id sent on this connection, so the bridge's
+   * echo marks that session's provenance `own`.
+   * @param startId Client-generated id included in the start message.
+   */
+  noteOwnStart: (startId: string) => void;
+  /** Test/observe: stream keys with a resync in flight. */
+  pendingResyncs: () => string[];
 };
 
 /**
@@ -122,6 +142,15 @@ export function createLiveBridgeDispatch(
   const stream = opts.coalesce
     ? createStreamCoalescer({ ...opts.coalesce, emit: emitCoalesced })
     : null;
+  /** Provenance + seq/epoch gate (duplicates drop, gaps resync, fallback). */
+  const control = createStreamControl({
+    handlers,
+    clock: opts.clock,
+    send: opts.sendRequest,
+    flush: () => stream?.flushAll(),
+    replay: (frame) => handleServerMsg(frame),
+    resyncTimeoutMs: opts.resyncTimeoutMs,
+  });
 
   /**
    * Resolve or create the reduce bucket for a session id.
@@ -210,6 +239,10 @@ export function createLiveBridgeDispatch(
    * @param msg Decoded bridge message.
    */
   function handleServerMsg(msg: BridgeServerMsg): boolean {
+    // Sequence seam: resync answers, duplicates and gap frames stop here.
+    if (control.intercept(msg)) {
+      return true;
+    }
     if (msg.type === "state") {
       // Drain pending notifies first (also covers the "__pending__" re-key).
       stream?.flushAll();
@@ -378,9 +411,13 @@ export function createLiveBridgeDispatch(
       // Never let a later emit read a freshly emptied bucket.
       stream?.flushAll();
       reduceBuckets.clear();
+      // Positions describe these buckets; they go together.
+      control.clear();
     },
     pendingUpdateIds: () => stream?.pendingIds() ?? [],
     replayingSessionIds: replayWindows.openIds,
     bucketFor,
+    noteOwnStart: control.noteOwnStart,
+    pendingResyncs: control.pendingResyncs,
   };
 }
