@@ -255,6 +255,13 @@ export type LiveBridgeHandlers = {
     session: SessionState,
     meta: { sessionId: string; eventId?: string; applied: boolean },
   ) => void;
+  /**
+   * Whether a session owns the painted canvas. connectLiveBridge coalesces
+   * its stream notifies per animation frame; other sessions use the slower
+   * background lane. Omitted → every session is treated as foreground.
+   * @param sessionId Wire session id ("" for the provisional bucket).
+   */
+  isForegroundSession?: (sessionId: string) => boolean;
   onPool?: (entries: PoolEntry[]) => void;
   onEnvironment?: (env: EnvironmentInfo) => void;
   /**
@@ -284,6 +291,12 @@ export type LiveBridgeHandlers = {
  */
 export type LiveBridgeHandle = {
   start: (opts?: StartOpts) => boolean;
+  /**
+   * Emit every coalesced stream notify now. Call before a session switch,
+   * remove or disconnect so the store holds the latest reduced state.
+   * Optional so test doubles may omit it.
+   */
+  flushPendingUpdates?: () => void;
   prompt: (
     text: string,
     sessionId?: string,

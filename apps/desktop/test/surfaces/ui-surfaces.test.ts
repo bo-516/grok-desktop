@@ -273,7 +273,13 @@ describe("UI surface presence", () => {
     assert.doesNotMatch(app, /contextRail === "plan" \? </);
     assert.match(app, /main-body-railed/);
     assert.match(app, /from "@\/widgets\/contextRail"/);
-    assert.match(app, /from "@\/widgets\/preview"/);
+    // Preview drawer is code-split: App mounts the lazy wrapper, whose entry
+    // still goes through the preview widget's public index.
+    assert.match(app, /from "@\/widgets\/lazyPanels"/);
+    assert.match(
+      readSrc("widgets/lazyPanels/panelEntries.ts"),
+      /import\("@\/widgets\/preview"\)/,
+    );
 
     const drawer = readSrc("widgets/contextRail/ContextDrawerWidget.tsx");
     assert.match(drawer, /id="context-rail"/);
@@ -1588,8 +1594,8 @@ describe("UI surface presence", () => {
       docWidget + docComponents,
       /from\s+["']@\/lib\/normalizeAgentMath["']/,
     );
-    assert.match(docWidget, /mode="static"/);
-    assert.match(docWidget, /parseIncompleteMarkdown=\{false\}/);
+    assert.match(docWidget, /mode: "static"/);
+    assert.match(docWidget, /parseIncompleteMarkdown: false/);
     assert.match(docWidget, /docComponents|previewDocComponents/);
     // Relative workspace links must not go through default rehype-harden only.
     assert.match(docWidget, /docRehypePlugins|docRehypeSafety/);

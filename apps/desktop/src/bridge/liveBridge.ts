@@ -5,6 +5,8 @@
  *
  * Relay protocol: hot-path streaming arrives as session_update; this client reduces
  * via applySessionUpdate + eventId set dedupe and surfaces SessionState to handlers.
+ * Those notifies are coalesced per animation frame (liveBridgeCoalesce); close()
+ * and socket close / error flush pending ones first.
  */
 
 import type { SessionState } from "@grok-desktop/acp-core";
@@ -62,8 +64,14 @@ export function connectLiveBridge(
 ): LiveBridgeHandle {
   const ws = new WebSocket(url);
   const pendingCli = new Map<string, PendingCli>();
-  /** Relay reduce + load-replay batching (shipped path; unit-tested via createLiveBridgeDispatch). */
-  const dispatch = createLiveBridgeDispatch({ handlers });
+  /**
+   * Relay reduce + load-replay batching + live stream coalescing (shipped
+   * path; unit-tested via createLiveBridgeDispatch with a fake scheduler).
+   */
+  const dispatch = createLiveBridgeDispatch({
+    handlers,
+    coalesce: { isForeground: handlers.isForegroundSession },
+  });
   const readyCallbacks: {
     resolve?: () => void;
     reject?: (error: Error) => void;
@@ -103,6 +111,8 @@ export function connectLiveBridge(
     catalogApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
     grokSetup.failAll(`WebSocket error connecting to ${url}`);
+    // Land coalesced chunks before the error paints.
+    dispatch.flushPendingUpdates();
     // I4: do not leave sessions muted if error aborts a load window.
     dispatch.flushAllReplays();
     readyCallbacks.reject?.(new Error(`WebSocket error connecting to ${url}`));
@@ -113,6 +123,8 @@ export function connectLiveBridge(
     catalogApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
     grokSetup.failAll("Bridge WebSocket closed");
+    // No lost final chunk: emit coalesced notifies before onClose.
+    dispatch.flushPendingUpdates();
     // I4: force-close any open replay windows before clearing buckets.
     dispatch.flushAllReplays();
     dispatch.clearBuckets();
@@ -178,6 +190,7 @@ export function connectLiveBridge(
 
   return {
     ready,
+    flushPendingUpdates: dispatch.flushPendingUpdates,
     start: (opts) => {
       // Prefill client reduce from catalog seed so Go pool-hit (empty timeline)
       // + later live chunks append instead of replacing painted history.
@@ -309,6 +322,8 @@ export function connectLiveBridge(
     readModelCatalog: catalogApi.readModelCatalog,
     grokSetup: grokSetup.api,
     close: () => {
+      // Land coalesced chunks while the store still treats the bridge as live.
+      dispatch.flushPendingUpdates();
       try {
         ws.close();
       } catch {

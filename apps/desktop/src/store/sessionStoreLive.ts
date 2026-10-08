@@ -42,6 +42,7 @@ import {
 } from "./sessionStoreCatalogPoll";
 import { syncCatalogFromBridge } from "./sessionStoreSync";
 import { beginLiveSessionStart } from "./sessionStoreLiveStart";
+import { shouldFollowSession } from "./sessionStoreLiveFollow";
 import { rememberSlashCatalog } from "@/lib/slashCatalog";
 import { rememberModelCatalog } from "@/store/modelCatalogStore";
 import {
@@ -203,6 +204,24 @@ export async function startLiveBridgeSession(
           if (b && Object.keys(get().pendingSessions ?? {}).length > 0) {
             schedulePendingSessionsSync(b, set, get);
           }
+        },
+        /**
+         * Stream coalescing lane: the canvas-owned session paints per frame,
+         * others on the background lane. A New chat draft (not yet creating)
+         * owns no stream, matching resolveCanvasFollow.
+         * @param sessionId Wire session id.
+         * @returns True when the session would repaint the canvas.
+         */
+        isForegroundSession: (sessionId) => {
+          const s = get();
+          if (s.localDraft && !s.creatingSession) {
+            return false;
+          }
+          return shouldFollowSession(
+            s.viewingSessionId,
+            s.activeSessionId,
+            sessionId,
+          );
         },
         onPool: (entries) => {
           if (poolFingerprintUnchanged(entries)) {
