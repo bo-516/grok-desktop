@@ -12,6 +12,7 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/reverse"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
@@ -25,6 +26,9 @@ type Handlers struct {
 	SessionSeeds  sync.Map
 	Send          func(ws *websocket.Conn, msg map[string]any)
 	Broadcast     func(msg map[string]any)
+	// Streams stamps per-session frames (epoch/seq), serves `resync` and
+	// holds provenance. Set by NewServer; nil keeps the unstamped relay.
+	Streams *sessionstream.Hub
 }
 
 // NewHandlers constructs bridge handlers bound to pool and I/O closures.
@@ -62,6 +66,7 @@ func (h *Handlers) lifecycleDeps() session.LifecycleDeps {
 		SessionSeeds:  &h.SessionSeeds,
 		Broadcast:     h.Broadcast,
 		BroadcastPool: h.BroadcastPool,
+		Streams:       h.Streams,
 	}
 }
 
@@ -110,8 +115,14 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 			h.Send(ws, map[string]any{"type": "error", "message": err.Error(), "sessionId": sessionID})
 			return nil
 		}
-		h.Send(ws, map[string]any{"type": "state", "session": rt.GetSessionState()})
+		// Snapshot carries epoch/headSeq so a client falling back from a
+		// failed resync can re-anchor its stream position.
+		h.sendStateSnapshot(ws, rt.GetSessionState())
 		return nil
+
+	// Catch up one (session, epoch) stream after a client-detected gap.
+	case "resync":
+		return h.handleResync(ws, msg)
 
 	case "list_workspace_entries":
 		requestID, _ := msg["requestId"].(string)
@@ -259,6 +270,8 @@ func (h *Handlers) handleStart(msg map[string]any) error {
 	if raw, ok := msg["spawnConfig"]; ok && raw != nil {
 		spawnConfig = parseSpawnConfig(raw)
 	}
+	// Client-generated id echoed in the new session's provenance.
+	startID, _ := msg["startId"].(string)
 	return session.StartOrResume(h.lifecycleDeps(), struct {
 		Cwd           string
 		AlwaysApprove bool
@@ -266,9 +279,11 @@ func (h *Handlers) handleStart(msg map[string]any) error {
 		Seed          *acp.SessionState
 		ForceNew      bool
 		SpawnConfig   *pool.SessionSpawnConfig
+		StartID       string
 	}{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: resumeID,
 		Seed: seed, ForceNew: forceNew, SpawnConfig: spawnConfig,
+		StartID: startID,
 	})
 }
 

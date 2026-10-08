@@ -7,6 +7,7 @@ import (
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
 )
 
 // HandlerState is focused session + default list cwd for the bridge.
@@ -23,76 +24,18 @@ type LifecycleDeps struct {
 	SessionSeeds  *sync.Map // sessionId -> acp.SessionState
 	Broadcast     func(msg map[string]any)
 	BroadcastPool func()
-}
-
-type lifecycleFingerprint struct {
-	status  acp.SessionStatus
-	permKey string
-	model   string
-	mode    string
-	id      string
-}
-
-func lifecycleFP(session acp.SessionState) lifecycleFingerprint {
-	permKey := ""
-	if session.PendingPermission != nil {
-		tcID := ""
-		if session.PendingPermission.ToolCall != nil {
-			if v, ok := session.PendingPermission.ToolCall["toolCallId"].(string); ok {
-				tcID = v
-			}
-		}
-		permKey = fmt.Sprintf("%v:%s", session.PendingPermission.RequestID, tcID)
-	}
-	return lifecycleFingerprint{
-		status: session.Status, permKey: permKey,
-		model: session.Model, mode: session.Mode, id: session.ID,
-	}
-}
-
-func lifecycleChanged(prev *lifecycleFingerprint, next lifecycleFingerprint) bool {
-	if prev == nil {
-		return true
-	}
-	return prev.status != next.status ||
-		prev.permKey != next.permKey ||
-		prev.model != next.model ||
-		prev.mode != next.mode ||
-		prev.id != next.id
-}
-
-// broadcastPoolFocus tells the UI a resident session is focused without wiping
-// client-side timeline. Go SessionState.timeline is always empty, so a full
-// `state` hydrate on pool hit blanks catalog-seeded history after refresh.
-// Prefer session_lifecycle (+ info) unless the snapshot somehow carries body.
-func broadcastPoolFocus(deps LifecycleDeps, session acp.SessionState, info string) {
-	if len(session.Timeline) > 0 {
-		deps.Broadcast(map[string]any{"type": "state", "session": session})
-	} else {
-		msg := map[string]any{
-			"type":      "session_lifecycle",
-			"sessionId": session.ID,
-			"status":    session.Status,
-			"model":     session.Model,
-			"mode":      session.Mode,
-		}
-		if session.PendingPermission != nil {
-			msg["pendingPermission"] = session.PendingPermission
-		} else {
-			msg["pendingPermission"] = nil
-		}
-		deps.Broadcast(msg)
-	}
-	if info != "" {
-		deps.Broadcast(map[string]any{
-			"type": "info", "message": info, "sessionId": session.ID,
-		})
-	}
-	deps.BroadcastPool()
+	// Streams stamps per-session frames with (epoch, seq), keeps the resync
+	// ring and the provenance registry. Nil → frames go out unstamped through
+	// Broadcast (hand-built deps in tests).
+	Streams *sessionstream.Hub
 }
 
 // StartOrResume acquires a pool slot or reuses a live session (relay freeze).
 // Unexpected agent exit triggers seed-based session/load recovery.
+// A spawned runtime gets a fresh stream epoch; every per-session frame it
+// relays is stamped (epoch, seq) and its streams are dropped on dispose.
+// opts.StartID is the client's `start` request id, echoed in the new
+// session's provenance ("" for recovery / restart).
 func StartOrResume(deps LifecycleDeps, opts struct {
 	Cwd           string
 	AlwaysApprove bool
@@ -100,6 +43,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	Seed          *acp.SessionState
 	ForceNew      bool
 	SpawnConfig   *pool.SessionSpawnConfig
+	StartID       string
 }) error {
 	cwd, err := filepath.Abs(opts.Cwd)
 	if err != nil {
@@ -157,6 +101,8 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	if err := deps.Pool.BeginSpawn(); err != nil {
 		return err
 	}
+	// Fresh epoch for this runtime: its per-session frames restart at seq 1.
+	rs := newRuntimeStream(deps, resumeID, opts.StartID)
 
 	runtime, err := CreateSessionRuntime(CreateRuntimeOpts{
 		Cwd:           cwd,
@@ -172,9 +118,12 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 			replayingSessions[sessionID] = true
 			delete(pendingReplayEnd, sessionID)
 			replayingMu.Unlock()
-			deps.Broadcast(map[string]any{
+			// session/load replays the runtime's own session: claim it first so
+			// the hydrate frames carry provenance.
+			rs.notePrimary(sessionID)
+			rs.relay(sessionID, map[string]any{
 				"type": "replay_begin", "sessionId": sessionID,
-			})
+			}, true)
 		},
 		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
 			if sessionID == "" {
@@ -194,7 +143,8 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 				}
 				wireUpdates = append(wireUpdates, item)
 			}
-			deps.Broadcast(map[string]any{
+			rs.notePrimary(sessionID)
+			rs.relay(sessionID, map[string]any{
 				"type":      "replay_end",
 				"sessionId": sessionID,
 				"updates":   wireUpdates,
@@ -204,7 +154,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 				"count":     count,
 				"bytes":     bytes,
 				"elapsedMs": elapsedMs,
-			})
+			}, true)
 			deps.BroadcastPool()
 		},
 		OnSessionUpdate: func(update map[string]any, sessionID string, eventID string) {
@@ -215,11 +165,15 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 			if eventID != "" {
 				msg["eventId"] = eventID
 			}
-			deps.Broadcast(msg)
+			// Child links (hosted id / subagent_spawned) before the frame goes out.
+			rs.noteUpdate(update, sessionID)
+			rs.relay(sessionID, msg, false)
 		},
 		OnState: func(session acp.SessionState) {
 			if session.ID != "" {
 				deps.SessionSeeds.Store(session.ID, session)
+				// acp.Client state is always the runtime's own session.
+				rs.notePrimary(session.ID)
 			}
 			// Skip the state paint that follows replay_end (already broadcast).
 			if session.ID != "" {
@@ -265,7 +219,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 				session.PendingPermission != nil ||
 				(prev.permKey != "" && fp.permKey == "")
 			if needsFullState {
-				deps.Broadcast(map[string]any{"type": "state", "session": session})
+				rs.relay(session.ID, map[string]any{"type": "state", "session": session}, true)
 			} else {
 				msg := map[string]any{
 					"type": "session_lifecycle", "sessionId": session.ID,
@@ -276,7 +230,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 				} else {
 					msg["pendingPermission"] = nil
 				}
-				deps.Broadcast(msg)
+				rs.relay(session.ID, msg, false)
 			}
 			deps.BroadcastPool()
 		},
@@ -284,7 +238,13 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 			deps.Broadcast(map[string]any{"type": "stderr", "text": text, "sessionId": sessionID})
 		},
 		OnInfo: func(message, sessionID string) {
-			deps.Broadcast(map[string]any{"type": "info", "message": message, "sessionId": sessionID})
+			// Notices stay unstamped; provenance lets a window tell its own
+			// `session <id> ready` from another window's.
+			msg := map[string]any{"type": "info", "message": message, "sessionId": sessionID}
+			if deps.Streams != nil && sessionID != "" {
+				deps.Streams.Provenance.Annotate(msg, sessionID, true)
+			}
+			deps.Broadcast(msg)
 		},
 		OnProcessExit: func(sessionID string, code *int) {
 			if sessionID == "" {
@@ -331,6 +291,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 					Seed          *acp.SessionState
 					ForceNew      bool
 					SpawnConfig   *pool.SessionSpawnConfig
+					StartID       string
 				}{
 					Cwd: exitCwd, AlwaysApprove: deps.AlwaysApprove,
 					ResumeID: sessionID, Seed: seedPtr, ForceNew: false,
@@ -349,7 +310,16 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	})
 	if err != nil {
 		deps.Pool.CancelSpawn()
+		// Handshake frames (state / replay_*) may already sit in the ring.
+		rs.drop()
 		return err
+	}
+	// Disposing the runtime (close, LRU eviction, crash, restart) retires its
+	// epoch: rings are freed and a resync naming it answers epoch_mismatch.
+	disposeRuntime := runtime.Dispose
+	runtime.Dispose = func() {
+		disposeRuntime()
+		rs.drop()
 	}
 
 	if err := deps.Pool.Insert(runtime); err != nil {
@@ -372,7 +342,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	}
 	replayingMu.Unlock()
 	if !skipInitial {
-		deps.Broadcast(map[string]any{"type": "state", "session": initial})
+		rs.relay(runtime.SessionID, map[string]any{"type": "state", "session": initial}, true)
 	}
 	deps.BroadcastPool()
 	return nil
@@ -410,6 +380,7 @@ func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.Sess
 		Seed          *acp.SessionState
 		ForceNew      bool
 		SpawnConfig   *pool.SessionSpawnConfig
+		StartID       string
 	}{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: sessionID, Seed: seed,
 		ForceNew: false, SpawnConfig: cfg,
