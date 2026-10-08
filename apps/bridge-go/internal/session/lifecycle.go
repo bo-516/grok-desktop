@@ -7,6 +7,7 @@ import (
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
@@ -24,6 +25,10 @@ type LifecycleDeps struct {
 	SessionSeeds  *sync.Map // sessionId -> acp.SessionState
 	Broadcast     func(msg map[string]any)
 	BroadcastPool func()
+	// Streams stamps per-session frames with (epoch, seq), keeps the resync
+	// ring and the provenance registry. Nil → frames go out unstamped through
+	// Broadcast (hand-built deps in tests).
+	Streams *sessionstream.Hub
 }
 
 // StartOrResume acquires a pool slot or reuses a live session (relay freeze).
@@ -41,6 +46,10 @@ type LifecycleDeps struct {
 // reused. Error when the cwd cannot be resolved, the worktree cannot be
 // created, or the agent fails to spawn. A worktree created by this call
 // is left on disk when spawn fails; the error includes its path.
+// A spawned runtime gets a fresh stream epoch; every per-session frame it
+// relays is stamped (epoch, seq) and its streams are dropped on dispose.
+// opts.StartID is the client's `start` request id, echoed in the new
+// session's provenance ("" for recovery / restart).
 func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 	cwd, err := filepath.Abs(opts.Cwd)
 	if err != nil {
@@ -107,6 +116,8 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 	if err := deps.Pool.BeginSpawn(); err != nil {
 		return err
 	}
+	// Fresh epoch for this runtime: its per-session frames restart at seq 1.
+	rs := newRuntimeStream(deps, resumeID, opts.StartID)
 
 	runtime, err := CreateSessionRuntime(CreateRuntimeOpts{
 		Cwd:           agentCwd,
@@ -122,9 +133,12 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 			replayingSessions[sessionID] = true
 			delete(pendingReplayEnd, sessionID)
 			replayingMu.Unlock()
-			deps.Broadcast(map[string]any{
+			// session/load replays the runtime's own session: claim it first so
+			// the hydrate frames carry provenance.
+			rs.notePrimary(sessionID)
+			rs.relay(sessionID, map[string]any{
 				"type": "replay_begin", "sessionId": sessionID,
-			})
+			}, true)
 		},
 		OnReplayEnd: func(sessionID string, updates []acp.ReplayBufferedUpdate, status acp.SessionStatus, model, mode string, count, bytes int, elapsedMs int64) {
 			if sessionID == "" {
@@ -144,7 +158,8 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 				}
 				wireUpdates = append(wireUpdates, item)
 			}
-			deps.Broadcast(map[string]any{
+			rs.notePrimary(sessionID)
+			rs.relay(sessionID, map[string]any{
 				"type":      "replay_end",
 				"sessionId": sessionID,
 				"updates":   wireUpdates,
@@ -154,7 +169,7 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 				"count":     count,
 				"bytes":     bytes,
 				"elapsedMs": elapsedMs,
-			})
+			}, true)
 			deps.BroadcastPool()
 		},
 		OnSessionUpdate: func(update map[string]any, sessionID string, eventID string) {
@@ -165,11 +180,15 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 			if eventID != "" {
 				msg["eventId"] = eventID
 			}
-			deps.Broadcast(msg)
+			// Child links (hosted id / subagent_spawned) before the frame goes out.
+			rs.noteUpdate(update, sessionID)
+			rs.relay(sessionID, msg, false)
 		},
 		OnState: func(session acp.SessionState) {
 			if session.ID != "" {
 				deps.SessionSeeds.Store(session.ID, session)
+				// acp.Client state is always the runtime's own session.
+				rs.notePrimary(session.ID)
 			}
 			// Skip the state paint that follows replay_end (already broadcast).
 			if session.ID != "" {
@@ -215,7 +234,7 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 				session.PendingPermission != nil ||
 				(prev.permKey != "" && fp.permKey == "")
 			if needsFullState {
-				deps.Broadcast(map[string]any{"type": "state", "session": session})
+				rs.relay(session.ID, map[string]any{"type": "state", "session": session}, true)
 			} else {
 				msg := map[string]any{
 					"type": "session_lifecycle", "sessionId": session.ID,
@@ -226,7 +245,7 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 				} else {
 					msg["pendingPermission"] = nil
 				}
-				deps.Broadcast(msg)
+				rs.relay(session.ID, msg, false)
 			}
 			deps.BroadcastPool()
 		},
@@ -234,7 +253,13 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 			deps.Broadcast(map[string]any{"type": "stderr", "text": text, "sessionId": sessionID})
 		},
 		OnInfo: func(message, sessionID string) {
-			deps.Broadcast(map[string]any{"type": "info", "message": message, "sessionId": sessionID})
+			// Notices stay unstamped; provenance lets a window tell its own
+			// `session <id> ready` from another window's.
+			msg := map[string]any{"type": "info", "message": message, "sessionId": sessionID}
+			if deps.Streams != nil && sessionID != "" {
+				deps.Streams.Provenance.Annotate(msg, sessionID, true)
+			}
+			deps.Broadcast(msg)
 		},
 		OnProcessExit: func(sessionID string, code *int) {
 			if sessionID == "" {
@@ -294,7 +319,16 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 	})
 	if err != nil {
 		deps.Pool.CancelSpawn()
+		// Handshake frames (state / replay_*) may already sit in the ring.
+		rs.drop()
 		return worktreeStartError(err, wtInfo, createdNow)
+	}
+	// Disposing the runtime (close, LRU eviction, crash, restart) retires its
+	// epoch: rings are freed and a resync naming it answers epoch_mismatch.
+	disposeRuntime := runtime.Dispose
+	runtime.Dispose = func() {
+		disposeRuntime()
+		rs.drop()
 	}
 
 	// Stamp before Insert so the first pool broadcast includes the worktree.
@@ -319,7 +353,7 @@ func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 	}
 	replayingMu.Unlock()
 	if !skipInitial {
-		deps.Broadcast(map[string]any{"type": "state", "session": initial})
+		rs.relay(runtime.SessionID, map[string]any{"type": "state", "session": initial}, true)
 	}
 	deps.BroadcastPool()
 	return nil

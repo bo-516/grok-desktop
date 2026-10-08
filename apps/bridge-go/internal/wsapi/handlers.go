@@ -12,6 +12,7 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/reverse"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/userterm"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
@@ -30,6 +31,9 @@ type Handlers struct {
 	// Terminals owns the user's interactive PTY terminals (terminal_* messages);
 	// killed on socket disconnect, close_session and Server.Close.
 	Terminals *userterm.Manager
+	// Streams stamps per-session frames (epoch/seq), serves `resync` and
+	// holds provenance. Set by NewServer; nil keeps the unstamped relay.
+	Streams *sessionstream.Hub
 }
 
 // NewHandlers constructs bridge handlers bound to pool and I/O closures.
@@ -69,6 +73,7 @@ func (h *Handlers) lifecycleDeps() session.LifecycleDeps {
 		SessionSeeds:  &h.SessionSeeds,
 		Broadcast:     h.Broadcast,
 		BroadcastPool: h.BroadcastPool,
+		Streams:       h.Streams,
 	}
 }
 
@@ -129,8 +134,14 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 			h.Send(ws, map[string]any{"type": "error", "message": err.Error(), "sessionId": sessionID})
 			return nil
 		}
-		h.Send(ws, map[string]any{"type": "state", "session": rt.GetSessionState()})
+		// Snapshot carries epoch/headSeq so a client falling back from a
+		// failed resync can re-anchor its stream position.
+		h.sendStateSnapshot(ws, rt.GetSessionState())
 		return nil
+
+	// Catch up one (session, epoch) stream after a client-detected gap.
+	case "resync":
+		return h.handleResync(ws, msg)
 
 	case "list_workspace_entries":
 		requestID, _ := msg["requestId"].(string)
@@ -310,10 +321,12 @@ func (h *Handlers) handleStart(msg map[string]any) error {
 	if err != nil {
 		return err
 	}
+	// Client-generated id echoed in the new session's provenance.
+	startID, _ := msg["startId"].(string)
 	return session.StartOrResume(h.lifecycleDeps(), session.StartOpts{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: resumeID,
 		Seed: seed, ForceNew: forceNew, SpawnConfig: spawnConfig,
-		Worktree: wtReq,
+		Worktree: wtReq, StartID: startID,
 	})
 }
 

@@ -38,4 +38,8 @@ type StartOpts struct {
 	// Recovery and restart pass it so a second create does not run.
 	// Ignored when Worktree is non-nil. Nil means a normal source checkout.
 	ExistingWorktree *worktree.Info
+	// StartID is the client's `start` request id, echoed in the new
+	// session's provenance so the requesting window can claim it. Empty for
+	// crash recovery and restart, which are not client starts.
+	StartID string
 }

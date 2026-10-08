@@ -22,6 +22,12 @@ import type {
   GrokSetupApi,
   GrokSetupPlans,
 } from "./liveBridgeGrokSetupTypes";
+import type {
+  BridgeFrameMeta,
+  BridgeResyncResultMsg,
+  BridgeSessionProvenance,
+  StreamResetReason,
+} from "./liveBridgeStreamTypes";
 
 /** Workspace-relative paths scanned by the real bridge for `@` completion. */
 export type WorkspaceEntry = {
@@ -152,33 +158,33 @@ export type BridgeServerMsg =
       impl?: "go";
       version?: string;
     }
-  | { type: "state"; session: SessionState }
-  | {
+  | ({ type: "state"; session: SessionState } & BridgeFrameMeta)
+  | ({
       type: "session_update";
       sessionId: string;
       update: SessionUpdate;
       eventId?: string;
-    }
-  | {
+    } & BridgeFrameMeta)
+  | ({
       type: "session_lifecycle";
       sessionId: string;
       status: SessionStatus;
       pendingPermission?: PermissionRequest | null;
       model?: string;
       mode?: AgentMode;
-    }
+    } & BridgeFrameMeta)
   /**
    * session/load replay opened; freeze per-update store notify for this session.
    */
-  | {
+  | ({
       type: "replay_begin";
       sessionId: string;
-    }
+    } & BridgeFrameMeta)
   /**
    * session/load replay closed. Node sends `session`; Go sends ordered `updates`.
    * Multiple ends per session are legal when the bridge hits buffer caps.
    */
-  | {
+  | ({
       type: "replay_end";
       sessionId: string;
       session?: SessionState;
@@ -189,13 +195,13 @@ export type BridgeServerMsg =
       count: number;
       bytes: number;
       elapsedMs: number;
-    }
+    } & BridgeFrameMeta)
   | { type: "pool"; entries: PoolEntry[] }
   | { type: "environment"; env: EnvironmentInfo }
   | { type: "auth_state"; auth: AuthProbe }
   | { type: "stderr"; text: string; sessionId?: string }
   | { type: "error"; message: string; sessionId?: string }
-  | { type: "info"; message: string; sessionId?: string }
+  | ({ type: "info"; message: string; sessionId?: string } & BridgeFrameMeta)
   | { type: "workspace_entries"; requestId: string; entries: WorkspaceEntry[] }
   | {
       type: "write_workspace_file_result";
@@ -232,6 +238,7 @@ export type BridgeServerMsg =
       setting: string;
     }
   | { type: "pong" }
+  | BridgeResyncResultMsg
   /**
    * Answer to `read_model_catalog`. configOptions is empty when the snapshot
    * came from initialize alone. ok false carries error and no catalog.
@@ -294,7 +301,31 @@ export type LiveBridgeHandlers = {
    * must treat it as idempotent and only react to an actual change.
    */
   onAuthState?: (auth: AuthProbe) => void;
-  onInfo?: (message: string, sessionId?: string) => void;
+  /**
+   * Bridge info notice. `meta.provenance` is set when the bridge asserted
+   * the session's provenance (e.g. `session <id> ready` after a start), so
+   * a window can ignore another window's ready notice.
+   */
+  onInfo?: (
+    message: string,
+    sessionId?: string,
+    meta?: { provenance?: BridgeSessionProvenance },
+  ) => void;
+  /**
+   * Bridge-asserted provenance for a session, fired before the frame that
+   * carried it is painted and again only when it changes.
+   * @param sessionId Session the provenance describes.
+   * @param provenance Kind / parent / startId plus `own` (this window started it).
+   */
+  onProvenance?: (
+    sessionId: string,
+    provenance: BridgeSessionProvenance,
+  ) => void;
+  /**
+   * A stream position was abandoned (resync too old, epoch gone, or no
+   * reply); the dispatcher already asked for `get_state`. Informational.
+   */
+  onStreamReset?: (sessionId: string, reason: StreamResetReason) => void;
   onError?: (message: string, sessionId?: string) => void;
   onStderr?: (text: string, sessionId?: string) => void;
   onHello?: (

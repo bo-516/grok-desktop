@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
 )
 
 // Bridge version advertised on hello for cold-switch observability.
@@ -65,6 +66,9 @@ type Server struct {
 	mu       sync.Mutex
 	// Per-connection write mutex: gorilla websocket allows only one concurrent writer.
 	sockets  map[*websocket.Conn]*sync.Mutex
+	// lnMu guards httpSrv and listener: ListenAndServe sets them on its own
+	// goroutine while BoundPort / Close / handleWS read them.
+	lnMu     sync.Mutex
 	httpSrv  *http.Server
 	listener net.Listener
 }
@@ -86,6 +90,8 @@ func NewServer(cfg Config) *Server {
 		},
 	}
 	s.handlers = NewHandlers(p, cfg.AlwaysApprove, cfg.Cwd, cfg.PoolCapacity, s.send, s.broadcast)
+	// Per-session frames are stamped (epoch/seq) and fanned out by the hub.
+	s.handlers.Streams = sessionstream.NewHub(sessionstream.Config{}, s.broadcastRaw)
 	return s
 }
 
@@ -96,14 +102,17 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/ws", s.handleWS)
 	// Also accept WS on root path (Node attaches WSS to the same HTTP server).
 	// Node uses WebSocketServer({ server }) so any path upgrades. Match that.
-	s.httpSrv = &http.Server{Handler: mux}
+	httpSrv := &http.Server{Handler: mux}
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	s.lnMu.Lock()
+	s.httpSrv = httpSrv
 	s.listener = ln
+	s.lnMu.Unlock()
 	boundPort := ln.Addr().(*net.TCPAddr).Port
 
 	fmt.Fprintf(os.Stderr,
@@ -117,15 +126,19 @@ func (s *Server) ListenAndServe() error {
 	})
 	fmt.Fprintf(os.Stderr, "[bridge] ready %s\n", string(ready))
 
-	return s.httpSrv.Serve(ln)
+	return httpSrv.Serve(ln)
 }
 
 // BoundPort returns the actual listen port (useful when Port was 0).
+// Before ListenAndServe has bound, it returns the configured port.
 func (s *Server) BoundPort() int {
-	if s.listener == nil {
+	s.lnMu.Lock()
+	ln := s.listener
+	s.lnMu.Unlock()
+	if ln == nil {
 		return s.cfg.Port
 	}
-	return s.listener.Addr().(*net.TCPAddr).Port
+	return ln.Addr().(*net.TCPAddr).Port
 }
 
 // Close shuts down the HTTP server, all user terminals (bounded wait for the
@@ -133,8 +146,11 @@ func (s *Server) BoundPort() int {
 func (s *Server) Close() error {
 	s.handlers.Terminals.CloseAll()
 	s.pool.DisposeAll()
-	if s.httpSrv != nil {
-		return s.httpSrv.Close()
+	s.lnMu.Lock()
+	httpSrv := s.httpSrv
+	s.lnMu.Unlock()
+	if httpSrv != nil {
+		return httpSrv.Close()
 	}
 	return nil
 }
@@ -145,11 +161,20 @@ func (s *Server) Pool() *pool.RuntimePool { return s.pool }
 // Handlers exposes message handlers for tests.
 func (s *Server) Handlers() *Handlers { return s.handlers }
 
+// broadcast encodes msg and writes it to every connected client.
+// Encoding failures drop the frame.
 func (s *Server) broadcast(msg map[string]any) {
 	raw, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
+	s.broadcastRaw(raw)
+}
+
+// broadcastRaw writes one already-encoded frame to every connected client,
+// each under its own write mutex. The session stream hub calls it while
+// holding a stream lock, so it must never call back into the hub.
+func (s *Server) broadcastRaw(raw []byte) {
 	s.mu.Lock()
 	conns := make([]struct {
 		ws *websocket.Conn
@@ -240,7 +265,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	focused := s.handlers.State.FocusedSessionID
 	if focused != "" && s.pool.Has(focused) {
 		if rt := s.pool.Get(focused); rt != nil {
-			s.send(conn, map[string]any{"type": "state", "session": rt.GetSessionState()})
+			// Anchors the new client's stream position (epoch/headSeq).
+			s.handlers.sendStateSnapshot(conn, rt.GetSessionState())
 		}
 	}
 	go func() {

@@ -18,6 +18,7 @@ import {
   type SetState,
 } from "./sessionStoreLiveInbound";
 import { applyLiveInboundSession } from "./sessionStoreLiveApply";
+import { applyBridgeProvenance } from "./sessionStoreBridgeProvenance";
 import { applyAuthProbe, authedFromEnvironment } from "./sessionStoreAuth";
 import {
   noteModeReadyInfo,
@@ -259,12 +260,19 @@ export async function startLiveBridgeSession(
         onAuthState: (auth) => {
           applyAuthProbe(set, get, auth);
         },
-        onInfo: (message, sessionId) => {
+        // Bridge-asserted child / own-start facts, ahead of the frame's paint.
+        onProvenance: (sessionId, provenance) => {
+          applyBridgeProvenance(set, get, sessionId, provenance);
+        },
+        onInfo: (message, sessionId, meta) => {
           set({ bridgeInfo: message, lastError: null });
           // forceNew: stamp local only for ready contract
           // `session <id> ready` (+ optional models=…). Recovery/ops info with
-          // a sessionId must not become sticky local mid-forceNew.
-          admitForceNewSessionFromInfo(set, get, sessionId, message);
+          // a sessionId must not become sticky local mid-forceNew. When the
+          // bridge asserts provenance, only this window's own start counts.
+          if (!meta?.provenance || meta.provenance.own) {
+            admitForceNewSessionFromInfo(set, get, sessionId, message);
+          }
           // `mode set to plan` means session/set_mode returned. Release a held prompt.
           noteModeReadyInfo(set, get, message, sessionId);
         },

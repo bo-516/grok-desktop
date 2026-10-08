@@ -67,12 +67,15 @@ func lifecycleChanged(prev *lifecycleFingerprint, next lifecycleFingerprint) boo
 // `state` hydrate on pool hit blanks catalog-seeded history after refresh.
 // Prefer session_lifecycle (+ info) unless the snapshot somehow carries body.
 //
+// Both frames ride the owning runtime's stream (stamped epoch/seq) via
+// relayPoolFocus; the trailing info frame and pool broadcast do not.
+//
 // @param deps Broadcast and BroadcastPool must be non-nil.
 // @param session Resident snapshot. Empty timeline takes the lifecycle path.
 // @param info Optional info-frame text. Empty skips that frame.
 func broadcastPoolFocus(deps LifecycleDeps, session acp.SessionState, info string) {
 	if len(session.Timeline) > 0 {
-		deps.Broadcast(map[string]any{"type": "state", "session": session})
+		relayPoolFocus(deps, session.ID, map[string]any{"type": "state", "session": session}, true)
 	} else {
 		msg := map[string]any{
 			"type":      "session_lifecycle",
@@ -86,7 +89,7 @@ func broadcastPoolFocus(deps LifecycleDeps, session acp.SessionState, info strin
 		} else {
 			msg["pendingPermission"] = nil
 		}
-		deps.Broadcast(msg)
+		relayPoolFocus(deps, session.ID, msg, false)
 	}
 	if info != "" {
 		deps.Broadcast(map[string]any{
