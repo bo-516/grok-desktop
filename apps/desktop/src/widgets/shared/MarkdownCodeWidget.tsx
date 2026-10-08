@@ -10,7 +10,11 @@
 import { useMemo, type HTMLAttributes, type ReactNode } from "react";
 import { flattenCodeLines } from "@/lib/codeHighlight";
 import { languageForFenceClass } from "@/lib/codeHighlightLanguages";
-import { CodeLineView, useCodeHighlight } from "@/widgets/shared";
+// Sibling modules, not the `@/widgets/shared` barrel: the barrel re-exports
+// this file, and that cycle breaks once code-split chunks (preview doc)
+// import MarkdownCodeWidget through the barrel.
+import { CodeLineView } from "./stateless/CodeLineView";
+import { useCodeHighlight } from "./useCodeHighlight";
 
 export type MarkdownCodeWidgetProps = HTMLAttributes<HTMLElement> & {
   /** Fence class from the Markdown pipeline, e.g. "language-tsx". */
