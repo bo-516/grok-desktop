@@ -19,6 +19,7 @@ import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
 import { ContextDrawerWidget } from "@/widgets/contextRail";
 import { PreviewDrawerWidget } from "@/widgets/preview";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
+import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
@@ -127,6 +128,7 @@ export function App() {
             />
             <TimelineWidget />
             <ComposerWidget />
+            <TerminalPanelWidget />
           </section>
 
           <ContextDrawerWidget
