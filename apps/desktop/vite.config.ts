@@ -12,14 +12,45 @@
  * Babel's 500KB pretty-print deopt note on the entry.
  */
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import UnoCSS from "unocss/vite";
 import { loadAiInspectorDevPlugins, REPO_ROOT } from "./aiInspectorDev";
 
+/**
+ * Product semver baked into the client as __APP_VERSION__.
+ * Root package.json is the source of truth. VERSION overrides it for a
+ * release build that stamps a different number than the committed file.
+ * A missing or unreadable package.json falls back to 0.0.0-dev so the
+ * dev server still boots.
+ * @returns A non-empty version string.
+ */
+function readProductVersion(): string {
+  const fromEnv = process.env.VERSION?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  try {
+    const raw = readFileSync(
+      path.resolve(__dirname, "../../package.json"),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    if (typeof parsed.version === "string" && parsed.version.trim()) {
+      return parsed.version.trim();
+    }
+  } catch {
+    // Fall through to the dev placeholder.
+  }
+  return "0.0.0-dev";
+}
+
 export default defineConfig(async () => {
   const aiInspectorPlugins = await loadAiInspectorDevPlugins();
+  /** Same string Info.plist and the shell -X stamp use. */
+  const appVersion = readProductVersion();
 
   return {
     plugins: [
@@ -35,6 +66,13 @@ export default defineConfig(async () => {
         babel: { compact: true },
       }),
     ],
+    /**
+     * Replaced at transform time. A string literal, so the client never
+     * reads package.json. Tests that run outside Vite do not see this define.
+     */
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "src"),

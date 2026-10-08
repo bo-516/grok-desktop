@@ -32,6 +32,8 @@
 > ```
 >
 > 不想碰终端？双击一次，再到**系统设置 → 隐私与安全性 → 仍要打开**放行 —— Sequoia 之后「右键 → 打开」这个老办法已经不管用了。
+>
+> **已签名的发布可以跳过这一步。** 用 Apple Developer ID 凭据打出来的包会公证并装订票据，Gatekeeper 可以直接打开。配置了 `WINDOWS_SIGN_PFX` 的 Windows 包做了 Authenticode 签名，SmartScreen 不会拦截 `grok-desktop.exe`。凭据还没配时，发布仍是 ad-hoc / 未签名，上面的步骤继续有效。细节见 [`apps/shell/README.md`](apps/shell/README.md#code-signing)。
 
 **先装 agent。** 这个应用是真实 `grok` CLI 的窗口，所以 CLI 必须在 PATH 上（或位于 `~/.grok/bin/grok`）并已 `grok login` —— 或者设好 `XAI_API_KEY`。没有它桥也能起来，但 UI 会显示鉴权横幅。
 
@@ -146,7 +148,7 @@ bash scripts/build-release.sh          # 两个目标 → release/
 bash scripts/build-release.sh mac      # 或：windows
 ```
 
-产出 `release/Grok-Desktop-macos-universal.zip`（ad-hoc 签名的 `.app`，arm64 + x86_64）和 `release/Grok-Desktop-windows-amd64.zip`。
+产出 `release/Grok-Desktop-macos-universal.zip`（通用 `.app`，arm64 + x86_64）和 `release/Grok-Desktop-windows-amd64.zip`。没有签名凭据时，`.app` 仍是 ad-hoc 签名，Windows 的 exe 不签名。设置 `MACOS_SIGN_IDENTITY`（再加 notarytool 钥匙串配置，或 `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）或 `WINDOWS_SIGN_PFX` 才会签名，见 [`apps/shell/README.md`](apps/shell/README.md#code-signing)。
 
 每个包里都有**两个**二进制：Wails 壳（内嵌 Vite 构建产物）和它拉起来的 Go 桥子进程。壳在 macOS 上从 `Contents/Resources` 找桥，在 Windows 上从自己 `.exe` 的同级目录找 —— 见 [`apps/shell/paths.go`](apps/shell/paths.go)。
 

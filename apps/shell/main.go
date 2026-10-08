@@ -7,6 +7,7 @@
 //  4. Embed apps/desktop dist and inject window.__GROK_BRIDGE_URL__
 //  5. Session file logs under ~/Library/Logs/grok-desktop (purge >12h on start)
 //  6. On exit: kill bridge process group
+//  7. Log the product version stamped from the repo root package.json
 //
 // No business reduce / ACP logic lives here.
 // "node" in env or config is a fatal error; the Node bridge process is gone.
@@ -65,7 +66,7 @@ func run() error {
 	wsURL := BridgeWSURL(host, port, token)
 	cwd := ResolveBridgeLaunchCwd(repoRoot)
 
-	log.Printf("[shell] bridge.impl=%s port=%d repo=%s", impl, port, repoRoot)
+	log.Printf("[shell] version=%s bridge.impl=%s port=%d repo=%s", AppVersion(), impl, port, repoRoot)
 
 	bridgeStdout, bridgeStderr := sessionLog.BridgeWriters()
 
