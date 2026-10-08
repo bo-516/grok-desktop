@@ -103,6 +103,18 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		h.Send(ws, map[string]any{"type": "pool", "entries": h.Pool.List()})
 		return nil
 
+	// CLI onboarding: run the official installer / `grok update` with live
+	// output, and the custom grok binary path setting (grok_setup.go,
+	// grok_bin_setting.go).
+	case "grok_setup_run":
+		return h.handleGrokSetupRun(ws, msg)
+	case "grok_setup_cancel":
+		return h.handleGrokSetupCancel(msg)
+	case "grok_bin_get":
+		return h.handleGrokBinGet(ws, msg)
+	case "grok_bin_set":
+		return h.handleGrokBinSet(ws, msg)
+
 	case "get_state":
 		sessionID, _ := msg["sessionId"].(string)
 		rt, err := session.RequireSessionRuntime(h.Pool, h.State.FocusedSessionID, sessionID)
