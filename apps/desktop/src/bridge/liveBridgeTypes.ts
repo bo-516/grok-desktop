@@ -12,6 +12,16 @@ import type {
   SessionStatus,
   SessionUpdate,
 } from "@grok-desktop/acp-core";
+import type {
+  LiveBridgeTerminal,
+  TerminalServerMsg,
+} from "./liveBridgeTerminalTypes";
+import type {
+  GrokFailureKind,
+  GrokPathSource,
+  GrokSetupApi,
+  GrokSetupPlans,
+} from "./liveBridgeGrokSetupTypes";
 
 /** Workspace-relative paths scanned by the real bridge for `@` completion. */
 export type WorkspaceEntry = {
@@ -82,6 +92,14 @@ export type EnvironmentInfo = {
   ok: boolean;
   message: string;
   poolCapacity: number;
+  /** Structured reason ok is false; "" when ready. Absent from old bridges. */
+  failureKind?: GrokFailureKind;
+  /** CLI version floor the bridge enforces (e.g. "0.9.0"). */
+  minVersion?: string;
+  /** Which rule located grokPath. */
+  grokPathSource?: GrokPathSource;
+  /** Install / update commands offered on the bridge host. */
+  setup?: GrokSetupPlans;
 };
 
 /**
@@ -226,7 +244,9 @@ export type BridgeServerMsg =
       availableModels?: AvailableModel[];
       configOptions?: unknown[];
       error?: string;
-    };
+    }
+  /** Integrated terminal frames (see liveBridgeTerminalTypes). */
+  | TerminalServerMsg;
 
 /**
  * Correlated reply for `read_model_catalog`.
@@ -398,6 +418,10 @@ export type LiveBridgeHandle = {
    * @param cwd Optional workspace passed to the probe child.
    */
   readModelCatalog: (cwd?: string) => Promise<ModelCatalogReply>;
+  /** Integrated terminal panel: PTY shells owned by this socket. */
+  terminal: LiveBridgeTerminal;
+  /** grok CLI onboarding: installer / update runs and the custom grok path. */
+  grokSetup: GrokSetupApi;
   close: () => void;
   ready: Promise<void>;
 };

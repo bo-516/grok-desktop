@@ -12,15 +12,19 @@ import {
   startBridgeReconnectLoop,
 } from "../../lib/bridgeReconnect";
 import { isSubagentSessionKind } from "../../lib/sessionActions";
+import { decideBootOpen, readBootSessionId } from "../../lib/sessionWindow";
 import { setAttentionBadge } from "../../lib/dockBadge";
 import { rememberModelCatalog } from "../../store/modelCatalogStore";
 import { useSessionStore } from "../../store/sessionStore";
 
 /**
- * Clear the legacy catalog cache, connect, then open the newest on-disk chat
- * once the first sessions_list lands. Refresh env, dock/OS attention badge,
- * retry the live bridge every 3s while `connectionMode` is disconnected, and
- * re-probe login every 3s while it is live.
+ * Clear the legacy catalog cache, connect, then open one chat.
+ * A window loaded with `?session=<id>` selects that row once it is in the
+ * catalog and the bridge is live, and does not fall through to a different
+ * chat while the list is still arriving. The primary window (no query) opens
+ * the newest non-subagent chat, same as before. Refresh env, dock/OS
+ * attention badge, retry the live bridge every 3s while `connectionMode` is
+ * disconnected, and re-probe login every 3s while it is live.
  * @param args Session status fields used for notifications and badge count.
  */
 export function useShellSessionLifecycle(args: {
@@ -66,8 +70,33 @@ export function useShellSessionLifecycle(args: {
     if (openedFromDisk.current) {
       return;
     }
-    if (localDraft || viewingSessionId) {
+    /**
+     * `?session=` pins this window. Wait until that row exists; do not open
+     * the newest chat in a window the user opened for a different session.
+     * Selection still waits for the live bridge, matching the newest-chat path.
+     */
+    const bootSessionId = readBootSessionId(
+      typeof window === "undefined" ? "" : window.location.search,
+    );
+    const decision = decideBootOpen({
+      bootSessionId,
+      catalogIds: useSessionStore.getState().catalog.map((row) => row.id),
+      viewingSessionId,
+      localDraft,
+    });
+    if (decision === "already-open") {
       openedFromDisk.current = true;
+      return;
+    }
+    if (decision === "wait-pinned") {
+      return;
+    }
+    if (decision === "select-pinned") {
+      if (args.connectionMode !== "live-bridge" || !bootSessionId) {
+        return;
+      }
+      openedFromDisk.current = true;
+      selectSession(bootSessionId);
       return;
     }
     if (args.connectionMode !== "live-bridge") {

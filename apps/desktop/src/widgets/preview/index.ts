@@ -35,3 +35,5 @@ export { DiffFileSectionView } from "./DiffFileSectionView";
 export { usePreviewSource, beginFilePreviewLoad } from "./usePreviewSource";
 export { PreviewFileStackView } from "./PreviewFileStackView";
 export type { PreviewFileStackViewProps } from "./PreviewFileStackView";
+export { GitChangeListWidget } from "./GitChangeListWidget";
+export type { GitChangeListWidgetProps } from "./GitChangeListWidget";

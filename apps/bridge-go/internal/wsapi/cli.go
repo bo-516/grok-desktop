@@ -87,7 +87,8 @@ func (h *Handlers) handleCli(ws *websocket.Conn, msg map[string]any) error {
 //
 // Ported surface mirrors Node cliDispatch (sessions / MCP / worktree / auth /
 // models / memory / plugin / prompts / mcp_stderr_log / import_claude).
-// Unknown command ids return an error naming that one command.
+// Unknown command ids return an error naming that one command. The `git_*`
+// ids (git panel) are Go-only and delegate to dispatchGitCliCommand (git.go).
 //
 // onAuthLogout is invoked after a successful auth_logout so the pool can dispose
 // all runtimes (F-AUTH-07); nil is safe when the caller does not need the hook.
@@ -161,6 +162,9 @@ func dispatchCliCommand(command string, args map[string]any, cwd string, onAuthL
 		return data, err
 	case "update_check":
 		return updateCheck()
+	// Git panel (see git.go / internal/gitops).
+	case "git_status", "git_diff", "git_commit", "git_push", "git_pr_preflight", "git_pr_create":
+		return dispatchGitCliCommand(command, args, cwd)
 	case "plugin":
 		return pluginAction(stringArg(args, "action"), stringArg(args, "name"), cwd)
 	case "marketplace":

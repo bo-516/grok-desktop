@@ -30,6 +30,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { railSessionTitle } from "@/lib/sessionTitleEdit";
 import {
+  OPEN_SESSION_WINDOW_EVENT,
+  type OpenSessionWindowDetail,
+} from "@/lib/sessionWindow";
+import {
   SessionRailSessionMenuButtonView,
   SessionRailSessionMenuItemsView,
 } from "./SessionRailSessionMenuView";
@@ -103,6 +107,20 @@ function SessionRailSessionRowWidgetInner(
   };
 
   /**
+   * Ask the session-window widget to open this row. Runs from onSelect:
+   * it does not move focus, so it does not need to wait for the menu to close.
+   */
+  const handleOpenWindow = () => {
+    const detail: OpenSessionWindowDetail = {
+      sessionId: rec.id,
+      title: titleLabel,
+    };
+    window.dispatchEvent(
+      new CustomEvent(OPEN_SESSION_WINDOW_EVENT, { detail }),
+    );
+  };
+
+  /**
    * Remove worktree after the menu releases focus, same as Delete, so the
    * confirm dialog can restore focus to the opener on dismiss.
    */
@@ -160,6 +178,7 @@ function SessionRailSessionRowWidgetInner(
             pinned={pinned}
             onRename={handleRename}
             onTogglePin={onTogglePin}
+            onOpenInWindow={handleOpenWindow}
             onRemove={handleRemove}
             onRemoveWorktree={handleRemoveWorktree}
           />
@@ -174,6 +193,7 @@ function SessionRailSessionRowWidgetInner(
           pinned={pinned}
           onRename={handleRename}
           onTogglePin={onTogglePin}
+          onOpenInWindow={handleOpenWindow}
           onRemove={handleRemove}
           onRemoveWorktree={handleRemoveWorktree}
         />

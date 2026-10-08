@@ -19,6 +19,7 @@ import {
   prefillComposer,
   type PaletteItem,
 } from "../lib/commandPalette";
+import { OPEN_SESSION_WINDOW_EVENT } from "../lib/sessionWindow";
 import { applyTheme, loadTheme, toggleTheme } from "../lib/theme";
 
 /** Empty-query cap: curated actions + MCP + skills should all be reachable. */
@@ -132,6 +133,10 @@ export function useCommandPaletteWidget(
     }
     if (item.runValue === "new_chat") {
       void newSession();
+      return;
+    }
+    if (item.runValue === "open_in_window") {
+      window.dispatchEvent(new CustomEvent(OPEN_SESSION_WINDOW_EVENT));
       return;
     }
     if (item.runValue === "auth_login") {

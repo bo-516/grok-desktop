@@ -7,6 +7,7 @@
 //  4. Embed apps/desktop dist and inject window.__GROK_BRIDGE_URL__
 //  5. Session file logs under ~/Library/Logs/grok-desktop (purge >12h on start)
 //  6. On exit: kill bridge process group
+//  7. Log the product version stamped from the repo root package.json
 //
 // No business reduce / ACP logic lives here.
 // "node" in env or config is a fatal error; the Node bridge process is gone.
@@ -65,7 +66,7 @@ func run() error {
 	wsURL := BridgeWSURL(host, port, token)
 	cwd := ResolveBridgeLaunchCwd(repoRoot)
 
-	log.Printf("[shell] bridge.impl=%s port=%d repo=%s", impl, port, repoRoot)
+	log.Printf("[shell] version=%s bridge.impl=%s port=%d repo=%s", AppVersion(), impl, port, repoRoot)
 
 	bridgeStdout, bridgeStderr := sessionLog.BridgeWriters()
 
@@ -96,13 +97,19 @@ func run() error {
 	}()
 
 	injectJS := bridgeInjectJS(wsURL, sessionLog)
+	// Registry is bound to the app below, before Run serves asset requests.
+	sessionWindows := newWailsWindowRegistry(injectJS)
 
 	app := application.New(application.Options{
 		Name:        "Grok Desktop",
 		Description: "Desktop ACP client for grok-build",
 		Assets: application.AssetOptions{
-			// UI log POST lands on the same origin as embedded assets.
-			Handler: WithUILogHandler(FrontendAssets(), sessionLog),
+			// UI log POST and session-window POST land on the same origin as assets.
+			// Session windows load /?session=<id>; the middleware still injects on "/".
+			Handler: WithUILogHandler(
+				WithSessionWindowHandler(FrontendAssets(), sessionWindows),
+				sessionLog,
+			),
 			// Inject into <head> before Vite modules so defaultBridgeUrl() sees the global.
 			// WebviewWindowOptions.JS alone is too late on darwin (post-navigation).
 			Middleware: BridgeURLInjectMiddleware(injectJS),
@@ -120,8 +127,10 @@ func run() error {
 			"logDir":     sessionLogDir(sessionLog),
 		},
 	})
+	sessionWindows.bind(app)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:   MainWindowName,
 		Title:  "Grok Desktop",
 		Width:  1280,
 		Height: 840,
