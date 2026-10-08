@@ -1,14 +1,21 @@
 /**
  * Stateful rendered-document body for the preview drawer.
- * Owns KaTeX plugin + DocRenderContext; Streamdown element map lives in
- * previewDocComponents (module-stable). Disk Markdown is fed as-authored:
- * no agent-output math rewrite (timeline-only path); `[…]` stays literal.
+ * Owns DocRenderContext; Streamdown element map lives in previewDocComponents
+ * (module-stable). Disk Markdown is fed as-authored: no agent-output math
+ * rewrite (timeline-only path); `[…]` stays literal.
+ * KaTeX is code-split: only a document containing `$$` renders the lazily
+ * loaded `LazyMathStreamdownView` (doc variant: display `$$` only, no
+ * single-`$` rewrite of currency / shell), with the plain render as fallback.
  */
 
-import { useMemo, useRef } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import { Streamdown } from "streamdown";
-import { createMathPlugin } from "@streamdown/math";
-import { useCopyFeedback } from "@/widgets/shared";
+import { hasMathDelimiters } from "@/lib/mathDelimiters";
+import {
+  LazyMathStreamdownView,
+  useCopyFeedback,
+  type MathStreamdownViewProps,
+} from "@/widgets/shared";
 import {
   DocRenderContext,
   docComponents,
@@ -16,8 +23,6 @@ import {
 } from "./previewDocComponents";
 import { docRehypePlugins } from "./docRehypeSafety";
 import { PreviewDocView } from "./PreviewDocView";
-// KaTeX layout metrics; text color inherits from doc chrome tokens.
-import "katex/dist/katex.min.css";
 
 export type PreviewDocWidgetProps = {
   /** Absolute path of the open document (relative link resolution base). */
@@ -34,16 +39,32 @@ export type PreviewDocWidgetProps = {
 };
 
 /**
- * Streamdown math for documents: display `$$` only (no single-`$` rewrite of
- * currency / shell). Input is the raw file string — not the agent math pipeline.
+ * Identity URL transform: do not rewrite relative hrefs against the page
+ * origin, so in-drawer workspace links keep their file-relative form.
+ * @param url Href/src exactly as authored in the document.
+ * @returns The same string.
  */
-const docMath = createMathPlugin({
-  singleDollarTextMath: false,
-  errorColor: "var(--color-danger)",
-});
+function keepUrl(url: string): string {
+  return url;
+}
 
-/** Stable plugins map — avoid reallocating on every PreviewDocWidget render. */
-const docPlugins = { math: docMath };
+/**
+ * Streamdown props shared by the plain and the math render (module-stable).
+ * Static mode + no incomplete parsing: disk files are complete. linkSafety
+ * off — we own the click matrix (external / anchor / file). docRehypePlugins
+ * replaces default rehype-harden so relative workspace links survive.
+ */
+const docMarkdownProps = {
+  className: "doc-flow",
+  mode: "static",
+  parseIncompleteMarkdown: false,
+  controls: false,
+  lineNumbers: false,
+  linkSafety: { enabled: false },
+  rehypePlugins: docRehypePlugins,
+  urlTransform: keepUrl,
+  components: docComponents,
+} satisfies Omit<MathStreamdownViewProps, "mathVariant" | "children">;
 
 /**
  * Render one workspace Markdown file as a static document (GFM + doc typography).
@@ -53,6 +74,8 @@ export function PreviewDocWidget(props: PreviewDocWidgetProps) {
   const { path, content, truncated, onOpenFile } = props;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const { copiedKey, copy } = useCopyFeedback();
+  /** Gate for the KaTeX chunk; doc flavour only treats `$$` as math. */
+  const needsMath = hasMathDelimiters(content, { singleDollar: false });
 
   const ctx = useMemo<DocRenderContextValue>(
     () => ({
@@ -65,31 +88,23 @@ export function PreviewDocWidget(props: PreviewDocWidgetProps) {
     [path, onOpenFile, copy, copiedKey],
   );
 
+  /** Plain render: the whole body when math-free, the fallback otherwise. */
+  const plain = <Streamdown {...docMarkdownProps}>{content}</Streamdown>;
+
   return (
     <DocRenderContext.Provider value={ctx}>
       <div ref={rootRef} className="flex flex-col flex-1 min-h-0">
         <PreviewDocView truncated={truncated}>
-          {/*
-            Static mode + no incomplete parsing: disk files are complete.
-            linkSafety off — we own the click matrix (external / anchor / file).
-            Raw content is passed through as-authored (no agent math rewrite).
-          */}
-          <Streamdown
-            className="doc-flow"
-            mode="static"
-            parseIncompleteMarkdown={false}
-            controls={false}
-            lineNumbers={false}
-            linkSafety={{ enabled: false }}
-            // Replace default rehype-harden so relative workspace links survive.
-            rehypePlugins={docRehypePlugins}
-            // Identity: do not rewrite relative hrefs against the page origin.
-            urlTransform={(url) => url}
-            plugins={docPlugins}
-            components={docComponents}
-          >
-            {content}
-          </Streamdown>
+          {/* Raw content is passed through as-authored (no agent math rewrite). */}
+          {needsMath ? (
+            <Suspense fallback={plain}>
+              <LazyMathStreamdownView {...docMarkdownProps} mathVariant="doc">
+                {content}
+              </LazyMathStreamdownView>
+            </Suspense>
+          ) : (
+            plain
+          )}
         </PreviewDocView>
       </div>
     </DocRenderContext.Provider>

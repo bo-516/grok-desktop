@@ -8,6 +8,12 @@
  *    remark-math@6 (used by @streamdown/math) does not parse backslash
  *    delimiters; CommonMark then eats `\` and leaves raw `[` soup on screen.
  * 2. `@streamdown/math` (remark-math + KaTeX) renders `$…$` / `$$…$$`.
+ *    KaTeX is code-split: {@link hasMathDelimiters} gates a lazily loaded
+ *    `LazyMathStreamdownView` (agent variant). Text without math — the vast
+ *    majority — renders plain Streamdown and never loads KaTeX. While the math
+ *    chunk loads (once per app session) the Suspense fallback is the same
+ *    plain Streamdown, so streaming keeps painting and `$…$` shows as text
+ *    for that moment only.
  *
  * Links open outside the shell via {@link openExternalUrl} (Wails system browser /
  * Vite new tab) — bare target=_blank is a no-op inside the desktop webview.
@@ -18,16 +24,22 @@
  * only the `hidden` token from `md-hr` in `uno/shortcuts.timeline.ts`.
  */
 
-import type { HTMLAttributes, MouseEvent, ReactNode } from "react";
+import {
+  Suspense,
+  type HTMLAttributes,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { Streamdown, type Components } from "streamdown";
-import { createMathPlugin } from "@streamdown/math";
 import cs from "classnames";
 import { openExternalUrl } from "@/lib/openExternalUrl";
 import { normalizeAgentMath } from "@/lib/normalizeAgentMath";
-import { MarkdownCodeWidget } from "@/widgets/shared";
-// KaTeX layout metrics (fonts, spacing). Text color inherits `currentColor` from
-// `.md-root`; errorColor below maps parse failures to the app danger token.
-import "katex/dist/katex.min.css";
+import { hasMathDelimiters } from "@/lib/mathDelimiters";
+import {
+  LazyMathStreamdownView,
+  MarkdownCodeWidget,
+  type MathStreamdownViewProps,
+} from "@/widgets/shared";
 
 export type StreamingMarkdownViewProps = {
   /** Full accumulated agent text (may be mid-stream / incomplete Markdown). */
@@ -35,20 +47,6 @@ export type StreamingMarkdownViewProps = {
   /** Whether to show a streaming caret after the last rendered content. */
   showCursor?: boolean;
 };
-
-/**
- * Streamdown math plugin (KaTeX).
- * singleDollarTextMath: LLMs almost always emit `$…$` for inline math; fenced
- * code blocks stay out of remark-math so `$HOME` / shell dollars inside fences
- * are not rewritten. errorColor must be a defineColor token (no hex in TSX).
- */
-const streamdownMath = createMathPlugin({
-  singleDollarTextMath: true,
-  errorColor: "var(--color-danger)",
-});
-
-/** Stable plugins map — avoid reallocating on every StreamingMarkdownView render. */
-const streamdownPlugins = { math: streamdownMath };
 
 /**
  * Common props Streamdown passes into custom element renderers.
@@ -239,6 +237,8 @@ const mdComponents: Components = {
 
 /**
  * Streaming Markdown view (Streamdown).
+ * Math-free text renders plain Streamdown; text that may hold math renders the
+ * lazily loaded KaTeX variant with the plain render as its Suspense fallback.
  * @param props text + optional end cursor while the agent is still streaming.
  */
 export function StreamingMarkdownView(props: StreamingMarkdownViewProps) {
@@ -246,24 +246,38 @@ export function StreamingMarkdownView(props: StreamingMarkdownViewProps) {
   // Bare () / [] / \( \) / \[ \] → $ / $$ only (remark-math v6). Then KaTeX.
   // Incomplete stream ticks leave open wrappers alone.
   const mathReady = normalizeAgentMath(text);
+  /** Gate for the KaTeX chunk; same flavour as the agent math plugin (single `$`). */
+  const needsMath = hasMathDelimiters(mathReady, { singleDollar: true });
+  /**
+   * Streamdown props shared by the plain and the math render so both paths
+   * parse and paint identically apart from the KaTeX plugin.
+   */
+  const markdownProps = {
+    className: "md-streamdown",
+    mode: showCursor ? "streaming" : "static",
+    parseIncompleteMarkdown: true,
+    controls: false,
+    lineNumbers: false,
+    linkSafety: { enabled: false },
+    components: mdComponents,
+  } satisfies Omit<MathStreamdownViewProps, "mathVariant" | "children">;
+  /** Plain render: the whole output when math-free, the fallback otherwise. */
+  const plain = <Streamdown {...markdownProps}>{mathReady}</Streamdown>;
 
   return (
     /* data-streaming drives the caret (base.css): it is an ::after on the last
      * rendered block, because a sibling <span> would always wrap to its own
      * line under the Streamdown wrapper div. */
     <div className="md-root" data-streaming={showCursor ? "true" : undefined}>
-      <Streamdown
-        className="md-streamdown"
-        mode={showCursor ? "streaming" : "static"}
-        parseIncompleteMarkdown
-        controls={false}
-        lineNumbers={false}
-        linkSafety={{ enabled: false }}
-        plugins={streamdownPlugins}
-        components={mdComponents}
-      >
-        {mathReady}
-      </Streamdown>
+      {needsMath ? (
+        <Suspense fallback={plain}>
+          <LazyMathStreamdownView {...markdownProps} mathVariant="agent">
+            {mathReady}
+          </LazyMathStreamdownView>
+        </Suspense>
+      ) : (
+        plain
+      )}
     </div>
   );
 }

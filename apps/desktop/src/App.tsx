@@ -12,12 +12,14 @@ import { PermissionModalView } from "./widgets/PermissionModalView";
 import { SessionRailWidget } from "@/widgets/sessionRail";
 import { TopNavWidget } from "./widgets/TopNavWidget";
 import { CommandPaletteWidget } from "./widgets/CommandPaletteWidget";
-import { EnvironmentSheetWidget } from "@/widgets/environment";
-import { SettingsPanelWidget } from "./widgets/SettingsPanelWidget";
 import { MultiSessionOverviewWidget } from "./widgets/MultiSessionOverviewWidget";
 import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
 import { ContextDrawerWidget } from "@/widgets/contextRail";
-import { PreviewDrawerWidget } from "@/widgets/preview";
+import {
+  LazyEnvironmentSheetWidget,
+  LazyPreviewDrawerWidget,
+  LazySettingsPanelWidget,
+} from "@/widgets/lazyPanels";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
 import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
@@ -52,6 +54,8 @@ function contextDrawerRail(
  * Signed out, the login screen covers all of it and the shell goes `inert`:
  * it stays mounted only because it owns the connection and the 3s login poll
  * that will close the gate — nothing of it is visible or reachable.
+ * Preview / Environment / Settings are code-split (`@/widgets/lazyPanels`):
+ * same props, chunks warmed after first paint.
  * @returns Full app chrome wired via useAppShellWidget + live session store.
  */
 export function App() {
@@ -143,17 +147,17 @@ export function App() {
             onSelectTab={shell.selectContextTab}
             onLayoutChange={shell.setDrawerLayout}
           />
-          <PreviewDrawerWidget
+          <LazyPreviewDrawerWidget
             open={shell.previewRailOpen}
             effectiveLayout={shell.drawerEffectiveLayout}
             onClose={shell.closeContextRail}
           />
-          <EnvironmentSheetWidget
+          <LazyEnvironmentSheetWidget
             open={shell.activePanel === "environment"}
             onClose={shell.closePanel}
             initialPage={shell.environmentPage}
           />
-          <SettingsPanelWidget
+          <LazySettingsPanelWidget
             open={shell.activePanel === "settings"}
             onClose={shell.closePanel}
           />
