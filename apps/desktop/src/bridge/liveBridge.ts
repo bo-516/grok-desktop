@@ -10,6 +10,7 @@
 import type { SessionState } from "@grok-desktop/acp-core";
 import { createLiveBridgeDispatch } from "./liveBridgeDispatch";
 import { createLiveBridgeFs } from "./liveBridgeFs";
+import { createLiveBridgeGrokSetup } from "./liveBridgeGrokSetup";
 import { createLiveBridgeModelCatalog } from "./liveBridgeModelCatalog";
 import type {
   AuthProbe,
@@ -83,6 +84,8 @@ export function connectLiveBridge(
 
   const fsApi = createLiveBridgeFs(send);
   const catalogApi = createLiveBridgeModelCatalog(send);
+  /** CLI onboarding: setup runs + custom grok path (own correlation maps). */
+  const grokSetup = createLiveBridgeGrokSetup(send);
 
   function rejectCliRequests(error: Error): void {
     for (const pending of pendingCli.values()) {
@@ -99,6 +102,7 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     catalogApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
+    grokSetup.failAll(`WebSocket error connecting to ${url}`);
     // I4: do not leave sessions muted if error aborts a load window.
     dispatch.flushAllReplays();
     readyCallbacks.reject?.(new Error(`WebSocket error connecting to ${url}`));
@@ -108,6 +112,7 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
     catalogApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
+    grokSetup.failAll("Bridge WebSocket closed");
     // I4: force-close any open replay windows before clearing buckets.
     dispatch.flushAllReplays();
     dispatch.clearBuckets();
@@ -124,6 +129,9 @@ export function connectLiveBridge(
       return;
     }
     if (catalogApi.handleServerMsg(msg)) {
+      return;
+    }
+    if (grokSetup.handleServerMsg(msg)) {
       return;
     }
     if (dispatch.handleServerMsg(msg)) {
@@ -299,6 +307,7 @@ export function connectLiveBridge(
     },
     cli,
     readModelCatalog: catalogApi.readModelCatalog,
+    grokSetup: grokSetup.api,
     close: () => {
       try {
         ws.close();
