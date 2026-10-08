@@ -49,9 +49,15 @@ export async function waitForCanvasSessionId(
 ): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const id = get().session.id.trim();
+    const snap = get();
+    const id = snap.session.id.trim();
     if (id) {
       return id;
+    }
+    // Worktree create failure and "not a git repository" arrive as
+    // lastError. Waiting out the deadline would hide that message.
+    if (snap.lastError) {
+      return null;
     }
     await new Promise<void>((resolve) => {
       setTimeout(resolve, WAIT_SESSION_ID_POLL_MS);
@@ -189,9 +195,12 @@ async function ensureSessionForSend(
 
   const sid = await waitForCanvasSessionId(get);
   if (!sid) {
+    const err = get().lastError;
     set({
       creatingSession: false,
-      bridgeInfo: "Session not ready yet — try send again",
+      bridgeInfo: err
+        ? `Cannot create session: ${err}`
+        : "Session not ready yet — try send again",
     });
     return null;
   }

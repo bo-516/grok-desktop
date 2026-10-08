@@ -3,6 +3,7 @@
  * Pure — no React, no localStorage.
  */
 
+import { projectGroupKey } from "@/lib/worktreeChat";
 import {
   NO_PROJECT_KEY,
   type ProjectGroup,
@@ -107,6 +108,10 @@ export function compareByFirstCharAscii(
  * focus). Groups sort by project display name first-character ASCII.
  * User drag order / pin are applied later via rail prefs and outrank this
  * default recency order inside a project.
+ * A worktree row groups under `worktree.sourceRepo` when that is set, so
+ * chats started in a checkout stay with the project that owns them.
+ * `/tmp` and `/var` are canonicalized to `/private/tmp` and `/private/var`.
+ * Other workspace strings are unchanged.
  * @param catalog Full session catalog.
  * @returns Project groups with sorted sessions.
  */
@@ -115,7 +120,8 @@ export function groupSessionsByProject(
 ): ProjectGroup[] {
   const map = new Map<string, SessionRecord[]>();
   for (const s of catalog) {
-    const key = s.workspace || NO_PROJECT_KEY;
+    const key =
+      projectGroupKey(s.workspace, s.worktree?.sourceRepo) || NO_PROJECT_KEY;
     const list = map.get(key) ?? [];
     list.push(s);
     map.set(key, list);

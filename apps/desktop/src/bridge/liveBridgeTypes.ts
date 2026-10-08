@@ -44,6 +44,23 @@ export type PreviewWorkspaceFileResult = {
   error?: string;
 };
 
+/**
+ * Worktree identity on a pool row. Absent when the session is a normal
+ * checkout. `sourceRepo` is the project the rail groups under.
+ */
+export type PoolWorktreeInfo = {
+  /** Worktree directory (agent cwd). */
+  path: string;
+  /** Checked-out branch, or "HEAD" when unnamed. */
+  branch: string;
+  /** Repository that owns this worktree. */
+  sourceRepo: string;
+  /** Requested name or grok label. */
+  name?: string;
+  /** Grok id. `worktree rm` accepts this. */
+  id?: string;
+};
+
 /** Aligned with bridge PoolEntry. */
 export type PoolEntry = {
   sessionId: string;
@@ -51,6 +68,8 @@ export type PoolEntry = {
   status: SessionState["status"];
   lastUsed: number;
   live: boolean;
+  /** Set when this process was started in a worktree. */
+  worktree?: PoolWorktreeInfo;
 };
 
 /** Aligned with bridge EnvironmentInfo; no secret plaintext. */
@@ -390,6 +409,13 @@ export type StartOpts = {
   seed?: SessionState;
   forceNew?: boolean;
   spawnConfig?: SessionSpawnConfig;
+  /**
+   * Create a grok worktree before spawn. Absent or undefined does not
+   * create one. An empty object uses CLI defaults (generated name, HEAD
+   * plus uncommitted changes). This is not `spawnConfig.worktree`, which
+   * is the older `grok agent --worktree` flag.
+   */
+  worktree?: { name?: string; ref?: string };
 };
 
 export type { ContentBlock, SessionState };

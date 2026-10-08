@@ -274,6 +274,16 @@ export const sideNavShortcuts: Record<string, string> = {
   "sess-title":
     "block min-w-0 max-w-full whitespace-nowrap overflow-x-hidden text-ellipsis text-nav font-normal tracking-tight",
   /*
+   * Title and the worktree chip share the first grid track on one 20px line
+   * so the 36px row does not grow. The title slot shrinks; the chip does not.
+   */
+  "sess-title-line": "flex items-center gap-1.5 min-w-0",
+  "sess-title-slot": "min-w-0 flex-1",
+  "sess-wt":
+    "shrink-0 inline-flex items-center gap-0.5 max-w-[40%] min-w-0 text-11px leading-none text-fg-muted",
+  "sess-wt-icon": "shrink-0 w-3 h-3",
+  "sess-wt-label": "min-w-0 truncate",
+  /*
    * Inline rename field: same 20px text-nav box as `.sess-title` so swapping
    * span → input does not grow the 36px row. No border, no focus ring, no
    * UA padding — the caret is the only edit chrome.

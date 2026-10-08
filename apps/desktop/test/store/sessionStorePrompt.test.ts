@@ -43,4 +43,17 @@ describe("waitForCanvasSessionId", () => {
     const sid = await waitForCanvasSessionId(makeGet(""), 120);
     assert.equal(sid, null);
   });
+
+  it("returns null immediately when start failed with lastError", async () => {
+    const get = () =>
+      ({
+        session: createSessionState({ id: "", workspace: "/w" }),
+        lastError: "not a git repository",
+      }) as SessionStore;
+    const started = Date.now();
+    const sid = await waitForCanvasSessionId(get, 2_000);
+    assert.equal(sid, null);
+    // The failure must not wait out the handshake deadline.
+    assert.ok(Date.now() - started < 400);
+  });
 });

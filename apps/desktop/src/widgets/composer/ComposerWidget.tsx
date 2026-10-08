@@ -14,6 +14,7 @@ import cs from "classnames";
 import { Plus } from "lucide-react";
 import { ClickSpark, StarBorder } from "@/components/react-bits";
 import { ProjectSwitcherWidget } from "@/widgets/project";
+import { WorktreeChatOptionWidget } from "@/widgets/worktreeChat";
 import { TurnStatusWidget } from "@/widgets/turnStatus";
 import { ComposerContextUsageView } from "./ComposerContextUsageView";
 import { ComposerWeeklyUsageView } from "./ComposerWeeklyUsageView";
@@ -95,6 +96,7 @@ export function ComposerWidget() {
           onEdit={queue.edit}
           onCancel={queue.cancel}
         />
+        <WorktreeChatOptionWidget />
         <div className="composer">
           {widget.isMenuOpen ? (
             <ComposerSuggestionListView

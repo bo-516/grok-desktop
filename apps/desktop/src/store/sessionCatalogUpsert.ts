@@ -373,6 +373,9 @@ export function upsertFromLiveState(
     backgroundTasks,
     goal,
     tokenUsage,
+    // ACP snapshots do not carry the worktree badge. Dropping it here would
+    // ungroup the row on the next live frame.
+    worktree: existing?.worktree,
   };
   const without = catalog.filter((s) => s.id !== state.id);
   // Id tie-break keeps sort stable when updatedAt collides (churn reduction).

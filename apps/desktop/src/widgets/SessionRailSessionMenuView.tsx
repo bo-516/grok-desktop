@@ -12,7 +12,7 @@
  * wired). The row widget owns the menu roots and open state.
  */
 
-import { Ellipsis, PencilLine, Pin, PinOff, Trash2 } from "lucide-react";
+import { Ellipsis, GitBranch, PencilLine, Pin, PinOff, Trash2 } from "lucide-react";
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -38,6 +38,11 @@ export type SessionRailSessionMenuItemsViewProps = {
   onTogglePin: () => void;
   /** Delete (through the shell's confirm when wired). */
   onRemove: () => void;
+  /**
+   * Remove this chat's worktree (shell confirm). Missing hides the row,
+   * including when the chat is not in a worktree.
+   */
+  onRemoveWorktree?: () => void;
 };
 
 /**
@@ -78,7 +83,8 @@ export function SessionRailSessionMenuButtonView(props: {
 export function SessionRailSessionMenuItemsView(
   props: SessionRailSessionMenuItemsViewProps,
 ) {
-  const { kind, pinned, onRename, onTogglePin, onRemove } = props;
+  const { kind, pinned, onRename, onTogglePin, onRemove, onRemoveWorktree } =
+    props;
   /** Row primitive for this menu kind (same props on both). */
   const Item = kind === "dropdown" ? DropdownMenuItem : ContextMenuItem;
   /** Separator primitive for this menu kind. */
@@ -98,6 +104,12 @@ export function SessionRailSessionMenuItemsView(
         <PinGlyph strokeWidth={1.75} aria-hidden="true" />
         {pinned ? "Unpin" : "Pin to top"}
       </Item>
+      {onRemoveWorktree ? (
+        <Item onSelect={onRemoveWorktree}>
+          <GitBranch strokeWidth={1.75} aria-hidden="true" />
+          Remove worktree…
+        </Item>
+      ) : null}
       <Separator />
       <Item variant="destructive" onSelect={onRemove}>
         <Trash2 strokeWidth={1.75} aria-hidden="true" />
