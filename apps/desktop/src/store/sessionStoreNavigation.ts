@@ -63,6 +63,7 @@ export function bumpSelectSeq(): number {
 /**
  * Open a local New chat draft. Does **not** call session/new on the bridge;
  * the real session is created on the first successful sendPrompt (forceNew).
+ * Drains coalesced live stream notifies before the previous canvas is persisted.
  * Optional cwd overrides workspace prefs for the draft and later create.
  * After the canvas is blanked, asks the composer to take keyboard focus so
  * every entry (rail, ⌘N, palette, session ⋯, workspace switch) lands in the
@@ -78,6 +79,8 @@ export async function newSessionAction(
 ): Promise<void> {
   /** Draft folder (prefs written); explicit cwd wins, then prefs, then canvas. */
   const workspace = adoptDraftWorkspace(cwd, get().session.workspace);
+  // Session switch: land coalesced stream chunks on the outgoing canvas first.
+  get().live?.flushPendingUpdates?.();
   // Cancel in-flight select/resume so a late resume cannot repaint over the draft.
   selectSeq += 1;
   get().clearPendingMode();
@@ -173,6 +176,8 @@ export async function reconnectAction(
 
 /**
  * Focus a catalog session: seed canvas immediately, resume live when needed.
+ * Drains coalesced live stream notifies first so the outgoing canvas and the
+ * target row are current before the switch.
  * @param set Zustand set.
  * @param get Zustand get.
  * @param id Catalog / ACP session id.
@@ -182,6 +187,9 @@ export function selectSessionAction(
   get: SessionStoreGet,
   id: string,
 ): void {
+  // Session switch: land coalesced stream chunks (old canvas and the target's
+  // catalog row) before anything below reads them.
+  get().live?.flushPendingUpdates?.();
   // L3 drill-down: promote buffered (or role-only stub) child → catalog first.
   promoteBufferedChildForSelect(set, get, id);
 
@@ -255,7 +263,8 @@ export function selectSessionAction(
 /**
  * Remove a session from catalog and pool; may re-focus another row.
  * Forgets busy→idle edge memory for this id so a later idle restore
- * of the same id is not treated as a turn settle.
+ * of the same id is not treated as a turn settle. Drains coalesced live
+ * stream notifies first so none can re-add the row after the filter.
  * @param set Zustand set.
  * @param get Zustand get.
  * @param id Session id to drop.
@@ -265,6 +274,8 @@ export function removeSessionAction(
   get: SessionStoreGet,
   id: string,
 ): void {
+  // A late coalesced notify must not re-add the row after the filter below.
+  get().live?.flushPendingUpdates?.();
   // Reclaim child process (if in pool)
   get().live?.closeSession(id);
   forgetTurnEdge(id);
@@ -308,6 +319,7 @@ export function removeSessionAction(
 /**
  * Persist current session into catalog and tear down live bridge.
  * Clears all busy→idle edge memory so the next idle restore is not a settle.
+ * Drains coalesced live stream notifies first so the flush sees final chunks.
  * @param set Zustand set.
  * @param get Zustand get.
  */
@@ -315,6 +327,8 @@ export function disconnectAction(
   set: SessionStoreSet,
   get: SessionStoreGet,
 ): void {
+  // Coalesced stream chunks land before the disconnect flush snapshots them.
+  get().live?.flushPendingUpdates?.();
   forgetAllTurnEdges();
   cancelPendingSessionsSync();
   // Pending / child buffers and the live canvas land in the catalog first.

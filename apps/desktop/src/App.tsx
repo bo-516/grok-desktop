@@ -12,14 +12,19 @@ import { PermissionModalView } from "./widgets/PermissionModalView";
 import { SessionRailWidget } from "@/widgets/sessionRail";
 import { TopNavWidget } from "./widgets/TopNavWidget";
 import { CommandPaletteWidget } from "./widgets/CommandPaletteWidget";
-import { EnvironmentSheetWidget } from "@/widgets/environment";
-import { SettingsPanelWidget } from "./widgets/SettingsPanelWidget";
 import { MultiSessionOverviewWidget } from "./widgets/MultiSessionOverviewWidget";
 import { ConfirmDialogView } from "./widgets/ConfirmDialogView";
 import { ContextDrawerWidget } from "@/widgets/contextRail";
-import { PreviewDrawerWidget } from "@/widgets/preview";
+import {
+  LazyEnvironmentSheetWidget,
+  LazyPreviewDrawerWidget,
+  LazySettingsPanelWidget,
+} from "@/widgets/lazyPanels";
+import { UpdateNoticeWidget } from "@/widgets/updateNotice";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
+import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
+import { SessionWindowWidget } from "@/widgets/sessionWindow";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
 import type { ContextRailId } from "./widgets/shell/shellPanels";
@@ -51,6 +56,8 @@ function contextDrawerRail(
  * Signed out, the login screen covers all of it and the shell goes `inert`:
  * it stays mounted only because it owns the connection and the 3s login poll
  * that will close the gate — nothing of it is visible or reachable.
+ * Preview / Environment / Settings are code-split (`@/widgets/lazyPanels`):
+ * same props, chunks warmed after first paint.
  * @returns Full app chrome wired via useAppShellWidget + live session store.
  */
 export function App() {
@@ -122,11 +129,14 @@ export function App() {
               waitingPermission={
                 shell.session.status === "waiting_permission"
               }
-              onLogin={() => void shell.authLogin()}
+              envAction={gate.bannerAction}
               onDismissRestart={shell.clearRestartNotice}
             />
+            {/* Startup GitHub release notice. Own state; not shell chrome state. */}
+            <UpdateNoticeWidget />
             <TimelineWidget />
             <ComposerWidget />
+            <TerminalPanelWidget />
           </section>
 
           <ContextDrawerWidget
@@ -141,17 +151,17 @@ export function App() {
             onSelectTab={shell.selectContextTab}
             onLayoutChange={shell.setDrawerLayout}
           />
-          <PreviewDrawerWidget
+          <LazyPreviewDrawerWidget
             open={shell.previewRailOpen}
             effectiveLayout={shell.drawerEffectiveLayout}
             onClose={shell.closeContextRail}
           />
-          <EnvironmentSheetWidget
+          <LazyEnvironmentSheetWidget
             open={shell.activePanel === "environment"}
             onClose={shell.closePanel}
             initialPage={shell.environmentPage}
           />
-          <SettingsPanelWidget
+          <LazySettingsPanelWidget
             open={shell.activePanel === "settings"}
             onClose={shell.closePanel}
           />
@@ -163,13 +173,10 @@ export function App() {
       </div>
 
       {shell.session.pendingPermission ? <PermissionModalView /> : null}
-      {/* Signed-out gate — portaled to <body>, so the `inert` shell above it
-          cannot swallow the one control the user still needs. */}
-      <LoginGateView
-        open={gate.open}
-        busy={gate.busy}
-        onLogin={gate.onLogin}
-      />
+      {/* Onboarding / signed-out gate — portaled to <body>, so the `inert`
+          shell above it cannot swallow the controls the user still needs. */}
+      <LoginGateView {...gate.view} />
+      <SessionWindowWidget />
       <CommandPaletteWidget
         open={shell.paletteOpen}
         onClose={() => shell.setPaletteOpen(false)}

@@ -4,6 +4,7 @@
  */
 
 import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { OPEN_SESSION_WINDOW_EVENT } from "../../lib/sessionWindow";
 import {
   openExclusivePanel,
   toggleContextRail,
@@ -46,7 +47,7 @@ const ENV_PAGES = new Set<EnvironmentPageId>([
 ]);
 
 /**
- * Register ⌘K / ⌘N / ⌘, / ⌘\ and open-panel / open-rewind / open-palette events.
+ * Register ⌘K / ⌘N / ⌘⇧N / ⌘, / ⌘\ and open-panel / open-rewind / open-palette events.
  * @param args Setters and callbacks from the shell hook.
  */
 export function useShellChromeEvents(args: ShellChromeEventsArgs): void {
@@ -66,6 +67,12 @@ export function useShellChromeEvents(args: ShellChromeEventsArgs): void {
       if (meta && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
+        return;
+      }
+      if (meta && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        // Opens the session on the canvas. The widget no-ops on a blank draft.
+        window.dispatchEvent(new CustomEvent(OPEN_SESSION_WINDOW_EVENT));
         return;
       }
       if (meta && e.key.toLowerCase() === "n") {

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for Contents/Resources/bridge-go.
+
+  The bridge is a separate Mach-O signed before the .app bundle (inner
+  first). It listens on 127.0.0.1 for the UI WebSocket and dials out.
+  Hardened runtime does not block posix_spawn of another executable, so the
+  user's grok CLI (different team id, or unsigned) can still be started.
+  allow-jit / allow-unsigned-executable-memory cover the Go runtime's
+  executable mappings. disable-library-validation lets those mappings and
+  any helper dylibs load under a Developer ID signature.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+</dict>
+</plist>

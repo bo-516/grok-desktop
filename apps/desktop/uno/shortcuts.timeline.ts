@@ -79,6 +79,20 @@ export const timelineShortcuts: Record<string, string> = {
 
     /* One turn = activity rail + final answer; inter-turn gap is on .timeline. */
     "turn-block": "flex flex-col gap-3 w-full",
+    /*
+     * Settled (non-live) timeline rows only. The live row must not take this
+     * class: stick-to-bottom reads scrollHeight, and a skipped live turn would
+     * report the intrinsic estimate instead of the growing answer.
+     *
+     * content-visibility: auto skips layout and paint while the row is outside
+     * the scroller (the DOM stays, so find-in-page still sees the text).
+     * contain-intrinsic-block-size: auto 240px — 240px is only the cold
+     * estimate for a collapsed rail plus a short answer. The `auto` keyword
+     * remembers the last real block size, which is what keeps scroll anchoring
+     * stable after the row has been on screen once.
+     */
+    "timeline-settled":
+      "[content-visibility:auto] [contain-intrinsic-block-size:auto_240px]",
     /* Quiet vertical guide instead of stacked filled pills.
      * Max height tracks the viewport (50vh) so long tool/thought stacks do not
      * push the final answer off-screen; floor at 280px so short viewports still

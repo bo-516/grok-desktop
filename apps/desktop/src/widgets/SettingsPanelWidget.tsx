@@ -27,7 +27,12 @@ import {
   loadContextUsagePrefs,
   saveContextUsagePrefs,
 } from "../lib/contextUsagePrefs";
+import { readAppVersion } from "../lib/appVersion";
 import { applyTheme, loadTheme, type ThemeId } from "../lib/theme";
+import {
+  loadUpdateCheckPrefs,
+  setUpdateCheckEnabled,
+} from "../lib/updateCheckStorage";
 import {
   createDefaultSettingsDraft,
   isSettingsDraftDirty,
@@ -35,12 +40,14 @@ import {
 } from "../lib/settingsDraft";
 import { ConfirmDialogView } from "./ConfirmDialogView";
 import { SidePanelShell } from "./SidePanelShell";
+import { GrokCliSettingsSectionWidget } from "@/widgets/grokCli";
 import {
   SettingsAccountSectionView,
   SettingsAppearanceSectionView,
   SettingsCompatSectionView,
   SettingsSecuritySectionView,
   SettingsSpawnSectionView,
+  SettingsUpdatesSectionView,
 } from "./settings";
 
 /**
@@ -87,6 +94,12 @@ export function SettingsPanelWidget(props: {
   const [showWeeklyUsage, setShowWeeklyUsage] = useState(
     () => loadContextUsagePrefs().showWeeklyUsage,
   );
+  /** Startup GitHub release check. Instant; not part of the SPAWN dirty draft. */
+  const [updateChecks, setUpdateChecks] = useState(
+    () => loadUpdateCheckPrefs().enabled,
+  );
+  /** Product semver baked at build time. Stable for the life of the page. */
+  const appVersion = readAppVersion();
   const [discardOpen, setDiscardOpen] = useState(false);
   /*
    * Compatibility sources stay collapsed until asked for: ten toggles is the
@@ -145,6 +158,16 @@ export function SettingsPanelWidget(props: {
   const setWeeklyUsageVisible = useCallback((show: boolean) => {
     setShowWeeklyUsage(show);
     saveContextUsagePrefs({ showWeeklyUsage: show });
+  }, []);
+
+  /**
+   * Toggle the startup update check. Persists immediately and hides the
+   * banner when turned off (the notice widget listens for the storage event).
+   * @param enabled Next checkbox value.
+   */
+  const setUpdateChecksEnabled = useCallback((enabled: boolean) => {
+    setUpdateChecks(enabled);
+    setUpdateCheckEnabled(enabled);
   }, []);
 
   /**
@@ -289,6 +312,12 @@ export function SettingsPanelWidget(props: {
           onShowWeeklyUsageChange={setWeeklyUsageVisible}
         />
 
+        <SettingsUpdatesSectionView
+          currentVersion={appVersion}
+          enabled={updateChecks}
+          onEnabledChange={setUpdateChecksEnabled}
+        />
+
         <SettingsSecuritySectionView
           draft={draft}
           networkNote={networkNote}
@@ -298,6 +327,9 @@ export function SettingsPanelWidget(props: {
         />
 
         <SettingsSpawnSectionView draft={draft} onPatchDraft={patchDraft} />
+
+        {/* Custom grok binary path — saved on the bridge, not in the draft. */}
+        <GrokCliSettingsSectionWidget />
 
         <SettingsCompatSectionView
           draft={draft}

@@ -18,10 +18,25 @@ export { MentionTextView } from "./stateless/MentionTextView";
 export { PathLabelView } from "./stateless/PathLabelView";
 export type { PathLabelViewProps } from "./stateless/PathLabelView";
 export { useCodeHighlight } from "./useCodeHighlight";
+export {
+  CodeHighlightVisibilityContext,
+  CodeHighlightVisibilityProvider,
+} from "./codeHighlightVisibility";
+export type {
+  CodeHighlightVisibility,
+  CodeHighlightVisibilityProviderProps,
+} from "./codeHighlightVisibility";
 export { CodeLineView } from "./stateless/CodeLineView";
 export type { CodeLineViewProps } from "./stateless/CodeLineView";
 export { MarkdownCodeWidget } from "./MarkdownCodeWidget";
 export type { MarkdownCodeWidgetProps } from "./MarkdownCodeWidget";
+// Lazy-only: a value re-export of ./MathStreamdownView would put KaTeX back in
+// the startup chunk. Types are erased, so re-exporting them is free.
+export { LazyMathStreamdownView } from "./lazyMathStreamdown";
+export type {
+  MathStreamdownVariant,
+  MathStreamdownViewProps,
+} from "./MathStreamdownView";
 export { useCopyFeedback } from "./useCopyFeedback";
 export type { CopyFeedback } from "./useCopyFeedback";
 export { OverflowTextView } from "./OverflowTextView";

@@ -6,6 +6,10 @@
 #   bash scripts/build-release.sh windows    # Windows amd64 only
 #   VERSION=0.2.0 bash scripts/build-release.sh
 #
+# Signing is optional and off unless credentials are set. See
+# scripts/release-sign.sh and apps/shell/README.md (Code signing).
+# Without them the .app stays ad-hoc signed and the Windows exes stay unsigned.
+#
 # Each bundle ships two binaries: the Wails shell and the Go bridge it spawns.
 # The shell finds the bridge next to its own executable (Windows) or in
 # Contents/Resources (macOS) — see apps/shell/paths.go.
@@ -26,13 +30,27 @@ BUNDLE_ID="io.github.bo516.grokdesktop"
 
 TARGET="${1:-all}"
 VERSION="${VERSION:-$(node -p "require('$ROOT/package.json').version")}"
+# Vite reads VERSION when it bakes the UI. Export it before the frontend build.
+export VERSION
+
+# Semver token only: the value is interpolated into Go -X and Info.plist.
+if [[ ! "$VERSION" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+  echo "VERSION must be a semver token (no spaces), got: $VERSION" >&2
+  exit 1
+fi
 
 # -trimpath keeps the builder's home directory out of shipped binaries;
 # -s -w drops the symbol table and DWARF from public artifacts.
+# LDFLAGS_SHELL stamps the same version into the Wails shell (package main,
+# var appVersion). Do not pass that -X to bridge-go — its main has no such var.
 GOFLAGS_REL="-trimpath"
 LDFLAGS_REL="-s -w"
+LDFLAGS_SHELL="${LDFLAGS_REL} -X main.appVersion=${VERSION}"
 
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+
+# shellcheck source=release-sign.sh
+source "$ROOT/scripts/release-sign.sh"
 
 # --- frontend (platform independent, embedded into every shell binary) -------
 build_frontend() {
@@ -57,8 +75,8 @@ build_mac() {
   log "macOS shell (arm64 + amd64)"
   # CGO is required for WKWebView; clang cross-compiles the amd64 slice on Apple silicon.
   (cd "$ROOT/apps/shell" &&
-    GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $GOFLAGS_REL -ldflags "$LDFLAGS_REL" -o "$tmp/shell-arm64" . 2>/dev/null &&
-    GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $GOFLAGS_REL -ldflags "$LDFLAGS_REL" -o "$tmp/shell-amd64" . 2>/dev/null)
+    GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build $GOFLAGS_REL -ldflags "$LDFLAGS_SHELL" -o "$tmp/shell-arm64" . 2>/dev/null &&
+    GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build $GOFLAGS_REL -ldflags "$LDFLAGS_SHELL" -o "$tmp/shell-amd64" . 2>/dev/null)
 
   log "assembling $APP_NAME.app"
   rm -rf "$app"
@@ -91,15 +109,16 @@ build_mac() {
 PLIST
 
   # lipo strips the per-slice signature Go writes; arm64 refuses to launch unsigned.
-  log "ad-hoc signing (not notarized — users must clear quarantine)"
-  codesign --force --deep --sign - "$app"
-  codesign --verify --deep "$app"
+  # Ad-hoc when MACOS_SIGN_IDENTITY is unset; Developer ID (inner binary first)
+  # when it is set. Notarization runs after the zip exists.
+  sign_macos_app "$app"
 
   # Asset names stay unversioned so README can link
   # releases/latest/download/<name> forever.
   local zip="$OUT/Grok-Desktop-macos-universal.zip"
   rm -f "$zip"
   ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
+  notarize_macos_app "$app" "$zip"
   log "built $zip"
 }
 
@@ -116,7 +135,7 @@ build_windows() {
   # spawned with CREATE_NO_WINDOW (apps/shell/proc_windows.go).
   (cd "$ROOT/apps/shell" &&
     GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $GOFLAGS_REL \
-      -ldflags "$LDFLAGS_REL -H windowsgui" -o "$dir/grok-desktop.exe" .)
+      -ldflags "$LDFLAGS_SHELL -H windowsgui" -o "$dir/grok-desktop.exe" .)
   (cd "$ROOT/apps/bridge-go" &&
     GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $GOFLAGS_REL \
       -ldflags "$LDFLAGS_REL" -o "$dir/bridge-go.exe" ./cmd/bridge)
@@ -131,7 +150,12 @@ Grok Desktop — Windows
    https://developer.microsoft.com/microsoft-edge/webview2/
 
 Logs: %LOCALAPPDATA%\grok-desktop\logs
+
+Unsigned copies may show a Windows SmartScreen warning. A release built with
+WINDOWS_SIGN_PFX is Authenticode-signed and should not.
 TXT
+
+  sign_windows_files "$dir/grok-desktop.exe" "$dir/bridge-go.exe"
 
   local zip="$dir.zip"
   rm -f "$zip"

@@ -19,14 +19,8 @@ import type {
   isTurnLive as isTurnLiveFn,
   TimelineRenderUnitWithTurns,
 } from "@/lib/turnGrouping";
-import {
-  BlurText,
-  FadeContent,
-  ShinyText,
-} from "@/components/react-bits";
-import { TurnBlockWidget } from "./TurnBlockWidget";
-import { TurnStepView } from "./TurnStepView";
-import { UserMessageView } from "./UserMessageView";
+import { BlurText, FadeContent, ShinyText } from "@/components/react-bits";
+import { TimelineUnitRowWidget } from "./TimelineUnitRowWidget";
 
 export type TimelineViewProps = {
   timeline: TimelineItem[];
@@ -134,88 +128,27 @@ export function TimelineView(props: TimelineViewProps) {
         // History restored by a rail click paints instantly; only content that
         // arrives while this canvas is open earns the entrance transition.
         const seeded = seededUnitKeys.has(unitKey);
-        if (unit.type === "turn") {
-          const live = isTurnLive(units, unitIndex, status);
-          const answerId = unit.answer?.item.id;
-          const isLastAnswer =
-            answerId !== undefined &&
-            timeline[timeline.length - 1]?.id === answerId;
-          const answerShowCursor = status === "streaming" && isLastAnswer;
-          // One FadeContent per turn so rail repartition does not re-enter every step.
-          return (
-            <FadeContent
-              key={unitKey}
-              className="msg-agent-wrap"
-              durationMs={320}
-              immediate={seeded}
-            >
-              <TurnBlockWidget
-                unit={unit}
-                live={live}
-                sessionStatus={status}
-                toolCalls={toolCalls}
-                answerShowCursor={answerShowCursor}
-                compact={compact}
-                fallbackAnswer={
-                  unitIndex === wrapUpIndex ? wrapUpText : undefined
-                }
-              />
-            </FadeContent>
-          );
-        }
-        // User / error stay top-level; residual work units share TurnStepView.
-        if (unit.type === "item") {
-          const item = unit.item;
-          if (item.kind === "user") {
-            return (
-              <FadeContent key={unitKey} durationMs={320} immediate={seeded}>
-                <UserMessageView blocks={item.blocks} />
-              </FadeContent>
-            );
-          }
-          if (item.kind === "error") {
-            return (
-              <FadeContent
-                key={unitKey}
-                className="msg-agent-wrap"
-                immediate={seeded}
-              >
-                <div className="item-error" data-kind="error">
-                  {item.message}
-                </div>
-              </FadeContent>
-            );
-          }
-          // Residual agent / thought / tool outside a turn (fixtures / bypass).
-          return (
-            <FadeContent
-              key={unitKey}
-              className="msg-agent-wrap"
-              durationMs={320}
-              immediate={seeded}
-            >
-              <TurnStepView
-                child={unit}
-                sessionStatus={status}
-                toolCalls={toolCalls}
-              />
-            </FadeContent>
-          );
-        }
-        // Residual tool_group / thought_group: same step renderer as in-turn.
+        const live = unit.type === "turn" && isTurnLive(units, unitIndex, status);
+        const answerId = unit.type === "turn" ? unit.answer?.item.id : undefined;
+        const isLastAnswer =
+          answerId !== undefined &&
+          timeline[timeline.length - 1]?.id === answerId;
+        const answerShowCursor = status === "streaming" && isLastAnswer;
         return (
-          <FadeContent
+          <TimelineUnitRowWidget
             key={unitKey}
-            className="msg-agent-wrap"
-            durationMs={320}
-            immediate={seeded}
-          >
-            <TurnStepView
-              child={unit}
-              sessionStatus={status}
-              toolCalls={toolCalls}
-            />
-          </FadeContent>
+            unit={unit}
+            unitKey={unitKey}
+            live={live}
+            seeded={seeded}
+            sessionStatus={status}
+            toolCalls={toolCalls}
+            answerShowCursor={answerShowCursor}
+            compact={compact}
+            fallbackAnswer={
+              unitIndex === wrapUpIndex ? wrapUpText : undefined
+            }
+          />
         );
       })}
     </div>
