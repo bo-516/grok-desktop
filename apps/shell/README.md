@@ -141,6 +141,57 @@ Covers config resolution (`go` default, `node` rejected), free port + token gene
 - Bridge remains an external process in packaged builds so the UI can still be browser-debugged.
 - On exit (window close / SIGINT / SIGTERM / `OnShutdown`): SIGTERM process group, then SIGKILL after grace (Unix `Setpgid`). Windows: `TerminateJobObject` on a kill-on-close Job Object holding the bridge and everything it spawned; the job also reaps the tree if the shell itself dies.
 
+## Code signing
+
+`scripts/build-release.sh` signs only when credentials are present. With none set, macOS stays an ad-hoc `codesign --sign -` (users clear quarantine — see the repo README) and Windows stays unsigned (SmartScreen may warn). The script prints that notice. It does not prompt for a certificate.
+
+Product version for `Info.plist`, the shell binary (`-X main.appVersion`), and the desktop UI is the repo root `package.json` `version` field. `VERSION=` overrides it for one build. `apps/desktop/package.json` is not the product version.
+
+### macOS (Developer ID + notarization)
+
+Entitlements live in `build/darwin/entitlements.plist` (Wails / WKWebView shell) and `build/darwin/entitlements-bridge.plist` (bridge: localhost server, outbound network, spawn of the user's `grok` CLI). The bridge is signed first, then the `.app`, with the hardened runtime and a secure timestamp. `--deep` is not used on this path.
+
+Create a notarytool keychain profile once (Apple ID + app-specific password):
+
+```bash
+xcrun notarytool store-credentials "grok-desktop-notary" \
+  --apple-id "you@example.com" \
+  --team-id "TEAMID" \
+  --password "app-specific-password"
+```
+
+Then:
+
+```bash
+MACOS_SIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
+MACOS_NOTARY_KEYCHAIN_PROFILE="grok-desktop-notary" \
+bash scripts/build-release.sh mac
+```
+
+CI can skip the keychain and pass an App Store Connect API key. `APPLE_API_KEY` is the path to the `.p8` file, not the key contents. If both styles are set, the keychain profile wins.
+
+```bash
+MACOS_SIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
+APPLE_API_KEY="$HOME/private_keys/AuthKey_XXXX.p8" \
+APPLE_API_KEY_ID="XXXX" \
+APPLE_API_ISSUER="issuer-uuid" \
+bash scripts/build-release.sh mac
+```
+
+The script zips the signed app, runs `xcrun notarytool submit --wait`, staples the ticket, and re-zips so the download contains the staple. An identity with no notarization credentials still signs, then prints that Gatekeeper will warn until a ticket exists. Notarization credentials without `MACOS_SIGN_IDENTITY` abort.
+
+`RELEASE_SIGN_DRY_RUN=1` prints the `codesign` / `notarytool` / `stapler` lines and does not run them. Do not ship that zip.
+
+### Windows (Authenticode, optional)
+
+```bash
+WINDOWS_SIGN_PFX=/path/to/codesign.pfx \
+WINDOWS_SIGN_PFX_PASSWORD='secret' \
+bash scripts/build-release.sh windows
+```
+
+`signtool` (Windows SDK) is used when it is on `PATH`. Otherwise `osslsigncode` 2.x (`brew install osslsigncode` on a macOS cross-build), RFC3161 timestamp `http://timestamp.digicert.com`. Both `grok-desktop.exe` and `bridge-go.exe` are signed before the zip. A set `WINDOWS_SIGN_PFX` with neither tool, or a missing file, aborts. The password is passed on the tool command line (visible to local process listings).
+
 ## Env blockers / requirements
 
 | Need | Why |

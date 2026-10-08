@@ -13,6 +13,9 @@ fi
 mkdir -p bin
 # CGO required on darwin for WKWebView.
 export CGO_ENABLED="${CGO_ENABLED:-1}"
-go build -o bin/grok-desktop .
+# Same source of truth as scripts/build-release.sh: repo root package.json.
+# VERSION overrides it. The UI build reads the same value via Vite.
+VERSION="${VERSION:-$(node -p "require('$ROOT/package.json').version")}"
+go build -ldflags "-X main.appVersion=${VERSION}" -o bin/grok-desktop .
 echo "built: $SHELL_DIR/bin/grok-desktop"
 file bin/grok-desktop || true
