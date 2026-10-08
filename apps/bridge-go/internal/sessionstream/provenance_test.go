@@ -23,30 +23,25 @@ func TestClaimPrimaryRecordsKindAndStartID(t *testing.T) {
 	}
 }
 
-func TestLinkChildExplicitBeatsHostedAndKeepsPrimaryKind(t *testing.T) {
+func TestLinkChildRecordsParentAndKeepsPrimaryKind(t *testing.T) {
 	reg := sessionstream.NewRegistry(0)
-	// Child frames arrive through the root's process before the spawn notice.
-	reg.LinkChild("c1", "root", false)
-	if p, _ := reg.Lookup("c1"); p.Kind != sessionstream.KindChild || p.ParentSessionID != "root" {
-		t.Fatalf("hosted link = %+v", p)
-	}
-	// Nested: the intermediate child's subagent_spawned names the real parent.
-	reg.LinkChild("c1", "mid", true)
-	if p, _ := reg.Lookup("c1"); p.ParentSessionID != "mid" {
-		t.Fatalf("explicit link must win, got %+v", p)
-	}
-	// Later implicit links never undo an explicit one.
-	reg.LinkChild("c1", "root", false)
-	if p, _ := reg.Lookup("c1"); p.ParentSessionID != "mid" {
-		t.Fatalf("implicit link overrode explicit: %+v", p)
+	reg.LinkChild("c1", "mid")
+	if p, _ := reg.Lookup("c1"); p.Kind != sessionstream.KindChild || p.ParentSessionID != "mid" {
+		t.Fatalf("link = %+v", p)
 	}
 	// Opening the child on its own keeps the lineage.
 	reg.ClaimPrimary("c1", sessionstream.KindResumed, "")
 	if p, _ := reg.Lookup("c1"); p.Kind != sessionstream.KindResumed || p.ParentSessionID != "mid" {
 		t.Fatalf("resumed child = %+v", p)
 	}
-	reg.LinkChild("self", "self", true)
-	reg.LinkChild("", "p", true)
+	// A primary later announced as a child keeps its kind, gains lineage.
+	reg.ClaimPrimary("p2", sessionstream.KindStarted, "s")
+	reg.LinkChild("p2", "root")
+	if p, _ := reg.Lookup("p2"); p.Kind != sessionstream.KindStarted || p.ParentSessionID != "root" {
+		t.Fatalf("linked primary = %+v", p)
+	}
+	reg.LinkChild("self", "self")
+	reg.LinkChild("", "p")
 	if _, ok := reg.Lookup("self"); ok {
 		t.Fatal("self links are ignored")
 	}
@@ -55,7 +50,7 @@ func TestLinkChildExplicitBeatsHostedAndKeepsPrimaryKind(t *testing.T) {
 func TestAnnotateHydrateAlwaysLiveOnlyForChildren(t *testing.T) {
 	reg := sessionstream.NewRegistry(0)
 	reg.ClaimPrimary("p", sessionstream.KindStarted, "s-1")
-	reg.LinkChild("c", "p", true)
+	reg.LinkChild("c", "p")
 
 	live := map[string]any{}
 	reg.Annotate(live, "p", false)

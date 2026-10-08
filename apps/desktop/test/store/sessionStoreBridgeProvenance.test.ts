@@ -183,8 +183,8 @@ describe("applyBridgeProvenance", () => {
   });
 });
 
-describe("dispatch + store: child frames before subagent_spawned", () => {
-  it("route to childSessions directly — never pending, never the catalog", () => {
+describe("dispatch + store: announced child frames", () => {
+  it("an early unannounced frame is claimed once provenance arrives; none reach the catalog", () => {
     const store = makeStore();
     const dispatch = createLiveBridgeDispatch({
       handlers: {
@@ -209,11 +209,17 @@ describe("dispatch + store: child frames before subagent_spawned", () => {
         },
         epoch: "e1",
         seq,
-        provenance: { kind: "child", parentSessionId: PARENT },
+        // Frame 1 streams before the parent's subagent_spawned: no assertion.
+        ...(seq > 1
+          ? { provenance: { kind: "child" as const, parentSessionId: PARENT } }
+          : {}),
       });
+      if (seq === 1) {
+        assert.ok(store.get().pendingSessions[CHILD], "unproven id waits in pending");
+      }
     }
     const s = store.get();
-    assert.deepEqual(s.pendingSessions, {}, "no wire buffer to claim later");
+    assert.deepEqual(s.pendingSessions, {}, "claimed by the bridge assertion");
     assert.equal(s.childSessions[CHILD]?.lastAgentText, "k1 k2 k3 ");
     assert.equal(s.sessionProvenance[CHILD], "child");
     assert.equal(s.catalog.length, 0, "child never enters the rail catalog");

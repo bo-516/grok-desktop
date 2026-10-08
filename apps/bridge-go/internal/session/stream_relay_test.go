@@ -88,18 +88,23 @@ func TestRuntimeStreamClaimsResumedForLoadTarget(t *testing.T) {
 	}
 }
 
-func TestRuntimeStreamLinksHostedAndSpawnedChildren(t *testing.T) {
+func TestRuntimeStreamLinksOnlyAnnouncedChildren(t *testing.T) {
 	rig := newRelayRig(t, true)
 	rs := newRuntimeStream(rig.deps, "", "")
 	rs.notePrimary("parent")
 
-	// Explicit spawn notice on the parent stream.
+	// A frame streaming through this process under another id (no spawn
+	// notice) is not asserted as a child — a fork could look the same.
+	rs.noteUpdate(map[string]any{"sessionUpdate": "agent_message_chunk"}, "kid-a")
+	rs.relay("kid-a", map[string]any{"type": "session_update", "sessionId": "kid-a"}, false)
+	if _, ok := rig.last(t)["provenance"]; ok {
+		t.Fatal("unannounced id must not carry provenance")
+	}
+
+	// Explicit spawn notice on the parent stream links it.
 	spawn := map[string]any{"sessionUpdate": "subagent_spawned", "subagent_id": "kid-a"}
 	rs.noteUpdate(spawn, "parent")
-	// Out-of-order child frame (no notice yet) — hosted by the primary.
-	rs.noteUpdate(map[string]any{"sessionUpdate": "agent_message_chunk"}, "kid-b")
-	msg := map[string]any{"type": "session_update", "sessionId": "kid-b"}
-	rs.relay("kid-b", msg, false)
+	rs.relay("kid-a", map[string]any{"type": "session_update", "sessionId": "kid-a"}, false)
 
 	reg := rig.deps.Streams.Provenance
 	if p, _ := reg.Lookup("kid-a"); p.Kind != sessionstream.KindChild || p.ParentSessionID != "parent" {

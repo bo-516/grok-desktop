@@ -14,8 +14,10 @@ const (
 	// KindResumed: session/load of an existing id (client resume, restart,
 	// crash recovery).
 	KindResumed Kind = "resumed"
-	// KindChild: the id streamed through another session's agent process
-	// (a subagent child); ParentSessionID names that session.
+	// KindChild: a subagent_spawned / subagent_finished update on another
+	// session's stream named this id as its child; ParentSessionID is that
+	// session. Merely streaming through another session's process is NOT
+	// enough (a fork created there could do the same), so it is not used.
 	KindChild Kind = "child"
 )
 
@@ -38,9 +40,6 @@ type Provenance struct {
 // registryEntry is one remembered session.
 type registryEntry struct {
 	prov Provenance
-	// explicitParent is true when the parent came from a subagent_spawned /
-	// subagent_finished link rather than from "streamed through host X".
-	explicitParent bool
 }
 
 // Registry remembers the provenance of session ids seen by this bridge.
@@ -95,23 +94,19 @@ func (r *Registry) ClaimPrimary(sessionID string, kind Kind, startID string) {
 	e.prov.StartID = startID
 }
 
-// LinkChild records that childID belongs under parentID.
-// explicit links (from a subagent_spawned / subagent_finished update) replace
-// an implicit "hosted by" link; an implicit link never replaces an existing
-// one. A primary claim keeps its kind — only the lineage is added.
+// LinkChild records that childID belongs under parentID, from a
+// subagent_spawned / subagent_finished update parentID's stream carried
+// (the latest link wins; a child is only ever announced by its own parent).
+// A primary claim keeps its kind — only the lineage is added.
 // No-op when either id is empty or they are equal.
-func (r *Registry) LinkChild(childID, parentID string, explicit bool) {
+func (r *Registry) LinkChild(childID, parentID string) {
 	if childID == "" || parentID == "" || childID == parentID {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e := r.entryLocked(childID)
-	if e.prov.ParentSessionID != "" && (e.explicitParent || !explicit) {
-		return
-	}
 	e.prov.ParentSessionID = parentID
-	e.explicitParent = explicit
 	if e.prov.Kind == "" {
 		e.prov.Kind = KindChild
 	}

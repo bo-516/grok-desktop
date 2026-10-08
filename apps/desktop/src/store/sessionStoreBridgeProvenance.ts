@@ -3,9 +3,10 @@
  * truth"). Called by the dispatcher before the frame that carried the
  * provenance is admitted, so applyInboundSession routes it by fact:
  *
- * - child (parentSessionId set): the id streamed through another session's
- *   process → child role + `child` stamp, and any wire-only pending buffer
- *   for it moves to childSessions. No sessions_list round trip needed.
+ * - child (parentSessionId set): the parent's stream announced the id
+ *   (subagent_spawned / _finished) → child role + `child` stamp, and any
+ *   wire-only pending buffer for it moves to childSessions. No reliance on
+ *   the parent's reduced subagent cards or a sessions_list round trip.
  * - own start (startId matched this window's `start`): `local` stamp, and a
  *   buffer that raced in before is re-admitted. Replaces the info-text match.
  * - own resume: `resumed` fill-in (navigation normally stamps it first).

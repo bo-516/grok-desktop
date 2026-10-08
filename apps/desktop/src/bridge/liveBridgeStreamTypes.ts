@@ -14,7 +14,10 @@ export type BridgeProvenanceKind = "started" | "resumed" | "child";
 
 /** `provenance` field on hydrate frames and on child live frames. */
 export type BridgeProvenance = {
-  /** started = session/new for a client start; resumed = session/load; child = hosted subagent. */
+  /**
+   * started = session/new for a client start; resumed = session/load;
+   * child = announced by its parent's subagent_spawned / _finished update.
+   */
   kind: BridgeProvenanceKind;
   /** Parent chat for subagent children (lineage is kept if a child is resumed). */
   parentSessionId?: string;

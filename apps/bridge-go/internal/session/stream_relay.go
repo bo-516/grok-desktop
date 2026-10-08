@@ -22,10 +22,8 @@ type runtimeStream struct {
 	resumeID string
 	// startID is the client `start` request id echoed in provenance.
 	startID string
-	// mu guards primary and bound.
+	// mu guards bound.
 	mu sync.Mutex
-	// primary is the runtime's own session id once known.
-	primary string
 	// bound is the primary id whose provenance/epoch binding was recorded.
 	bound string
 }
@@ -37,8 +35,6 @@ func newRuntimeStream(deps LifecycleDeps, resumeID, startID string) *runtimeStre
 	if deps.Streams != nil {
 		rs.epoch = deps.Streams.NewEpoch()
 	}
-	// session/load frames (replay_begin) can precede the first state.
-	rs.primary = resumeID
 	return rs
 }
 
@@ -55,7 +51,6 @@ func (rs *runtimeStream) notePrimary(sessionID string) {
 		rs.mu.Unlock()
 		return
 	}
-	rs.primary = sessionID
 	rs.bound = sessionID
 	rs.mu.Unlock()
 	if rs.deps.Streams == nil {
@@ -71,28 +66,17 @@ func (rs *runtimeStream) notePrimary(sessionID string) {
 	rs.deps.Streams.BindPrimary(sessionID, rs.epoch)
 }
 
-// primaryID returns the runtime's own session id ("" before the handshake
-// of a session/new has produced one).
-func (rs *runtimeStream) primaryID() string {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	return rs.primary
-}
-
-// noteUpdate records child links before a session_update is relayed:
-// a frame for an id other than the runtime's primary is a child hosted by
-// the primary, and a subagent_spawned / subagent_finished update names an
-// explicit child of the session it arrived on.
+// noteUpdate records child links before a session_update is relayed: a
+// subagent_spawned / subagent_finished update names a child of the session
+// it arrived on (nested children are named by their own parent's stream).
+// A frame that merely streams through this runtime under another id is not
+// treated as a child — a session forked in this process could look the same.
 func (rs *runtimeStream) noteUpdate(update map[string]any, sessionID string) {
 	if rs.deps.Streams == nil || sessionID == "" {
 		return
 	}
-	reg := rs.deps.Streams.Provenance
-	if primary := rs.primaryID(); primary != "" && sessionID != primary {
-		reg.LinkChild(sessionID, primary, false)
-	}
 	if child := sessionstream.SubagentChildID(update); child != "" {
-		reg.LinkChild(child, sessionID, true)
+		rs.deps.Streams.Provenance.LinkChild(child, sessionID)
 	}
 }
 
