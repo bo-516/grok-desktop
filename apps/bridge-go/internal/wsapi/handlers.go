@@ -12,6 +12,7 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/reverse"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/session"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/userterm"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/pkg/workspacepath"
 )
 
@@ -25,6 +26,9 @@ type Handlers struct {
 	SessionSeeds  sync.Map
 	Send          func(ws *websocket.Conn, msg map[string]any)
 	Broadcast     func(msg map[string]any)
+	// Terminals owns the user's interactive PTY terminals (terminal_* messages);
+	// killed on socket disconnect, close_session and Server.Close.
+	Terminals *userterm.Manager
 }
 
 // NewHandlers constructs bridge handlers bound to pool and I/O closures.
@@ -36,7 +40,7 @@ func NewHandlers(
 	send func(ws *websocket.Conn, msg map[string]any),
 	broadcast func(msg map[string]any),
 ) *Handlers {
-	return &Handlers{
+	h := &Handlers{
 		Pool:          p,
 		AlwaysApprove: alwaysApprove,
 		DefaultCwd:    defaultCwd,
@@ -47,6 +51,8 @@ func NewHandlers(
 		Send:      send,
 		Broadcast: broadcast,
 	}
+	h.Terminals = newTerminalManager(h)
+	return h
 }
 
 // BroadcastPool sends the current pool summary to all clients.
@@ -143,6 +149,8 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 		closed := h.Pool.Close(sessionID)
 		// Drop crash-recovery seed so long-running bridges do not retain timelines forever.
 		h.SessionSeeds.Delete(sessionID)
+		// User terminals opened for this session die with it.
+		h.Terminals.CloseSession(sessionID)
 		if h.State.FocusedSessionID == sessionID {
 			list := h.Pool.List()
 			h.State.FocusedSessionID = ""
@@ -223,6 +231,11 @@ func (h *Handlers) dispatch(ws *websocket.Conn, typ string, msg map[string]any) 
 	// CLI channel: one-shot grok + disk helpers (see cli.go / cli_commands.go).
 	case "cli":
 		return h.handleCli(ws, msg)
+
+	// Integrated terminal panel: PTY-backed user shells (see terminal.go).
+	case "terminal_create", "terminal_input", "terminal_resize",
+		"terminal_ack", "terminal_kill", "terminal_list":
+		return h.handleTerminal(ws, typ, msg)
 
 	default:
 		if typ == "" {

@@ -128,8 +128,10 @@ func (s *Server) BoundPort() int {
 	return s.listener.Addr().(*net.TCPAddr).Port
 }
 
-// Close shuts down the HTTP server and all child agent processes.
+// Close shuts down the HTTP server, all user terminals (bounded wait for the
+// shells to exit) and all child agent processes.
 func (s *Server) Close() error {
+	s.handlers.Terminals.CloseAll()
 	s.pool.DisposeAll()
 	if s.httpSrv != nil {
 		return s.httpSrv.Close()
@@ -251,6 +253,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.mu.Lock()
 			delete(s.sockets, conn)
 			s.mu.Unlock()
+			// Terminals stream only to their creator; nobody can drive them now.
+			s.handlers.Terminals.CloseOwner(conn)
 			_ = conn.Close()
 		}()
 		for {
