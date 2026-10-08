@@ -11,9 +11,13 @@
 //     error}. mode is one of all / conversation_only / code_only / files_only.
 //
 // The bridge only uses mode `files_only` (the conversation is kept). Without
-// force, grok-build refuses to touch anything when a file was changed outside
-// the agent since its last edit and reports the conflicts; with force it
-// overwrites them. No parallel checkpoint store is kept here.
+// force, grok-build never writes: it answers success=false with the files it
+// would restore (clean_files) and those changed outside the agent since its
+// last edit (conflicts, plus an error asking to confirm). With force it
+// applies the restore and overwrites conflicts. Execute treats a non-force
+// answer without conflicts as that confirmation gate and applies at once —
+// the user already confirmed the file list in the desktop dialog — so only
+// outside edits need the explicit force. No parallel checkpoint store is kept.
 //
 // One gap is filled on the bridge side: when the client serves `fs/*`
 // (as this bridge does), grok-build restores modified files through
@@ -119,8 +123,10 @@ func ListPoints(req RequestFunc, sessionID string) ([]Point, error) {
 
 // Execute restores files to the state right before prompt TargetPromptIndex
 // (undoing that turn and every later one) and completes deletions of files
-// those turns created. A refusal (conflicts without force) comes back as a
-// Result with Success false — not as an error — so the caller can show it.
+// those turns created. Without Force, a gate answer with no conflicts is
+// re-sent with force (see the package doc); a refusal with conflicts comes
+// back as a Result with Success false — not as an error — so the caller can
+// show it and ask before forcing.
 // @param req Extension request sender for the session.
 // @param opts Session, workspace, checkpoint folder, target and force flag.
 // @returns Normalized result; error only for bad input or transport failures.
@@ -135,14 +141,14 @@ func Execute(req RequestFunc, opts ExecuteOptions) (Result, error) {
 		return Result{}, fmt.Errorf("invalid targetPromptIndex %d", opts.TargetPromptIndex)
 	}
 	absent, shimErr := absentForOptions(opts)
-	raw, err := req("_x.ai/rewind/execute", map[string]any{
-		"sessionId":         opts.SessionID,
-		"targetPromptIndex": opts.TargetPromptIndex,
-		"mode":              Mode,
-		"force":             opts.Force,
-	})
+	raw, err := sendExecute(req, opts, opts.Force)
 	if err != nil {
-		return Result{}, fmt.Errorf("rewind: %w", err)
+		return Result{}, err
+	}
+	if !opts.Force && isConfirmGate(raw) {
+		if raw, err = sendExecute(req, opts, true); err != nil {
+			return Result{}, err
+		}
 	}
 	res := normalizeResult(raw, opts.TargetPromptIndex)
 	if !res.Success {
@@ -154,6 +160,37 @@ func Execute(req RequestFunc, opts ExecuteOptions) (Result, error) {
 	}
 	res.DeletedFiles, res.Warnings = removeCreatedFiles(opts.Cwd, res.RevertedFiles, absent, res.Warnings)
 	return res, nil
+}
+
+// sendExecute sends one `_x.ai/rewind/execute` request.
+// @param req Extension request sender.
+// @param opts Session and target.
+// @param force Value of the force flag for this request.
+// @returns Raw result, or the wrapped transport error.
+func sendExecute(req RequestFunc, opts ExecuteOptions, force bool) (any, error) {
+	raw, err := req("_x.ai/rewind/execute", map[string]any{
+		"sessionId":         opts.SessionID,
+		"targetPromptIndex": opts.TargetPromptIndex,
+		"mode":              Mode,
+		"force":             force,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("rewind: %w", err)
+	}
+	return raw, nil
+}
+
+// isConfirmGate reports grok-build's non-force answer that only asks for
+// confirmation: not applied, no conflicts, no error text, something to restore.
+// @param raw Raw execute result.
+// @returns True when re-sending with force overwrites nothing outside the agent.
+func isConfirmGate(raw any) bool {
+	m, ok := raw.(map[string]any)
+	if !ok || toBool(m["success"]) || toString(m["error"]) != "" {
+		return false
+	}
+	conflicts, _ := m["conflicts"].([]any)
+	return len(conflicts) == 0 && len(toStrings(pick(m, "clean_files", "cleanFiles"))) > 0
 }
 
 // absentForOptions loads the created-by-the-turns path set when the shim is

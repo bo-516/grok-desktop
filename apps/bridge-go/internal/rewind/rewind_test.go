@@ -164,6 +164,36 @@ func TestExecuteRefusalTouchesNothing(t *testing.T) {
 	}
 }
 
+// grok-build's non-force answer without conflicts only asks for confirmation;
+// Execute re-sends with force and applies (observed live with grok 1.0.46).
+func TestExecuteAppliesThroughConfirmGate(t *testing.T) {
+	ws := t.TempDir()
+	sessionDir := t.TempDir()
+	writeFile(t, filepath.Join(sessionDir, CheckpointFile), checkpointLog)
+	writeFile(t, filepath.Join(ws, "a.txt"), "new\n")
+	forces := []any{}
+	req := func(method string, params map[string]any) (any, error) {
+		forces = append(forces, params["force"])
+		if params["force"] == true {
+			return map[string]any{"success": true, "reverted_files": []any{"a.txt", "b.txt"}}, nil
+		}
+		return map[string]any{"success": false, "clean_files": []any{"a.txt", "b.txt"}, "conflicts": []any{}, "error": nil}, nil
+	}
+	res, err := Execute(req, ExecuteOptions{SessionID: "s1", Cwd: ws, SessionDir: sessionDir, TargetPromptIndex: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(forces, []any{false, true}) {
+		t.Fatalf("force sequence = %v", forces)
+	}
+	if !res.Success || !reflect.DeepEqual(res.DeletedFiles, []string{"a.txt"}) || exists(filepath.Join(ws, "a.txt")) {
+		t.Fatalf("result = %+v", res)
+	}
+	if isConfirmGate(map[string]any{"success": false, "clean_files": []any{}}) {
+		t.Fatal("nothing to restore is not a gate")
+	}
+}
+
 func TestExecuteGuardsWorkspace(t *testing.T) {
 	parent := t.TempDir()
 	ws := filepath.Join(parent, "ws")
