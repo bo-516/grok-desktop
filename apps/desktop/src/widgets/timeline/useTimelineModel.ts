@@ -3,12 +3,13 @@
  * inspector. The only production UI path that builds render units.
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { SessionState, ToolCallCard } from "@grok-desktop/acp-core";
 import { resolveGoalWrapUp } from "@/lib/goalWrapUp";
 import { timelineContentKey } from "@/lib/timelineContentKey";
 import { buildTimelineRenderUnits } from "@/lib/timelinePipeline";
-import { isTurnLive } from "@/lib/turnGrouping";
+import { reuseTimelineRenderUnits } from "@/lib/timelineRenderReuse";
+import { isTurnLive, type TimelineRenderUnitWithTurns } from "@/lib/turnGrouping";
 import { useTimelineEntranceBaseline } from "./useTimelineEntranceBaseline";
 import { useTimelineStickToBottom } from "./useTimelineStickToBottom";
 
@@ -52,10 +53,19 @@ export function useTimelineModel(args: UseTimelineModelArgs) {
   /** Worker wrap-up length so stick-to-bottom follows a late last_event_detail. */
   const wrapUpSig = goal?.lastEventDetail ?? "";
 
-  const units = useMemo(
-    () => buildTimelineRenderUnits(timeline, toolCalls),
-    [timeline, toolCalls],
-  );
+  /**
+   * Last paint's units. Written during render (same reason as the entrance
+   * baseline): the next streaming chunk must reuse these wrappers, and an
+   * effect would run too late for a chunk flushed in the same commit.
+   * Idempotent under strict-mode double render — reuse of reuse is a no-op.
+   */
+  const previousUnitsRef = useRef<TimelineRenderUnitWithTurns[] | null>(null);
+  const units = useMemo(() => {
+    const built = buildTimelineRenderUnits(timeline, toolCalls);
+    const stable = reuseTimelineRenderUnits(previousUnitsRef.current, built);
+    previousUnitsRef.current = stable;
+    return stable;
+  }, [timeline, toolCalls]);
   const wrapUp = useMemo(
     () => resolveGoalWrapUp(units, goal?.lastEventDetail),
     [units, goal?.lastEventDetail],

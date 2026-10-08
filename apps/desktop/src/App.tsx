@@ -20,8 +20,11 @@ import {
   LazyPreviewDrawerWidget,
   LazySettingsPanelWidget,
 } from "@/widgets/lazyPanels";
+import { UpdateNoticeWidget } from "@/widgets/updateNotice";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
+import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
+import { SessionWindowWidget } from "@/widgets/sessionWindow";
 import { buildConfirmPrompt } from "./lib/confirmAction";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
 import type { ContextRailId } from "./widgets/shell/shellPanels";
@@ -129,8 +132,11 @@ export function App() {
               envAction={gate.bannerAction}
               onDismissRestart={shell.clearRestartNotice}
             />
+            {/* Startup GitHub release notice. Own state; not shell chrome state. */}
+            <UpdateNoticeWidget />
             <TimelineWidget />
             <ComposerWidget />
+            <TerminalPanelWidget />
           </section>
 
           <ContextDrawerWidget
@@ -170,6 +176,7 @@ export function App() {
       {/* Onboarding / signed-out gate — portaled to <body>, so the `inert`
           shell above it cannot swallow the controls the user still needs. */}
       <LoginGateView {...gate.view} />
+      <SessionWindowWidget />
       <CommandPaletteWidget
         open={shell.paletteOpen}
         onClose={() => shell.setPaletteOpen(false)}

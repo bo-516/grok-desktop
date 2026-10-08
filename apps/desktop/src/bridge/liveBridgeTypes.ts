@@ -13,6 +13,10 @@ import type {
   SessionUpdate,
 } from "@grok-desktop/acp-core";
 import type {
+  LiveBridgeTerminal,
+  TerminalServerMsg,
+} from "./liveBridgeTerminalTypes";
+import type {
   GrokFailureKind,
   GrokPathSource,
   GrokSetupApi,
@@ -221,7 +225,9 @@ export type BridgeServerMsg =
       availableModels?: AvailableModel[];
       configOptions?: unknown[];
       error?: string;
-    };
+    }
+  /** Integrated terminal frames (see liveBridgeTerminalTypes). */
+  | TerminalServerMsg;
 
 /**
  * Correlated reply for `read_model_catalog`.
@@ -393,6 +399,8 @@ export type LiveBridgeHandle = {
    * @param cwd Optional workspace passed to the probe child.
    */
   readModelCatalog: (cwd?: string) => Promise<ModelCatalogReply>;
+  /** Integrated terminal panel: PTY shells owned by this socket. */
+  terminal: LiveBridgeTerminal;
   /** grok CLI onboarding: installer / update runs and the custom grok path. */
   grokSetup: GrokSetupApi;
   close: () => void;
