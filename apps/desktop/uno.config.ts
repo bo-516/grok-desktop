@@ -124,6 +124,7 @@ export default defineConfig({
     "uno/shortcuts.code.ts",
     "uno/shortcuts.doc.ts",
     "uno/shortcuts.git.ts",
+    "uno/shortcuts.review.ts",
   ],
   /**
    * Colon only. UnoCSS also accepts `-` as a variant separator by default, so

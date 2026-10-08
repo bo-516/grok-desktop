@@ -73,6 +73,20 @@ export function promptAnchors(units: readonly TimelineRenderUnitWithTurns[]): Pr
 }
 
 /**
+ * promptAnchors over a raw session timeline (groups it with the same
+ * pipeline as the timeline widget, so turn ids match TurnUnit.id).
+ * @param timeline Session timeline.
+ * @param toolCalls Session tool cards (tool grouping needs their kinds).
+ * @returns Anchors (one per user item).
+ */
+export function promptAnchorsForTimeline(
+  timeline: TimelineItem[],
+  toolCalls: Record<string, ToolCallCard | undefined>,
+): PromptAnchor[] {
+  return promptAnchors(buildTimelineRenderUnits(timeline, toolCalls));
+}
+
+/**
  * Normalize text for preview comparison: drop a trailing ellipsis and
  * collapse whitespace (grok-build flattens newlines in previews).
  * @param s Prompt or preview text.

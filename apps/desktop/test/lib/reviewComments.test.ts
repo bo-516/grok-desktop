@@ -42,7 +42,7 @@ function memoryStorage(): Storage {
   };
 }
 
-const oldText = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+const oldText = `${Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n")}\n`;
 const newText = oldText.replace("line 5\n", "line five\n").replace("line 25\n", "");
 const fileDiff = buildFileDiff(oldText, newText);
 const rows = fullDiffRows(fileDiff, oldText.split("\n"), newText.split("\n"));
@@ -176,7 +176,7 @@ describe("review comment storage", () => {
     assert.deepEqual(loadReviewComments("s1", storage), [comment]);
     assert.deepEqual(loadReviewComments("s2", storage), []);
     saveReviewComments("s1", [], storage);
-    assert.equal(storage.getItem(REVIEW_COMMENTS_KEY_PREFIX + "s1"), null);
+    assert.equal(storage.getItem(`${REVIEW_COMMENTS_KEY_PREFIX}s1`), null);
     saveReviewComments("", [comment], storage);
     assert.equal(storage.length, 0);
   });

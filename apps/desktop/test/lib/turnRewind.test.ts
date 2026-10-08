@@ -14,7 +14,7 @@ import {
   matchRewindPoint,
   normalizePromptText,
   previewMatches,
-  promptAnchors,
+  promptAnchorsForTimeline,
   rewindFilePlan,
   type RewindPoint,
 } from "@/lib/turnRewind";
@@ -91,7 +91,7 @@ describe("matchRewindPoint", () => {
     ["third", []],
     ["again", ["t3"]],
   ]);
-  const anchors = promptAnchors(buildTimelineRenderUnits(timeline, toolCalls));
+  const anchors = promptAnchorsForTimeline(timeline, toolCalls);
 
   it("pairs every prompt with the turn after it", () => {
     assert.equal(anchors.length, 4);

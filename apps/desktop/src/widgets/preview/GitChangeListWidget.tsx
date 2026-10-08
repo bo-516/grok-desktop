@@ -12,6 +12,8 @@ import { toPathDisplay } from "@/lib/pathDisplay";
 import { usePreviewStore } from "@/store/previewStore";
 import { useSessionStore } from "@/store/sessionStore";
 import { GitActionBarWidget } from "@/widgets/git";
+import { ReviewTrayView, useReviewCommentsWidget } from "@/widgets/review";
+import { TurnRewindWidget } from "@/widgets/turnRewind";
 import { GitChangeFileWidget } from "./GitChangeFileWidget";
 import { GitChangeListView, GitChangeScopeView } from "./GitChangeListView";
 import { useDiffListChrome } from "./useDiffListChrome";
@@ -37,12 +39,16 @@ function joinRoot(root: string, path: string): string {
 }
 
 /**
- * Git change list with action bar.
+ * Git change list with action bar, line-comment review tray and (for turn
+ * targets) the "Restore" trigger beside the turn filter.
  * @param props Changeset target.
  * @returns List view.
  */
 export function GitChangeListWidget(props: GitChangeListWidgetProps) {
   const list = useGitChangeListWidget(props.target);
+  /** Session review comments + gutter selection (sinks here, not the store). */
+  const review = useReviewCommentsWidget();
+  const turnId = props.target.scope === "turn" ? props.target.turnId : "";
   const openPreview = usePreviewStore((s) => s.openPreview);
   /** Chat title for the PR prefill (live title wins, like the top nav). */
   const sessionTitle = useSessionStore((s) => titleFromSessionState(s.session));
@@ -67,9 +73,10 @@ export function GitChangeListWidget(props: GitChangeListWidgetProps) {
         onViewPrefsChange={chrome.onPrefsReplace}
         onLoad={list.loadFile}
         onOpenFile={onOpenFile}
+        review={review}
       />
     ),
-    [root, chrome.viewPrefs, chrome.onPrefsReplace, list.loadFile, onOpenFile],
+    [root, chrome.viewPrefs, chrome.onPrefsReplace, list.loadFile, onOpenFile, review],
   );
 
   return (
@@ -85,8 +92,20 @@ export function GitChangeListWidget(props: GitChangeListWidgetProps) {
               turnFilter={list.turnFilter}
               onModeChange={list.setMode}
               onFilterChange={list.setFilterOn}
+              turnAction={turnId ? <TurnRewindWidget turnId={turnId} variant="filter" label="Restore before this turn" /> : null}
             />
           }
+        />
+      }
+      reviewTray={
+        <ReviewTrayView
+          comments={review.comments}
+          sending={review.sending}
+          turnBusy={review.turnBusy}
+          notice={review.notice}
+          onRemove={review.onRemove}
+          onClear={review.onClear}
+          onSend={review.onSend}
         />
       }
       files={list.files}

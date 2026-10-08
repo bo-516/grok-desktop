@@ -25,6 +25,7 @@ import {
 } from "@/lib/turnLabel";
 import { usePreviewStore } from "@/store/previewStore";
 import { CollapsibleStepView } from "@/widgets/shared";
+import { TurnRewindWidget } from "@/widgets/turnRewind";
 import { TurnActivityRailView } from "./TurnActivityRailView";
 import { TurnAnswerView } from "./TurnAnswerView";
 import { TurnChangeSummaryView } from "./TurnChangeSummaryView";
@@ -151,21 +152,28 @@ export function TurnBlockWidget(props: TurnBlockWidgetProps) {
      */
   }, [live, unit.activity, unit.totalMs]);
 
-  /** Change list always opens the preview drawer (never expands in-panel). */
+  /**
+   * Change list always opens the preview drawer (never expands in-panel).
+   * Finished turns also offer "Restore" (grok-build rewind to this turn's
+   * start); the live turn does not — its checkpoint is still being written.
+   */
   const changeSummary =
     changeSet.fileCount > 0 ? (
-      <TurnChangeSummaryView
-        changeSet={changeSet}
-        onOpen={() =>
-          openPreview({
-            kind: "changeset",
-            scope: "turn",
-            turnId: unit.id,
-            // Capture ids at click time — drawer must not re-group turns.
-            toolCallIds: collectToolCallIdsFromTurn(unit),
-          })
-        }
-      />
+      <div className="turn-change-row">
+        <TurnChangeSummaryView
+          changeSet={changeSet}
+          onOpen={() =>
+            openPreview({
+              kind: "changeset",
+              scope: "turn",
+              turnId: unit.id,
+              // Capture ids at click time — drawer must not re-group turns.
+              toolCallIds: collectToolCallIdsFromTurn(unit),
+            })
+          }
+        />
+        {live || compact ? null : <TurnRewindWidget turnId={unit.id} variant="summary" />}
+      </div>
     ) : null;
   /** Transcript trailing answer; empty when the turn ended on tools. */
   const answerText = unit.answer?.item.text ?? "";
