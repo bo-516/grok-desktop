@@ -115,6 +115,18 @@ describe("catalog churn reductions", () => {
       },
     ];
     assert.notEqual(poolEntriesFingerprint(e1), poolEntriesFingerprint(e3));
+    // A worktree that arrives on a later frame must not be dropped.
+    const withTree = [
+      {
+        ...e1[0]!,
+        worktree: {
+          path: "/wt",
+          branch: "feat",
+          sourceRepo: "/proj",
+        },
+      },
+    ];
+    assert.notEqual(poolEntriesFingerprint(e1), poolEntriesFingerprint(withTree));
   });
 
   it("poolHasStreaming and adaptive intervals", () => {

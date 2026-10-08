@@ -66,7 +66,7 @@ export async function openExternalUrl(raw: string): Promise<boolean> {
  */
 async function tryWailsOpenUrl(url: string): Promise<boolean> {
   // Skip the round-trip outside wails:// (and similar) origins.
-  if (!looksLikeWailsHost()) {
+  if (!isWailsShellHost()) {
     return false;
   }
   try {
@@ -87,6 +87,16 @@ async function tryWailsOpenUrl(url: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether this page is the Wails asset host (wails:// or wails.localhost).
+ * Vite (`http://localhost`) returns false so session windows use window.open
+ * and external links skip the runtime round-trip.
+ * @returns True when `/wails/runtime` and the shell asset endpoints exist.
+ */
+export function isWailsShellHost(): boolean {
+  return looksLikeWailsHost();
 }
 
 /**

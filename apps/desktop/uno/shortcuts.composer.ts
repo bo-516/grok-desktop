@@ -29,6 +29,16 @@ export const composerShortcuts: Record<string, string> = {
      */
     "composer-queue":
       "flex flex-col gap-1.5 m-0 mb-2 mx-1.5 p-0 list-none",
+    /*
+     * New-chat worktree option, above the input card. Hidden by the widget
+     * when it does not apply, so the margin only exists while it is mounted.
+     */
+    "worktree-opt":
+      "flex flex-col gap-2 mb-2 mx-1.5 px-3 py-2 rounded-10px border border-line bg-composer",
+    "worktree-opt-fields": "grid grid-cols-2 gap-2",
+    "worktree-opt-input":
+      "h-8 min-w-0 w-full rounded-8px border border-line bg-timeline px-2 text-12px text-fg",
+    "worktree-opt-error": "m-0 text-11px leading-4 text-fg-muted",
     "composer-queue-row":
       "flex items-center gap-2 min-w-0 px-2.5 py-1.75 rounded-10px border border-line-queue bg-composer-queue",
     /* 1-based enqueue order (1 drains next). Decorative — row aria-label speaks it. */

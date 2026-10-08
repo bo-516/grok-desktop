@@ -12,7 +12,9 @@
 import type { SessionState } from "@grok-desktop/acp-core";
 import { createLiveBridgeDispatch } from "./liveBridgeDispatch";
 import { createLiveBridgeFs } from "./liveBridgeFs";
+import { createLiveBridgeGrokSetup } from "./liveBridgeGrokSetup";
 import { createLiveBridgeModelCatalog } from "./liveBridgeModelCatalog";
+import { createLiveBridgeTerminal } from "./liveBridgeTerminal";
 import type {
   AuthProbe,
   BridgeServerMsg,
@@ -105,6 +107,10 @@ export function connectLiveBridge(
 
   const fsApi = createLiveBridgeFs(send);
   const catalogApi = createLiveBridgeModelCatalog(send);
+  /** Integrated terminal channel (PTY shells owned by this socket). */
+  const terminalChannel = createLiveBridgeTerminal(send);
+  /** CLI onboarding: setup runs + custom grok path (own correlation maps). */
+  const grokSetup = createLiveBridgeGrokSetup(send);
 
   function rejectCliRequests(error: Error): void {
     for (const pending of pendingCli.values()) {
@@ -121,6 +127,8 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     catalogApi.rejectAll(new Error(`WebSocket error connecting to ${url}`));
     rejectCliRequests(new Error(`WebSocket error connecting to ${url}`));
+    terminalChannel.closeAll(`WebSocket error: ${url}`);
+    grokSetup.failAll(`WebSocket error connecting to ${url}`);
     // Land coalesced chunks before the error paints.
     dispatch.flushPendingUpdates();
     // I4: do not leave sessions muted if error aborts a load window.
@@ -132,6 +140,8 @@ export function connectLiveBridge(
     fsApi.rejectAll(new Error("Bridge WebSocket closed"));
     catalogApi.rejectAll(new Error("Bridge WebSocket closed"));
     rejectCliRequests(new Error("Bridge WebSocket closed"));
+    terminalChannel.closeAll("Bridge disconnected");
+    grokSetup.failAll("Bridge WebSocket closed");
     // No lost final chunk: emit coalesced notifies before onClose.
     dispatch.flushPendingUpdates();
     // I4: force-close any open replay windows before clearing buckets.
@@ -150,6 +160,12 @@ export function connectLiveBridge(
       return;
     }
     if (catalogApi.handleServerMsg(msg)) {
+      return;
+    }
+    if (terminalChannel.handleServerMsg(msg)) {
+      return;
+    }
+    if (grokSetup.handleServerMsg(msg)) {
       return;
     }
     if (dispatch.handleServerMsg(msg)) {
@@ -216,6 +232,9 @@ export function connectLiveBridge(
         seed: opts?.seed,
         forceNew: opts?.forceNew,
         spawnConfig: opts?.spawnConfig,
+        // Undefined is omitted by JSON.stringify, so a normal start does
+        // not send a worktree field. `{}` still creates one.
+        worktree: opts?.worktree,
       });
     },
     /**
@@ -331,6 +350,8 @@ export function connectLiveBridge(
     },
     cli,
     readModelCatalog: catalogApi.readModelCatalog,
+    terminal: terminalChannel.api,
+    grokSetup: grokSetup.api,
     close: () => {
       // Land coalesced chunks while the store still treats the bridge as live.
       dispatch.flushPendingUpdates();

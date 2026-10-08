@@ -2,6 +2,9 @@
 
 export { TimelineWidget } from "./TimelineWidget";
 export { TimelineView } from "./TimelineView";
+export { TimelineUnitRowWidget } from "./TimelineUnitRowWidget";
+export { TimelineUnitRowView } from "./TimelineUnitRowView";
+export type { TimelineUnitRowViewProps } from "./TimelineUnitRowView";
 export type { TimelineViewProps } from "./TimelineView";
 export { useTimelineWidget } from "./useTimelineWidget";
 export { useTimelineModel } from "./useTimelineModel";

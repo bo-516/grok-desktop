@@ -20,9 +20,13 @@ import {
   LazyPreviewDrawerWidget,
   LazySettingsPanelWidget,
 } from "@/widgets/lazyPanels";
+import { UpdateNoticeWidget } from "@/widgets/updateNotice";
 import { LoginGateView, useLoginGateWidget } from "@/widgets/auth";
+import { TerminalPanelWidget } from "@/widgets/terminal";
 import { ShellBannersView, useAppShellWidget } from "./widgets/shell";
+import { SessionWindowWidget } from "@/widgets/sessionWindow";
 import { buildConfirmPrompt } from "./lib/confirmAction";
+import { worktreeRemovePrompt } from "./lib/worktreeChat";
 import { buildRewindCommand, rewindConfirm } from "./lib/sessionActions";
 import type { ContextRailId } from "./widgets/shell/shellPanels";
 
@@ -66,6 +70,15 @@ export function App() {
       : null;
   const rewindPrompt =
     shell.confirm?.kind === "rewind" ? rewindConfirm(true) : null;
+  const worktreeConfirm =
+    shell.confirm?.kind === "worktree_rm" ? shell.confirm : null;
+  const worktreePrompt = worktreeConfirm
+    ? worktreeRemovePrompt(
+        worktreeConfirm.label,
+        worktreeConfirm.blocked,
+        worktreeConfirm.reason,
+      )
+    : null;
 
   return (
     <div
@@ -80,6 +93,9 @@ export function App() {
         onClose={() => shell.setRailOpen(false)}
         onCollapse={shell.collapseSidebar}
         onRequestDelete={shell.requestDelete}
+        onRequestRemoveWorktree={(target) => {
+          void shell.requestRemoveWorktree(target);
+        }}
         liveCount={shell.liveCount}
       />
 
@@ -126,11 +142,14 @@ export function App() {
               waitingPermission={
                 shell.session.status === "waiting_permission"
               }
-              onLogin={() => void shell.authLogin()}
+              envAction={gate.bannerAction}
               onDismissRestart={shell.clearRestartNotice}
             />
+            {/* Startup GitHub release notice. Own state; not shell chrome state. */}
+            <UpdateNoticeWidget />
             <TimelineWidget />
             <ComposerWidget />
+            <TerminalPanelWidget />
           </section>
 
           <ContextDrawerWidget
@@ -167,13 +186,10 @@ export function App() {
       </div>
 
       {shell.session.pendingPermission ? <PermissionModalView /> : null}
-      {/* Signed-out gate — portaled to <body>, so the `inert` shell above it
-          cannot swallow the one control the user still needs. */}
-      <LoginGateView
-        open={gate.open}
-        busy={gate.busy}
-        onLogin={gate.onLogin}
-      />
+      {/* Onboarding / signed-out gate — portaled to <body>, so the `inert`
+          shell above it cannot swallow the controls the user still needs. */}
+      <LoginGateView {...gate.view} />
+      <SessionWindowWidget />
       <CommandPaletteWidget
         open={shell.paletteOpen}
         onClose={() => shell.setPaletteOpen(false)}
@@ -201,6 +217,30 @@ export function App() {
                 shell.removeSession(id);
               },
             );
+          }}
+        />
+      ) : null}
+      {worktreePrompt && worktreeConfirm ? (
+        <ConfirmDialogView
+          open
+          title={worktreePrompt.title}
+          subject={worktreePrompt.subject}
+          details={worktreePrompt.details}
+          confirmLabel={worktreePrompt.confirmLabel}
+          cancelLabel={worktreePrompt.cancelLabel}
+          danger
+          blocked={worktreeConfirm.blocked}
+          onCancel={shell.clearConfirm}
+          onConfirm={() => {
+            const current = worktreeConfirm;
+            shell.clearConfirm();
+            if (current.blocked) {
+              return;
+            }
+            shell.closeLiveSession(current.sessionId);
+            // A non-zero code leaves the directory. The catalog row stays
+            // either way; a failed rm is not surfaced in this slice.
+            void shell.runCli("worktree_rm", { name: current.rmName });
           }}
         />
       ) : null}

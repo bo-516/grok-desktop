@@ -14,6 +14,9 @@ import { agentsShortcuts } from "./shortcuts.agents";
 import { previewShortcuts } from "./shortcuts.preview";
 import { codeShortcuts } from "./shortcuts.code";
 import { docShortcuts } from "./shortcuts.doc";
+import { terminalShortcuts } from "./shortcuts.terminal";
+import { onboardingShortcuts } from "./shortcuts.onboarding";
+import { gitShortcuts } from "./shortcuts.git";
 
 export const appShortcuts: Record<string, string> = {
   ...sideNavShortcuts,
@@ -25,4 +28,7 @@ export const appShortcuts: Record<string, string> = {
   ...previewShortcuts,
   ...codeShortcuts,
   ...docShortcuts,
+  ...terminalShortcuts,
+  ...onboardingShortcuts,
+  ...gitShortcuts,
 };

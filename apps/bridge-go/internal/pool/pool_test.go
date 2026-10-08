@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
 // mockRuntime builds a pool entry whose status can mutate via the returned pointer.
@@ -42,6 +43,36 @@ func TestPickLruIdleVictim(t *testing.T) {
 	got := PickLruIdleVictim(entries)
 	if got != "old-idle" {
 		t.Fatalf("want old-idle got %s", got)
+	}
+}
+
+// TestListCopiesWorktree checks the rail summary includes a snapshot of the
+// runtime worktree and that mutating the snapshot does not change the runtime.
+func TestListCopiesWorktree(t *testing.T) {
+	p := NewRuntimePool(1)
+	rt, _ := mockRuntime("s1", acp.StatusIdle, 1)
+	rt.Worktree = &worktree.Info{Path: "/wt", Branch: "feat", SourceRepo: "/repo", Name: "feat"}
+	if err := p.Insert(rt); err != nil {
+		t.Fatal(err)
+	}
+	entries := p.List()
+	if len(entries) != 1 || entries[0].Worktree == nil || entries[0].Worktree.Branch != "feat" {
+		t.Fatalf("list: %+v", entries)
+	}
+	if entries[0].Worktree == rt.Worktree {
+		t.Fatal("list aliased the runtime worktree pointer")
+	}
+	entries[0].Worktree.Branch = "changed"
+	if rt.Worktree.Branch != "feat" {
+		t.Fatal("snapshot mutation leaked into the runtime")
+	}
+	plain, _ := mockRuntime("s2", acp.StatusIdle, 2)
+	p2 := NewRuntimePool(1)
+	if err := p2.Insert(plain); err != nil {
+		t.Fatal(err)
+	}
+	if p2.List()[0].Worktree != nil {
+		t.Fatal("nil worktree should stay omitted")
 	}
 }
 

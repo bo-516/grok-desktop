@@ -1,27 +1,33 @@
 package session
 
-// Lifecycle fingerprinting and pool-focus frames, moved out of lifecycle.go
-// to keep that file under the size limit. Behavior is unchanged except that
-// focus frames now ride the owning runtime's stream (see stream_relay.go).
-
 import (
 	"fmt"
 
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 )
 
-// lifecycleFingerprint is the subset of SessionState whose change warrants a
-// lifecycle (or full state) frame.
+// lifecycleFingerprint is the slice of session state that changes the rail
+// and composer chrome. Timeline body is excluded: Go does not reduce it, so
+// comparing it would either no-op or force empty full-state paints.
 type lifecycleFingerprint struct {
-	status  acp.SessionStatus
+	// status is the ACP session status (idle, streaming, …).
+	status acp.SessionStatus
+	// permKey identifies a pending permission. Empty means none is showing.
 	permKey string
-	model   string
-	mode    string
-	id      string
+	// model is the selected model id.
+	model string
+	// mode is the selected mode id.
+	mode string
+	// id is the ACP session id. A change means a different session focused.
+	id string
 }
 
-// lifecycleFP fingerprints a snapshot; the pending permission is keyed by
-// request id + tool call id so a new prompt for the same tool still differs.
+// lifecycleFP builds the fingerprint for one snapshot.
+// A nil pending permission yields an empty permKey. A permission whose
+// tool call lacks toolCallId still keys on the request id alone.
+//
+// @param session Latest snapshot. Zero value is a valid "nothing yet" print.
+// @returns Comparable fingerprint. Never nil-panics on a missing permission.
 func lifecycleFP(session acp.SessionState) lifecycleFingerprint {
 	permKey := ""
 	if session.PendingPermission != nil {
@@ -39,8 +45,12 @@ func lifecycleFP(session acp.SessionState) lifecycleFingerprint {
 	}
 }
 
-// lifecycleChanged reports whether next differs from prev (nil prev = first
-// snapshot, always a change).
+// lifecycleChanged reports whether the UI must hear about next.
+// A nil prev means the first snapshot for that session and always changes.
+//
+// @param prev Previous fingerprint, or nil when none was stored.
+// @param next Fingerprint just observed.
+// @returns True when any tracked field differs.
 func lifecycleChanged(prev *lifecycleFingerprint, next lifecycleFingerprint) bool {
 	if prev == nil {
 		return true
@@ -56,7 +66,13 @@ func lifecycleChanged(prev *lifecycleFingerprint, next lifecycleFingerprint) boo
 // client-side timeline. Go SessionState.timeline is always empty, so a full
 // `state` hydrate on pool hit blanks catalog-seeded history after refresh.
 // Prefer session_lifecycle (+ info) unless the snapshot somehow carries body.
-// Both frames ride the owning runtime's stream (stamped epoch/seq).
+//
+// Both frames ride the owning runtime's stream (stamped epoch/seq) via
+// relayPoolFocus; the trailing info frame and pool broadcast do not.
+//
+// @param deps Broadcast and BroadcastPool must be non-nil.
+// @param session Resident snapshot. Empty timeline takes the lifecycle path.
+// @param info Optional info-frame text. Empty skips that frame.
 func broadcastPoolFocus(deps LifecycleDeps, session acp.SessionState, info string) {
 	if len(session.Timeline) > 0 {
 		relayPoolFocus(deps, session.ID, map[string]any{"type": "state", "session": session}, true)

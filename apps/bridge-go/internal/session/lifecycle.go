@@ -8,6 +8,7 @@ import (
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/acp"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/pool"
 	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/sessionstream"
+	"github.com/xai-org/grok-desktop/apps/bridge-go/internal/worktree"
 )
 
 // HandlerState is focused session + default list cwd for the bridge.
@@ -32,24 +33,38 @@ type LifecycleDeps struct {
 
 // StartOrResume acquires a pool slot or reuses a live session (relay freeze).
 // Unexpected agent exit triggers seed-based session/load recovery.
+// A Worktree request creates the checkout before any spawn. Create failure
+// returns immediately and does not start the agent in the source checkout.
+// DefaultListCwd stays the source repository when the session is a worktree.
+// ExistingWorktree on crash recovery reuses that checkout.
+//
+// @param deps Pool, State, SessionSeeds, Broadcast, and BroadcastPool must
+// be non-nil. A nil State panics; callers always pass the handler state.
+// @param opts See StartOpts. A worktree request with a resume id and
+// ForceNew false is an error.
+// @returns nil after the runtime is inserted, or after a live session is
+// reused. Error when the cwd cannot be resolved, the worktree cannot be
+// created, or the agent fails to spawn. A worktree created by this call
+// is left on disk when spawn fails; the error includes its path.
 // A spawned runtime gets a fresh stream epoch; every per-session frame it
 // relays is stamped (epoch, seq) and its streams are dropped on dispose.
 // opts.StartID is the client's `start` request id, echoed in the new
 // session's provenance ("" for recovery / restart).
-func StartOrResume(deps LifecycleDeps, opts struct {
-	Cwd           string
-	AlwaysApprove bool
-	ResumeID      string
-	Seed          *acp.SessionState
-	ForceNew      bool
-	SpawnConfig   *pool.SessionSpawnConfig
-	StartID       string
-}) error {
+func StartOrResume(deps LifecycleDeps, opts StartOpts) error {
 	cwd, err := filepath.Abs(opts.Cwd)
 	if err != nil {
 		return err
 	}
+	agentCwd, wtInfo, createdNow, err := prepareWorktreeStart(cwd, &opts)
+	if err != nil {
+		return err
+	}
 	deps.State.DefaultListCwd = cwd
+	if wtInfo != nil && wtInfo.SourceRepo != "" {
+		if src, absErr := filepath.Abs(wtInfo.SourceRepo); absErr == nil {
+			deps.State.DefaultListCwd = src
+		}
+	}
 
 	// Resume already in pool: zero spawn.
 	if opts.ResumeID != "" && !opts.ForceNew && deps.Pool.Has(opts.ResumeID) {
@@ -105,7 +120,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 	rs := newRuntimeStream(deps, resumeID, opts.StartID)
 
 	runtime, err := CreateSessionRuntime(CreateRuntimeOpts{
-		Cwd:           cwd,
+		Cwd:           agentCwd,
 		AlwaysApprove: opts.AlwaysApprove,
 		ResumeID:      resumeID,
 		Seed:          seed,
@@ -260,10 +275,12 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 				}
 			}
 			var spawnConfig *pool.SessionSpawnConfig
+			var existingWT *worktree.Info
 			exitCwd := deps.State.DefaultListCwd
 			if rt := deps.Pool.Get(sessionID); rt != nil {
 				spawnConfig = rt.SpawnConfig
 				exitCwd = rt.Cwd
+				existingWT = rt.Worktree
 			}
 			if seedPtr != nil && seedPtr.Workspace != "" {
 				exitCwd = seedPtr.Workspace
@@ -284,23 +301,15 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 			})
 			deps.BroadcastPool()
 			go func() {
-				err := StartOrResume(deps, struct {
-					Cwd           string
-					AlwaysApprove bool
-					ResumeID      string
-					Seed          *acp.SessionState
-					ForceNew      bool
-					SpawnConfig   *pool.SessionSpawnConfig
-					StartID       string
-				}{
+				err := StartOrResume(deps, StartOpts{
 					Cwd: exitCwd, AlwaysApprove: deps.AlwaysApprove,
 					ResumeID: sessionID, Seed: seedPtr, ForceNew: false,
-					SpawnConfig: spawnConfig,
+					SpawnConfig: spawnConfig, ExistingWorktree: existingWT,
 				})
 				if err != nil {
 					deps.Broadcast(map[string]any{
-						"type": "error",
-						"message": "crash recovery failed: " + err.Error(),
+						"type":      "error",
+						"message":   "crash recovery failed: " + err.Error(),
 						"sessionId": sessionID,
 					})
 					deps.BroadcastPool()
@@ -312,7 +321,7 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		deps.Pool.CancelSpawn()
 		// Handshake frames (state / replay_*) may already sit in the ring.
 		rs.drop()
-		return err
+		return worktreeStartError(err, wtInfo, createdNow)
 	}
 	// Disposing the runtime (close, LRU eviction, crash, restart) retires its
 	// epoch: rings are freed and a resync naming it answers epoch_mismatch.
@@ -322,10 +331,12 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 		rs.drop()
 	}
 
+	// Stamp before Insert so the first pool broadcast includes the worktree.
+	runtime.Worktree = wtInfo
 	if err := deps.Pool.Insert(runtime); err != nil {
 		// Insert already consumed the BeginSpawn reservation; just dispose the child.
 		runtime.Dispose()
-		return err
+		return worktreeStartError(err, wtInfo, createdNow)
 	}
 	deps.State.FocusedSessionID = runtime.SessionID
 	initial := runtime.GetSessionState()
@@ -349,6 +360,15 @@ func StartOrResume(deps LifecycleDeps, opts struct {
 }
 
 // RestartSession restarts a session process with new SPAWN config then session/load.
+// An existing worktree is passed through and is not created again. The agent
+// cwd stays that worktree; DefaultListCwd stays its source repository.
+//
+// @param deps Same requirements as StartOrResume.
+// @param sessionID Session to restart. Unknown ids still attempt a start
+// from DefaultListCwd or the seed workspace.
+// @param spawnConfig Replacement SPAWN flags. Nil keeps the previous config.
+// @param approve Always-approve for the new process.
+// @returns The start error, or nil after the info frame is broadcast.
 func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.SessionSpawnConfig, approve bool) error {
 	existing := deps.Pool.Get(sessionID)
 	var seed *acp.SessionState
@@ -362,9 +382,11 @@ func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.Sess
 	}
 	cwd := deps.State.DefaultListCwd
 	var prevSpawn *pool.SessionSpawnConfig
+	var existingWT *worktree.Info
 	if existing != nil {
 		cwd = existing.Cwd
 		prevSpawn = existing.SpawnConfig
+		existingWT = existing.Worktree
 		deps.Pool.Close(sessionID)
 	} else if seed != nil && seed.Workspace != "" {
 		cwd = seed.Workspace
@@ -373,23 +395,15 @@ func RestartSession(deps LifecycleDeps, sessionID string, spawnConfig *pool.Sess
 	if cfg == nil {
 		cfg = prevSpawn
 	}
-	if err := StartOrResume(deps, struct {
-		Cwd           string
-		AlwaysApprove bool
-		ResumeID      string
-		Seed          *acp.SessionState
-		ForceNew      bool
-		SpawnConfig   *pool.SessionSpawnConfig
-		StartID       string
-	}{
+	if err := StartOrResume(deps, StartOpts{
 		Cwd: cwd, AlwaysApprove: approve, ResumeID: sessionID, Seed: seed,
-		ForceNew: false, SpawnConfig: cfg,
+		ForceNew: false, SpawnConfig: cfg, ExistingWorktree: existingWT,
 	}); err != nil {
 		return err
 	}
 	deps.Broadcast(map[string]any{
-		"type": "info",
-		"message": fmt.Sprintf("restarted session %s with updated SPAWN settings", sessionID),
+		"type":      "info",
+		"message":   fmt.Sprintf("restarted session %s with updated SPAWN settings", sessionID),
 		"sessionId": sessionID,
 	})
 	return nil

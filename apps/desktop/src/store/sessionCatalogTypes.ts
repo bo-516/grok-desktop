@@ -86,6 +86,24 @@ export type SessionRecord = {
    */
   tokenUsage?: SessionTokenUsage;
   /**
+   * Set when this chat was started in a grok worktree (or a probe mapped
+   * the checkout back to a source repo). The rail groups by `sourceRepo`
+   * and shows `branch` on the row. Absent for a normal checkout. Live
+   * upserts must keep this — ACP state does not carry it.
+   */
+  worktree?: {
+    /** Worktree directory the agent uses as cwd. */
+    path: string;
+    /** Checked-out branch, or "HEAD" when unnamed. */
+    branch: string;
+    /** Repository the rail groups this chat under. */
+    sourceRepo: string;
+    /** Requested name or grok label. */
+    name?: string;
+    /** Grok worktree id. `worktree rm` prefers this over the path. */
+    id?: string;
+  };
+  /**
    * Catalog row schema version after provenance whitelist migration.
    * Missing / 1 = pre-whitelist (may contain untagged child ghosts).
    * 2 = current (roles/migration applied).

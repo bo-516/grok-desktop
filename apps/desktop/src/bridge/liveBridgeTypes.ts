@@ -13,6 +13,16 @@ import type {
   SessionUpdate,
 } from "@grok-desktop/acp-core";
 import type {
+  LiveBridgeTerminal,
+  TerminalServerMsg,
+} from "./liveBridgeTerminalTypes";
+import type {
+  GrokFailureKind,
+  GrokPathSource,
+  GrokSetupApi,
+  GrokSetupPlans,
+} from "./liveBridgeGrokSetupTypes";
+import type {
   BridgeFrameMeta,
   BridgeResyncResultMsg,
   BridgeSessionProvenance,
@@ -50,6 +60,23 @@ export type PreviewWorkspaceFileResult = {
   error?: string;
 };
 
+/**
+ * Worktree identity on a pool row. Absent when the session is a normal
+ * checkout. `sourceRepo` is the project the rail groups under.
+ */
+export type PoolWorktreeInfo = {
+  /** Worktree directory (agent cwd). */
+  path: string;
+  /** Checked-out branch, or "HEAD" when unnamed. */
+  branch: string;
+  /** Repository that owns this worktree. */
+  sourceRepo: string;
+  /** Requested name or grok label. */
+  name?: string;
+  /** Grok id. `worktree rm` accepts this. */
+  id?: string;
+};
+
 /** Aligned with bridge PoolEntry. */
 export type PoolEntry = {
   sessionId: string;
@@ -57,6 +84,8 @@ export type PoolEntry = {
   status: SessionState["status"];
   lastUsed: number;
   live: boolean;
+  /** Set when this process was started in a worktree. */
+  worktree?: PoolWorktreeInfo;
 };
 
 /** Aligned with bridge EnvironmentInfo; no secret plaintext. */
@@ -69,6 +98,14 @@ export type EnvironmentInfo = {
   ok: boolean;
   message: string;
   poolCapacity: number;
+  /** Structured reason ok is false; "" when ready. Absent from old bridges. */
+  failureKind?: GrokFailureKind;
+  /** CLI version floor the bridge enforces (e.g. "0.9.0"). */
+  minVersion?: string;
+  /** Which rule located grokPath. */
+  grokPathSource?: GrokPathSource;
+  /** Install / update commands offered on the bridge host. */
+  setup?: GrokSetupPlans;
 };
 
 /**
@@ -214,7 +251,9 @@ export type BridgeServerMsg =
       availableModels?: AvailableModel[];
       configOptions?: unknown[];
       error?: string;
-    };
+    }
+  /** Integrated terminal frames (see liveBridgeTerminalTypes). */
+  | TerminalServerMsg;
 
 /**
  * Correlated reply for `read_model_catalog`.
@@ -410,6 +449,10 @@ export type LiveBridgeHandle = {
    * @param cwd Optional workspace passed to the probe child.
    */
   readModelCatalog: (cwd?: string) => Promise<ModelCatalogReply>;
+  /** Integrated terminal panel: PTY shells owned by this socket. */
+  terminal: LiveBridgeTerminal;
+  /** grok CLI onboarding: installer / update runs and the custom grok path. */
+  grokSetup: GrokSetupApi;
   close: () => void;
   ready: Promise<void>;
 };
@@ -421,6 +464,13 @@ export type StartOpts = {
   seed?: SessionState;
   forceNew?: boolean;
   spawnConfig?: SessionSpawnConfig;
+  /**
+   * Create a grok worktree before spawn. Absent or undefined does not
+   * create one. An empty object uses CLI defaults (generated name, HEAD
+   * plus uncommitted changes). This is not `spawnConfig.worktree`, which
+   * is the older `grok agent --worktree` flag.
+   */
+  worktree?: { name?: string; ref?: string };
 };
 
 export type { ContentBlock, SessionState };

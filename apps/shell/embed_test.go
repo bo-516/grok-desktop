@@ -33,6 +33,22 @@ func TestBridgeURLInjectMiddleware_InsertsHeadScript(t *testing.T) {
 	}
 }
 
+// TestBridgeURLInjectMiddleware_SessionQueryStillInjects covers session windows.
+// They load "/?session=<id>"; the path is still "/" so the bridge global is injected.
+func TestBridgeURLInjectMiddleware_SessionQueryStillInjects(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><head></head><body><script type="module" src="/assets/app.js"></script></body></html>`))
+	})
+	h := BridgeURLInjectMiddleware(bridgeInjectJS("ws://127.0.0.1:9?token=abc", nil))(inner)
+	req := httptest.NewRequest(http.MethodGet, "/?session=abc-1", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "window.__GROK_BRIDGE_URL__=") {
+		t.Fatalf("session window html missing inject: %s", rec.Body.String())
+	}
+}
+
 // TestBridgeURLInjectMiddleware_SkipsAssets leaves non-HTML alone.
 func TestBridgeURLInjectMiddleware_SkipsAssets(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

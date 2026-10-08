@@ -225,6 +225,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   ensureConnected: async () => ensureLiveBridgeConnected(set, get),
   selectSession: (id) => selectSessionAction(set, get, id),
   removeSession: (id) => removeSessionAction(set, get, id),
+  closeLiveSession: (id) => {
+    const trimmed = id.trim();
+    if (!trimmed) {
+      return;
+    }
+    get().live?.closeSession(trimmed);
+  },
   renameSession: (id, title) => renameSessionAction(set, get, id, title),
   sendPrompt: async (draft, blocks) =>
     sendPromptAction(set, get, draft, blocks),

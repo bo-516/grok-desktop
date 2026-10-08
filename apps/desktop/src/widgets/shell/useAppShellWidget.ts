@@ -36,11 +36,8 @@ import {
 import { useShellChromeEvents } from "./useShellChromeEvents";
 import { useShellSessionLifecycle } from "./useShellSessionLifecycle";
 import { useSidebarVisibility } from "./useSidebarVisibility";
-
-/** Confirm dialog kinds hosted by the shell (single active confirm). */
-export type ShellConfirm =
-  | { kind: "session_delete"; id: string; title: string }
-  | { kind: "rewind" };
+import type { ShellConfirm } from "./shellConfirm";
+import { useRemoveWorktreeConfirm } from "./useRemoveWorktreeConfirm";
 
 /**
  * Assembles shell UI state for App region assembly.
@@ -72,6 +69,7 @@ export function useAppShellWidget() {
   const restartNotice = useSessionStore((s) => s.restartNotice);
   const clearRestartNotice = useSessionStore((s) => s.clearRestartNotice);
   const removeSession = useSessionStore((s) => s.removeSession);
+  const closeLiveSession = useSessionStore((s) => s.closeLiveSession);
   const runCli = useSessionStore((s) => s.runCli);
   /** Login + immediate re-probe; the banner's Login button and the gate share it. */
   const authLogin = useSessionStore((s) => s.authLogin);
@@ -298,6 +296,12 @@ export function useAppShellWidget() {
   const requestDelete = useCallback((id: string, sessionTitle: string) => {
     setConfirm({ kind: "session_delete", id, title: sessionTitle });
   }, []);
+  /**
+   * Probe the checkout, then open the remove-worktree confirm.
+   * The hook sets `blocked` when the tree is dirty or the check failed,
+   * so App never sends `worktree_rm` in those cases.
+   */
+  const requestRemoveWorktree = useRemoveWorktreeConfirm(runCli, setConfirm);
   const clearConfirm = useCallback(() => setConfirm(null), []);
   const setDrawerLayout = useCallback((layout: DrawerLayout) => {
     setDrawerLayoutPref(layout);
@@ -327,6 +331,7 @@ export function useAppShellWidget() {
     restartNotice,
     clearRestartNotice,
     removeSession,
+    closeLiveSession,
     runCli,
     authLogin,
     sendPrompt,
@@ -363,6 +368,7 @@ export function useAppShellWidget() {
     selectContextTab,
     closeContextRail,
     requestDelete,
+    requestRemoveWorktree,
     requestRewind,
     clearConfirm,
     drawerLayoutPref,

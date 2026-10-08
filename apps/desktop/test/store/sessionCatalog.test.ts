@@ -193,6 +193,33 @@ describe("sessionCatalog", () => {
     );
   });
 
+  it("upsertFromLiveState keeps a worktree badge across live frames", () => {
+    const seeded = upsertFromLiveState(
+      [],
+      createSessionState({ id: "s-wt", workspace: "/tmp/wt" }),
+      1000,
+    );
+    /** Badge a live frame cannot carry. Losing it would ungroup the row. */
+    const badge = {
+      path: "/tmp/wt",
+      branch: "feat",
+      sourceRepo: "/proj/demo",
+      name: "task",
+    };
+    const withBadge = seeded.map((row) =>
+      row.id === "s-wt" ? { ...row, worktree: badge } : row,
+    );
+    const next = upsertFromLiveState(
+      withBadge,
+      createSessionState({ id: "s-wt", workspace: "/tmp/wt" }),
+      2000,
+    );
+    assert.deepEqual(
+      next.find((row) => row.id === "s-wt")?.worktree,
+      badge,
+    );
+  });
+
   it("resource embed blocks change activity without using type names as text", () => {
     const withText = createSessionState({
       id: "s-embed",
@@ -727,6 +754,62 @@ describe("sessionCatalog", () => {
       groups[0]?.sessions.map((s) => s.id),
       ["a", "a2"],
     );
+  });
+
+  it("groupSessionsByProject files a worktree under its source repo", () => {
+    const groups = groupSessionsByProject([
+      {
+        id: "main",
+        workspace: "/proj/demo",
+        title: "Main",
+        mode: "build",
+        model: "m",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 100,
+        timeline: [],
+        toolCalls: {},
+        lastAgentText: "",
+      },
+      {
+        id: "wt",
+        workspace: "/tmp/grok-wt",
+        title: "Worktree",
+        mode: "build",
+        model: "m",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 300,
+        timeline: [],
+        toolCalls: {},
+        lastAgentText: "",
+        worktree: {
+          path: "/tmp/grok-wt",
+          branch: "feat",
+          sourceRepo: "/proj/demo",
+          name: "task",
+        },
+      },
+      {
+        id: "other",
+        workspace: "/proj/other",
+        title: "Other",
+        mode: "build",
+        model: "m",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 200,
+        timeline: [],
+        toolCalls: {},
+        lastAgentText: "",
+      },
+    ]);
+    assert.equal(groups[0]?.workspace, "/proj/demo");
+    assert.deepEqual(
+      groups[0]?.sessions.map((s) => s.id),
+      ["wt", "main"],
+    );
+    assert.equal(groups[1]?.workspace, "/proj/other");
   });
 
   it("splitNoProjectSessions pulls unfiled chats out of the project tree", () => {

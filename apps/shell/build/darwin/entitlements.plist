@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Wails shell (Grok Desktop.app).
+
+  Applied only when MACOS_SIGN_IDENTITY is set. Ad-hoc builds do not embed
+  this file. WKWebView / JavaScriptCore need JIT and unsigned executable
+  memory or the window stays blank under the hardened runtime. The shell
+  reaches localhost (bridge WebSocket) and the public network (release
+  notes, login pages opened from the webview).
+
+  Microphone / speech entitlements are intentionally absent: Info.plist has
+  no NSMicrophoneUsageDescription, and adding the entitlement without that
+  key makes TCC abort the process if dictation touches the mic.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

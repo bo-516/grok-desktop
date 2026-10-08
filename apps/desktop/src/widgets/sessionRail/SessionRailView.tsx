@@ -91,6 +91,7 @@ export function SessionRailView(props: SessionRailViewProps) {
         onTogglePin={row.onTogglePin}
         onReorder={row.onReorder}
         onRemove={row.onRemove}
+        onRemoveWorktree={row.onRemoveWorktree}
         editing={renamingId === rec.id}
         onBeginRename={() => beginRename(rec.id)}
         onCommitRename={(title) => commitRename(rec.id, title)}

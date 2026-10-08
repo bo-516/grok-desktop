@@ -45,6 +45,7 @@ import { syncCatalogFromBridge } from "./sessionStoreSync";
 import { beginLiveSessionStart } from "./sessionStoreLiveStart";
 import { shouldFollowSession } from "./sessionStoreLiveFollow";
 import { rememberSlashCatalog } from "@/lib/slashCatalog";
+import { stampCatalogWorktrees } from "@/lib/worktreeChatCatalog";
 import { rememberModelCatalog } from "@/store/modelCatalogStore";
 import {
   persistNormalizedCatalog,
@@ -230,6 +231,9 @@ export async function startLiveBridgeSession(
           }
           set((s) => ({
             poolEntries: entries,
+            // Stamp path/branch/source onto catalog rows. Entries without
+            // a worktree leave existing badges alone.
+            catalog: stampCatalogWorktrees(s.catalog, entries),
             // Reconnect / select often seeds idle before list_pool lands.
             // Promote Working when the viewed process is still busy.
             session: applyPoolBusyToSession(

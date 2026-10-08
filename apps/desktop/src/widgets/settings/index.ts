@@ -7,3 +7,5 @@ export { SettingsSecuritySectionView } from "./SettingsSecuritySectionView";
 export { SettingsSpawnSectionView } from "./SettingsSpawnSectionView";
 export { SettingsCompatSectionView } from "./SettingsCompatSectionView";
 export { SettingsAccountSectionView } from "./SettingsAccountSectionView";
+export { SettingsUpdatesSectionView } from "./SettingsUpdatesSectionView";
+export type { SettingsUpdatesSectionViewProps } from "./SettingsUpdatesSectionView";
