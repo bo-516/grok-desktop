@@ -52,6 +52,7 @@ import {
   setWorkspaceAction,
 } from "./sessionStoreNavigation";
 import { ensureLiveBridgeConnected } from "./sessionStoreReconnect";
+import { prefetchSessionHistoryIntoCatalog } from "./sessionStoreHistory";
 import { renameSessionAction } from "./sessionStoreRename";
 import { forkSessionAction } from "./sessionStoreFork";
 import { refreshWeeklyUsageAction } from "./sessionStoreBilling";
@@ -224,6 +225,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   reconnect: async () => reconnectAction(set, get),
   ensureConnected: async () => ensureLiveBridgeConnected(set, get),
   selectSession: (id) => selectSessionAction(set, get, id),
+  prefetchSessionHistory: (id) =>
+    prefetchSessionHistoryIntoCatalog(set, get, { sessionId: id }),
   removeSession: (id) => removeSessionAction(set, get, id),
   closeLiveSession: (id) => {
     const trimmed = id.trim();

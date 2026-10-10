@@ -16,6 +16,7 @@ import {
   TimelineUnitRowView,
   type TimelineUnitRowViewProps,
 } from "./TimelineUnitRowView";
+import { useTimelineRowHeightMemory } from "./useTimelineRowHeightMemory";
 import { useTimelineRowHighlight } from "./useTimelineRowHighlight";
 
 export type TimelineUnitRowWidgetProps = {
@@ -71,6 +72,15 @@ function TimelineUnitRowWidgetInner(props: TimelineUnitRowWidgetProps) {
   const highlight = useTimelineRowHighlight(live);
   /** "1" when the settled shortcut applies. Kept in sync with the class. */
   const settled = live ? "0" : "1";
+  /**
+   * Remount seed for the contain-intrinsic estimate: the last measured height
+   * of this unit, when the session was painted before. Live rows opt out.
+   */
+  const intrinsicBlockSize = useTimelineRowHeightMemory({
+    unitKey,
+    live,
+    shellRef: highlight.shellRef,
+  });
 
   noteTimelineUnitRowRender(unitKey, live);
 
@@ -85,6 +95,9 @@ function TimelineUnitRowWidgetInner(props: TimelineUnitRowWidgetProps) {
     compact,
     fallbackAnswer,
     shellClassName: rowShellClassName(live),
+    shellStyle: intrinsicBlockSize
+      ? { containIntrinsicBlockSize: intrinsicBlockSize }
+      : undefined,
     settled,
     codeVisibility: highlight.visibility,
     shellRef: highlight.shellRef,

@@ -97,6 +97,12 @@ export type SessionRailSessionRowProps = {
   /** Open this chat (click, Enter, Space). */
   onSelect: () => void;
   /**
+   * Warm this row's catalog timeline (hover / keyboard focus) so a following
+   * click paints the transcript instead of the restore gate. Missing in
+   * isolated mounts simply skips the warm-up.
+   */
+  onPrefetch?: () => void;
+  /**
    * Reorder within the same project after a successful drop.
    * @param fromId Dragged session id.
    * @param toId Drop-target session id (fromId moves to this index).
@@ -149,6 +155,7 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
     liveStatus,
     pinned,
     onSelect,
+    onPrefetch,
     onReorder,
     editing = false,
     onBeginRename,
@@ -284,6 +291,8 @@ function SessionRailSessionRowViewInner(props: SessionRailSessionRowProps) {
         onSelect();
       }}
       onKeyDown={handleKeyDown}
+      onMouseEnter={() => onPrefetch?.()}
+      onFocus={() => onPrefetch?.()}
     >
       <div className="sess-title-line">
         <div className="sess-title-slot">

@@ -21,6 +21,115 @@ import type { SessionStoreGet, SessionStoreSet } from "./sessionStoreTypes";
 const inflight = new Map<string, Promise<boolean>>();
 
 /**
+ * In-flight catalog-only prefetches (rail hover → click warm-up).
+ * The catalog row's empty timeline is what forces the "Restoring
+ * conversation…" gate on select; filling it ahead of the click makes the
+ * switch paint the transcript in one frame instead of shimmering then popping.
+ */
+const prefetchInflight = new Set<string>();
+/** Sessions already warmed this run; resolved prefetches never refetch. */
+const prefetchDone = new Set<string>();
+/** Hover sweeps arm at most this many session_history fetches at once. */
+const PREFETCH_CONCURRENCY = 3;
+
+/**
+ * Warm one rail row's catalog timeline from `session_history` without
+ * touching the canvas. Fires from row hover / focus so a click usually lands
+ * after the fetch and selects with a cached timeline — `coldRestore` never
+ * engages, so neither the Restoring gate nor the one-frame body pop does.
+ *
+ * Skips: already-warm rows, in-flight or done sessions, the viewed session
+ * (select's own hydrate owns it), non-live bridges, and sweeps beyond
+ * {@link PREFETCH_CONCURRENCY}.
+ * @param set Zustand set.
+ * @param get Zustand get.
+ * @param opts Target catalog session id.
+ */
+export function prefetchSessionHistoryIntoCatalog(
+  set: SessionStoreSet,
+  get: SessionStoreGet,
+  opts: { sessionId: string },
+): void {
+  const sessionId = opts.sessionId.trim();
+  if (
+    !sessionId ||
+    prefetchDone.has(sessionId) ||
+    prefetchInflight.has(sessionId) ||
+    prefetchInflight.size >= PREFETCH_CONCURRENCY
+  ) {
+    return;
+  }
+  const rec = get().catalog.find((row) => row.id === sessionId);
+  if (!rec || rec.timeline.length > 0) {
+    return;
+  }
+  if (get().viewingSessionId === sessionId) {
+    return;
+  }
+  if (get().connectionMode !== "live-bridge") {
+    return;
+  }
+  const live = get().live;
+  if (!live) {
+    return;
+  }
+  prefetchInflight.add(sessionId);
+  void (async () => {
+    try {
+      const result = await live.cli(
+        "session_history",
+        { sessionId, cwd: rec.workspace || undefined },
+        rec.workspace || undefined,
+      );
+      if (!result.ok) {
+        return;
+      }
+      /**
+       * Clicked through mid-flight: select seeded the canvas already and its
+       * own hydrate/resume owns this session now — writing here would double
+       * the admission work for the same body.
+       */
+      if (get().viewingSessionId === sessionId) {
+        return;
+      }
+      const payload = parseSessionHistoryPayload(result.data);
+      const state = sessionStateFromHistoryPayload(payload, {
+        sessionId,
+        workspace: rec.workspace || payload.cwd || "",
+        model: rec.model,
+        mode: rec.mode,
+        title: rec.title,
+      });
+      if (!sessionHasConversationContent(state.timeline)) {
+        // Genuinely empty on disk — the rec.timeline>0 guard cannot stop a
+        // refetch loop, so remember the empty answer for this run.
+        prefetchDone.add(sessionId);
+        return;
+      }
+      // Admission requires user-facing provenance for the catalog upsert;
+      // viewing === false keeps applyInboundSession catalog-only (no canvas).
+      if (!isUserFacingProvenance(get().sessionProvenance?.[sessionId])) {
+        set({
+          sessionProvenance: stampProvenance(
+            get().sessionProvenance ?? {},
+            sessionId,
+            "resumed",
+          ),
+        });
+      }
+      applyInboundSession(set as never, get as never, state, {
+        recency: "passive",
+      });
+      prefetchDone.add(sessionId);
+    } catch {
+      /* opportunistic: the click path re-fetches through the real hydrate */
+    } finally {
+      prefetchInflight.delete(sessionId);
+    }
+  })();
+}
+
+/**
  * Fetch on-disk history for the viewing session and paint it when the canvas
  * is still empty. No-ops when the bridge is down, the user already switched,
  * or the canvas already has user/agent content.

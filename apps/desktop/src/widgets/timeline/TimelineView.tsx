@@ -123,34 +123,41 @@ export function TimelineView(props: TimelineViewProps) {
       data-timeline-compact={compact ? "1" : undefined}
       onScroll={handleScroll}
     >
-      {units.map((unit, unitIndex) => {
-        const unitKey = timelineRenderUnitKey(unit);
-        // History restored by a rail click paints instantly; only content that
-        // arrives while this canvas is open earns the entrance transition.
-        const seeded = seededUnitKeys.has(unitKey);
-        const live = unit.type === "turn" && isTurnLive(units, unitIndex, status);
-        const answerId = unit.type === "turn" ? unit.answer?.item.id : undefined;
-        const isLastAnswer =
-          answerId !== undefined &&
-          timeline[timeline.length - 1]?.id === answerId;
-        const answerShowCursor = status === "streaming" && isLastAnswer;
-        return (
-          <TimelineUnitRowWidget
-            key={unitKey}
-            unit={unit}
-            unitKey={unitKey}
-            live={live}
-            seeded={seeded}
-            sessionStatus={status}
-            toolCalls={toolCalls}
-            answerShowCursor={answerShowCursor}
-            compact={compact}
-            fallbackAnswer={
-              unitIndex === wrapUpIndex ? wrapUpText : undefined
-            }
-          />
-        );
-      })}
+      {/*
+       * One inner box around every unit: the scroller's border box never
+       * changes, so stick-to-bottom observes this child's block size for
+       * content growth instead of polling scrollHeight.
+       */}
+      <div className="timeline-body">
+        {units.map((unit, unitIndex) => {
+          const unitKey = timelineRenderUnitKey(unit);
+          // History restored by a rail click paints instantly; only content that
+          // arrives while this canvas is open earns the entrance transition.
+          const seeded = seededUnitKeys.has(unitKey);
+          const live = unit.type === "turn" && isTurnLive(units, unitIndex, status);
+          const answerId = unit.type === "turn" ? unit.answer?.item.id : undefined;
+          const isLastAnswer =
+            answerId !== undefined &&
+            timeline[timeline.length - 1]?.id === answerId;
+          const answerShowCursor = status === "streaming" && isLastAnswer;
+          return (
+            <TimelineUnitRowWidget
+              key={unitKey}
+              unit={unit}
+              unitKey={unitKey}
+              live={live}
+              seeded={seeded}
+              sessionStatus={status}
+              toolCalls={toolCalls}
+              answerShowCursor={answerShowCursor}
+              compact={compact}
+              fallbackAnswer={
+                unitIndex === wrapUpIndex ? wrapUpText : undefined
+              }
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }

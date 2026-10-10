@@ -6,7 +6,7 @@
  * props the widget already decided.
  */
 
-import type { RefObject } from "react";
+import type { CSSProperties, RefObject } from "react";
 import type {
   SessionStatus,
   ToolCallCard,
@@ -57,6 +57,12 @@ export type TimelineUnitRowViewProps = {
    * The widget owns that choice so the view does not re-derive it.
    */
   shellClassName: string;
+  /**
+   * Optional shell style — carries the remembered contain-intrinsic estimate
+   * (`auto <measured>px`) for settled rows on a remount. Layout-only; color
+   * styles are forbidden by project rules anyway.
+   */
+  shellStyle?: CSSProperties;
   /** "1" when content-visibility applies. Mirrors `timeline-settled`. */
   settled: "0" | "1";
   /** Shiki timing for fences inside this row. */
@@ -82,6 +88,7 @@ export function TimelineUnitRowView(props: TimelineUnitRowViewProps) {
     compact,
     fallbackAnswer,
     shellClassName,
+    shellStyle,
     settled,
     codeVisibility,
     shellRef,
@@ -92,6 +99,7 @@ export function TimelineUnitRowView(props: TimelineUnitRowViewProps) {
       <div
         ref={shellRef}
         className={shellClassName}
+        style={shellStyle}
         data-settled={settled}
         data-live={live ? "1" : "0"}
       >

@@ -5,12 +5,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  advanceTimelineSettle,
+  INITIAL_TIMELINE_SETTLE_STATE,
   isEdgeNear,
   isScrollNearBottom,
   scrollDeltaToAlignBottoms,
   scrollTopForBottom,
   shouldRepinOnEnable,
+  stickAfterScroll,
+  TIMELINE_SETTLE_FRAME_BUDGET,
   TIMELINE_STICK_THRESHOLD_PX,
+  type TimelineSettleState,
 } from "@/lib/timelineScroll";
 
 describe("timelineScroll", () => {
@@ -89,5 +94,86 @@ describe("timelineScroll", () => {
     assert.equal(scrollDeltaToAlignBottoms(400, 480), 80);
     assert.equal(scrollDeltaToAlignBottoms(400, 350), -50);
     assert.equal(scrollDeltaToAlignBottoms(400, 400), 0);
+  });
+
+  it("stickAfterScroll keeps the pin on its own short-jump echo", () => {
+    // Session-switch write landed at the estimated bottom; rows resolved
+    // taller afterwards so the offset sits far above the new bottom.
+    assert.equal(
+      stickAfterScroll({
+        wasStuck: true,
+        previousTop: 4000,
+        currentTop: 4000,
+        nearBottom: false,
+      }),
+      true,
+    );
+  });
+
+  it("stickAfterScroll detaches only on a real upward gesture", () => {
+    assert.equal(
+      stickAfterScroll({
+        wasStuck: true,
+        previousTop: 4000,
+        currentTop: 3999,
+        nearBottom: false,
+      }),
+      true,
+    );
+    assert.equal(
+      stickAfterScroll({
+        wasStuck: true,
+        previousTop: 4000,
+        currentTop: 3000,
+        nearBottom: false,
+      }),
+      false,
+    );
+  });
+
+  it("stickAfterScroll does not re-attach on a mid-scroll downward gesture", () => {
+    assert.equal(
+      stickAfterScroll({
+        wasStuck: false,
+        previousTop: 1000,
+        currentTop: 1500,
+        nearBottom: false,
+      }),
+      false,
+    );
+    assert.equal(
+      stickAfterScroll({
+        wasStuck: false,
+        previousTop: 1000,
+        currentTop: 1500,
+        nearBottom: true,
+      }),
+      true,
+    );
+  });
+
+  it("advanceTimelineSettle repins while the bottom drifts and stops when stable", () => {
+    const drift = advanceTimelineSettle(INITIAL_TIMELINE_SETTLE_STATE, 1080);
+    assert.equal(drift.repin, true);
+    assert.equal(drift.done, false);
+    assert.equal(drift.stableFrames, 0);
+
+    const firstHold = advanceTimelineSettle(drift, 0);
+    assert.equal(firstHold.repin, false);
+    assert.equal(firstHold.done, false);
+
+    const secondHold = advanceTimelineSettle(firstHold, 0.5);
+    assert.equal(secondHold.done, true);
+  });
+
+  it("advanceTimelineSettle spends its frame budget on endless drift", () => {
+    let state: TimelineSettleState = INITIAL_TIMELINE_SETTLE_STATE;
+    let done = false;
+    for (let i = 0; i < TIMELINE_SETTLE_FRAME_BUDGET; i += 1) {
+      const frame = advanceTimelineSettle(state, 500);
+      done = frame.done;
+      state = frame;
+    }
+    assert.equal(done, true);
   });
 });

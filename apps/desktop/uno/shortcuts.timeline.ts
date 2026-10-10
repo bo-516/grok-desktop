@@ -17,6 +17,12 @@ export const timelineShortcuts: Record<string, string> = {
      * bg-timeline: the scroller owns the canvas fill (matches `.main`). */
     timeline:
       "flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-timeline px-container pt-5 pb-5 flex flex-col gap-7 w-full",
+    /* Inner content box measured by the stick-to-bottom ResizeObserver: its
+     * block size tracks every row growth (image decode, KaTeX swap,
+     * content-visibility estimate → real height), so growth repins can land
+     * before the displaced frame ever paints. Owns the inter-row gap now that
+     * rows are nested one level under the scroller. */
+    "timeline-body": "flex flex-col gap-7 w-full min-w-0",
     empty:
       "m-auto text-center text-fg-muted px-6 py-12 flex flex-col items-center gap-2",
     "empty-title":

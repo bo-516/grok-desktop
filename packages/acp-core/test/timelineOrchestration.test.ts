@@ -74,13 +74,14 @@ describe("timeline orchestration", () => {
     resetTimelineIdCounter();
   });
 
-  it("isOrchestrationUpdate covers the five kinds only", () => {
+  it("isOrchestrationUpdate covers the six kinds only", () => {
     for (const kind of [
       "goal_updated",
       "subagent_spawned",
       "subagent_finished",
       "task_backgrounded",
       "task_completed",
+      "background_tasks",
     ]) {
       assert.equal(isOrchestrationUpdate(kind), true, kind);
     }
@@ -256,6 +257,105 @@ describe("timeline orchestration", () => {
     assert.equal(Object.keys(state.backgroundTasks ?? {}).length, 1);
     assert.equal(done?.status, "completed");
     assert.equal(done?.command, TASK_BG.command);
+  });
+
+  it("background_tasks list snapshot builds cards and refreshes status", () => {
+    let state = createSessionState({ id: "parent" });
+    const beforeLen = state.timeline.length;
+    state = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: [
+        {
+          task_id: TASK_BG.task_id,
+          command: TASK_BG.command,
+          description: TASK_BG.description,
+          cwd: TASK_BG.cwd,
+          kind: "bash",
+          status: "running",
+          output_file: TASK_BG.output_file,
+        },
+      ],
+    });
+    const bg = state.backgroundTasks?.[TASK_BG.task_id];
+    assert.ok(bg);
+    assert.equal(bg?.status, "running");
+    assert.equal(bg?.command, TASK_BG.command);
+    assert.equal(bg?.description, TASK_BG.description);
+    assert.equal(bg?.outputFile, TASK_BG.output_file);
+    assert.equal(state.timeline.length, beforeLen);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: [
+        {
+          task_id: TASK_BG.task_id,
+          command: TASK_BG.command,
+          cwd: TASK_BG.cwd,
+          kind: "bash",
+          status: "completed",
+          exit_code: 0,
+        },
+      ],
+    });
+    const done = state.backgroundTasks?.[TASK_BG.task_id];
+    assert.equal(done?.status, "completed");
+    // Snapshot omitted description / output_file this time: keep prior fields.
+    assert.equal(done?.description, TASK_BG.description);
+    assert.equal(done?.outputFile, TASK_BG.output_file);
+  });
+
+  it("background_tasks is authoritative: unlisted cards drop and empty clears", () => {
+    let state = createSessionState({ id: "parent" });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: [
+        { task_id: "t1", command: "a", status: "running" },
+        { task_id: "t2", command: "b", status: "running" },
+      ],
+    });
+    assert.equal(Object.keys(state.backgroundTasks ?? {}).length, 2);
+    state = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: [{ task_id: "t2", command: "b", status: "completed" }],
+    });
+    assert.equal(Object.keys(state.backgroundTasks ?? {}).length, 1);
+    assert.equal(state.backgroundTasks?.t2?.status, "completed");
+    state = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: [],
+    });
+    assert.equal(Object.keys(state.backgroundTasks ?? {}).length, 0);
+  });
+
+  it("background_tasks keeps toolCallId learned from task_backgrounded", () => {
+    let state = createSessionState({ id: "parent" });
+    state = applySessionUpdate(state, { ...TASK_BG });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: [
+        {
+          task_id: TASK_BG.task_id,
+          command: TASK_BG.command,
+          status: "completed",
+        },
+      ],
+    });
+    const bg = state.backgroundTasks?.[TASK_BG.task_id];
+    assert.equal(bg?.toolCallId, TASK_BG.tool_call_id);
+    assert.equal(bg?.status, "completed");
+  });
+
+  it("background_tasks without a tasks array leaves state untouched", () => {
+    let state = createSessionState({ id: "parent" });
+    state = applySessionUpdate(state, { ...TASK_BG });
+    const next = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+    });
+    assert.equal(next, state);
+    const bad = applySessionUpdate(state, {
+      sessionUpdate: "background_tasks",
+      tasks: "not-an-array",
+    });
+    assert.equal(bad, state);
   });
 
   it("orchestration events never change timeline length", () => {

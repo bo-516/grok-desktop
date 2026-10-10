@@ -163,6 +163,14 @@ export type SessionStore = {
    */
   ensureConnected: () => Promise<void>;
   selectSession: (id: string) => void;
+  /**
+   * Warm a rail row's catalog timeline from `session_history` ahead of the
+   * click (hover / keyboard focus). Catalog-only — never repaints the canvas.
+   * A warmed row selects with `coldRestore === false`, so the switch paints
+   * the transcript instead of the "Restoring conversation…" gate.
+   * @param id Catalog session id of the hovered / focused row.
+   */
+  prefetchSessionHistory: (id: string) => void;
   removeSession: (id: string) => void;
   /**
    * Persist a user-chosen rail title and lock it against agent / timeline overwrite.

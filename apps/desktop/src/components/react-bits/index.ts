@@ -18,3 +18,5 @@ export { SpotlightCard } from "./SpotlightCard";
 export type { SpotlightCardProps } from "./SpotlightCard";
 export { ClickSpark } from "./ClickSpark";
 export type { ClickSparkProps } from "./ClickSpark";
+export { MorphFolderIcon } from "./MorphFolderIcon";
+export type { MorphFolderIconProps } from "./MorphFolderIcon";

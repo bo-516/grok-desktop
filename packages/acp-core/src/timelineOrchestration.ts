@@ -26,6 +26,7 @@ const ORCHESTRATION_KINDS = new Set([
   "subagent_finished",
   "task_backgrounded",
   "task_completed",
+  "background_tasks",
 ]);
 
 /**
@@ -73,6 +74,28 @@ function readStringAlias(
     }
   }
   return undefined;
+}
+
+/**
+ * Same field reader as {@link readString} but for nested records (task list
+ * entries / snapshots) that are not session updates themselves.
+ * @param record Raw object to read; anything non-object yields undefined.
+ * @param key Payload key to read.
+ * @returns Trimmed value, or undefined when absent / empty / wrong type.
+ */
+function readRecordString(
+  record: unknown,
+  key: string,
+): string | undefined {
+  if (!record || typeof record !== "object") {
+    return undefined;
+  }
+  const value = (record as Record<string, unknown>)[key];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 /**
@@ -193,6 +216,49 @@ function applyBackgroundTaskUpdate(
 }
 
 /**
+ * Apply a `background_tasks` list snapshot. grok-build rebroadcasts its full
+ * task registry on every change — down to an empty list on cleanup — so the
+ * snapshot is authoritative: entries patch into their existing cards (keeping
+ * fields the list omits, e.g. `toolCallId` learned from `task_backgrounded`)
+ * and unlisted cards drop. Entries carry `task_id` / `command` /
+ * `description` / `cwd` / `kind` / `status` / `output_file` / `exit_code`;
+ * fields without a card slot are ignored.
+ * @param state Current snapshot.
+ * @param update Raw `background_tasks` update; `tasks` should be an array.
+ * @returns New state; unchanged when `tasks` is missing or not an array.
+ */
+function applyBackgroundTaskListUpdate(
+  state: SessionState,
+  update: SessionUpdate,
+): SessionState {
+  const tasks = (update as { tasks?: unknown }).tasks;
+  if (!Array.isArray(tasks)) {
+    return state;
+  }
+  const backgroundTasks: Record<string, BackgroundTaskCard> = {};
+  for (const entry of tasks) {
+    const taskId = readRecordString(entry, "task_id");
+    if (!taskId) {
+      continue;
+    }
+    backgroundTasks[taskId] = patchBackgroundTaskCard(
+      state.backgroundTasks?.[taskId],
+      {
+        taskId,
+        toolCallId: readRecordString(entry, "tool_call_id"),
+        command: readRecordString(entry, "command"),
+        cwd: readRecordString(entry, "cwd"),
+        outputFile: readRecordString(entry, "output_file"),
+        description: readRecordString(entry, "description"),
+        // Entries always carry status; "running" mirrors the event reducer.
+        status: readRecordString(entry, "status") ?? "running",
+      },
+    );
+  }
+  return { ...state, backgroundTasks };
+}
+
+/**
  * Apply one orchestration event to session state.
  * Caller must gate on `isOrchestrationUpdate` first.
  * @param state Current snapshot; not mutated in place.
@@ -285,6 +351,10 @@ export function applyOrchestrationUpdate(
     };
   }
 
-  // task_backgrounded / task_completed
+  // task_backgrounded / task_completed patch one card; background_tasks is
+  // an authoritative list snapshot broadcast on every task change.
+  if (kind === "background_tasks") {
+    return applyBackgroundTaskListUpdate(state, update);
+  }
   return applyBackgroundTaskUpdate(state, update, kind);
 }

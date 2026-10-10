@@ -83,6 +83,9 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
   const liveStatus = useSessionStore((s) => s.session.status);
   const poolEntries = useSessionStore((s) => s.poolEntries);
   const selectSession = useSessionStore((s) => s.selectSession);
+  const prefetchSessionHistory = useSessionStore(
+    (s) => s.prefetchSessionHistory,
+  );
   const newSession = useSessionStore((s) => s.newSession);
   const removeSession = useSessionStore((s) => s.removeSession);
   const renameSession = useSessionStore((s) => s.renameSession);
@@ -294,6 +297,9 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
         liveStatus: rowStatus,
         pinned: isSessionPinned(railPrefs, rec.id),
         onSelect: () => pickSession(rec.id),
+        // Hover / focus warm-up so the click paints the transcript directly
+        // instead of going through the "Restoring conversation…" gate.
+        onPrefetch: () => prefetchSessionHistory(rec.id),
         onTogglePin: () => onTogglePin(rec.id),
         onReorder: (fromId: string, toId: string) =>
           onReorderSession(workspace, orderedIds, fromId, toId),
@@ -326,6 +332,7 @@ export function useSessionRailWidget(props: SessionRailWidgetProps = {}) {
       onTogglePin,
       pickSession,
       poolStatusById,
+      prefetchSessionHistory,
       props,
       railPrefs,
       removeSession,

@@ -39,7 +39,7 @@
     "@unocss/reset": "^66.7.5",
     "@vitejs/plugin-react": "^4.3.4",
     "happy-dom": "^20.14.5",
-    "ide-byebye": "^0.2.2",
+    "ide-byebye": "^0.6.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "unocss": "^66.7.5",

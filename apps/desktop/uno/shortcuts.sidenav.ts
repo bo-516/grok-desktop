@@ -136,22 +136,24 @@ export const sideNavShortcuts: Record<string, string> = {
    * `data-[state=open]` is set by the project context menu (Radix trigger)
    * and keeps the hover fill while the menu is open, so the right-clicked
    * folder stays marked after the pointer moves into the menu.
+   * will-change-transform promotes the header to its own composited layer:
+   * composited scrolled content (the animate-spin live dot, hover opacity
+   * chips) otherwise paints OVER a non-composited sticky box during fast
+   * compositor-thread scrolls — z-10 only orders same-layer paint, not
+   * layer-vs-layer ordering. (transform-gpu would emit an invalid --un-*
+   * transform chain with preflight off.)
    */
   "project-group-header":
-    "sticky top-0 z-10 flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover data-[state=open]:before:bg-sidebar-hover",
+    "sticky top-0 z-10 will-change-transform flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover data-[state=open]:before:bg-sidebar-hover",
   "project-group-main":
     "flex flex-1 items-center gap-1.5 min-w-0 h-[36px] pl-1 border-none rounded-8px bg-transparent text-left cursor-pointer focus-visible:(outline-none ring-2 ring-[var(--color-focus-ring)] ring-offset-1 ring-offset-[var(--color-bg-sidebar)])",
   /* Rotate −90° when collapsed so the same ChevronDown points right. */
   "project-group-chevron":
     "w-3 h-3 shrink-0 block text-fg-faint transition-[color,transform] duration-fast ease-soft group-hover:text-fg-muted",
   "project-group-chevron-collapsed": "rotate-90-ccw",
-  /* Flat folder stack — both glyphs absolute; active/idle crossfade + scale. */
+  /* Morphing folder glyph (MorphFolderIcon) — single svg, d interpolates. */
   "project-group-folder":
-    "relative shrink-0 inline-block w-3.5 h-3.5 text-fg-secondary",
-  "project-group-icon":
-    "absolute inset-0 w-3.5 h-3.5 block transition-[opacity,transform] duration-fast ease-soft",
-  "project-group-icon-active": "opacity-100 scale-100",
-  "project-group-icon-idle": "opacity-0 scale-90 pointer-events-none",
+    "shrink-0 inline-block w-3.5 h-3.5 text-fg-secondary",
   /* text-nav owns font-size + line-height (--line-height-nav-item). Do not
    * add leading-*: Uno emits text-nav after leading utilities, so a tighter
    * token would win and clip descenders (g/y/p) again. overflow-x-hidden
@@ -189,12 +191,15 @@ export const sideNavShortcuts: Record<string, string> = {
    * Sticky + opaque bg-sidebar for the same reason folder headers are:
    * rows scroll under it. min-h is px (same rem-collapse trap as folders).
    * mt-1 with a hairline rule separates it from the last project group.
+   * will-change-transform: same composited-layer promotion as
+   * project-group-header — without it, animated row content can paint
+   * over the pinned label during fast compositor-thread scrolls.
    */
   "loose-group": "flex flex-col gap-px pt-1.5 pb-1.5 border-t border-line-subtle",
   "loose-group-active": "[&_.loose-group-name]:text-fg",
   "loose-group-collapsed": "pb-0.5",
   "loose-group-header":
-    "sticky top-0 z-10 flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover",
+    "sticky top-0 z-10 will-change-transform flex items-center gap-1.5 min-h-[36px] pr-1.5 bg-sidebar shadow-[0_-1px_0_0_var(--color-bg-sidebar)] before:(content-[''] absolute inset-0 z-[-1] rounded-8px bg-transparent pointer-events-none transition-colors duration-fast ease-soft) hover:before:bg-sidebar-hover",
   /* Section-cased label: matches project-section-label ink/size, no px-2.5
    * (project-group-main already owns the row inset). No glyph — a 14px
    * stroke next to 10px tracked caps fights the quiet section read. */

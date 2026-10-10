@@ -23,6 +23,14 @@ export type TimelineEntranceBaseline = {
    * The next non-empty paint is adopted as history rather than as live content.
    */
   awaitingBody: boolean;
+  /**
+   * Wall clock (ms) until which every new unit key on this session is also
+   * adopted as history. Disk hydrate and session/load replay land after the
+   * seeded paint and repartition units — without the window those already-read
+   * rows re-mounted with fresh keys and replayed the FadeContent entrance,
+   * which read as the canvas flashing on every rail switch.
+   */
+  warmUntil: number;
 };
 
 /** Baseline for a canvas that has not painted any session yet. */
@@ -30,7 +38,15 @@ export const EMPTY_TIMELINE_ENTRANCE_BASELINE: TimelineEntranceBaseline = {
   sessionId: null,
   seededUnitKeys: new Set<string>(),
   awaitingBody: false,
+  warmUntil: 0,
 };
+
+/**
+ * How long after a session switch new unit keys still count as restored
+ * history. Covers disk hydrate plus the session/load replay racing behind it;
+ * a live turn's own growth past the window keeps animating as usual.
+ */
+export const TIMELINE_ENTRANCE_WARM_MS = 1200;
 
 /**
  * Advance the baseline for one render of the canvas.
@@ -49,6 +65,7 @@ export const EMPTY_TIMELINE_ENTRANCE_BASELINE: TimelineEntranceBaseline = {
  *   store's uncached-session marker. A stale `sessionId` would animate restored
  *   history; an unstable one would suppress every entrance. A wrong
  *   `restoringSessionId` costs at most one fade and never hides content.
+ * @param now Wall clock in ms; injectable for tests.
  * @returns Same object reference when nothing changed (so callers can keep a
  *   stable set identity), otherwise the updated baseline.
  */
@@ -59,6 +76,7 @@ export function advanceTimelineEntranceBaseline(
     unitKeys: string[];
     restoringSessionId: string | null;
   },
+  now: number = Date.now(),
 ): TimelineEntranceBaseline {
   if (prev.sessionId !== next.sessionId) {
     return {
@@ -67,6 +85,7 @@ export function advanceTimelineEntranceBaseline(
       awaitingBody:
         next.unitKeys.length === 0 &&
         next.restoringSessionId === next.sessionId,
+      warmUntil: now + TIMELINE_ENTRANCE_WARM_MS,
     };
   }
   if (prev.awaitingBody && next.unitKeys.length > 0) {
@@ -74,6 +93,7 @@ export function advanceTimelineEntranceBaseline(
       sessionId: next.sessionId,
       seededUnitKeys: new Set(next.unitKeys),
       awaitingBody: false,
+      warmUntil: prev.warmUntil,
     };
   }
   // Fork (and some session/load hydrates) replace every item id in one paint.
@@ -84,7 +104,30 @@ export function advanceTimelineEntranceBaseline(
       sessionId: next.sessionId,
       seededUnitKeys: new Set(next.unitKeys),
       awaitingBody: false,
+      warmUntil: prev.warmUntil,
     };
+  }
+  /**
+   * Inside the post-switch window every unseen key is adopted as history:
+   * hydrate and session/load replay merge or repartition units after the
+   * seeded paint, and animating those rows is exactly the flash being fixed.
+   */
+  if (now < prev.warmUntil) {
+    let merged: Set<string> | null = null;
+    for (const key of next.unitKeys) {
+      if (!prev.seededUnitKeys.has(key)) {
+        merged ??= new Set(prev.seededUnitKeys);
+        merged.add(key);
+      }
+    }
+    if (merged !== null) {
+      return {
+        sessionId: next.sessionId,
+        seededUnitKeys: merged,
+        awaitingBody: false,
+        warmUntil: prev.warmUntil,
+      };
+    }
   }
   return prev;
 }

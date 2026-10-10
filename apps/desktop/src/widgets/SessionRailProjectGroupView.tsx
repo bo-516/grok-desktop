@@ -1,6 +1,6 @@
 /**
  * Workspace project group for the session rail: tree-style folder header
- * (animated chevron + flat folder glyph + name + count), indented sessions
+ * (animated chevron + morphing folder glyph + name + count), indented sessions
  * with a vertical guide, optional "Show more" / "Show less", collapse
  * on header click. Expanded lists cap the viewport at 8 rows and scroll.
  * Folder name is sticky at the top of the rail scrollport (PROJECTS sits
@@ -15,8 +15,9 @@
  */
 
 import cs from "classnames";
-import { ChevronDown, Folder, FolderOpen } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
+import { MorphFolderIcon } from "@/components/react-bits";
 import { projectGroupListModel } from "@/lib/sessionRailPreview";
 import type { ProjectGroup, SessionRecord } from "@/store/sessionCatalog";
 import { SessionRailGroupMoreView } from "./SessionRailGroupMoreView";
@@ -63,8 +64,8 @@ export type SessionRailProjectGroupViewProps = {
 /**
  * One project block: sticky folder header + nested session list with tree guide.
  * Hierarchy is stronger than a flat pill list so project vs chat stays clear.
- * Folder glyph has no well: closed `Folder` / open `FolderOpen` crossfade in
- * place; chevron rotates. Two UI states with a short opacity+scale transition.
+ * Folder glyph has no well: one MorphFolderIcon morphs the outline between
+ * closed and open states (spring-driven `d` interpolation); chevron rotates.
  * Sticky positioning is pure CSS on `project-group-header` (top-0 in scroll).
  * `active` (folder of the selected chat) lifts the name to full contrast and
  * tints glyph + tree guide — idle folders sit at secondary ink.
@@ -133,23 +134,12 @@ export function SessionRailProjectGroupView(
               strokeWidth={2}
               aria-hidden="true"
             />
-            {/* Both glyphs stacked; active one fades/scales in (no well). */}
-            <span className="project-group-folder" aria-hidden="true">
-              <Folder
-                className={cs("project-group-icon", {
-                  "project-group-icon-active": collapsed,
-                  "project-group-icon-idle": !collapsed,
-                })}
-                strokeWidth={1.75}
-              />
-              <FolderOpen
-                className={cs("project-group-icon", {
-                  "project-group-icon-active": !collapsed,
-                  "project-group-icon-idle": collapsed,
-                })}
-                strokeWidth={1.75}
-              />
-            </span>
+            {/* Single morphing glyph: `d` interpolates closed ↔ open. */}
+            <MorphFolderIcon
+              open={!collapsed}
+              className="project-group-folder"
+              strokeWidth={1.75}
+            />
             <span className="project-group-name">{group.projectName}</span>
           </button>
           <span

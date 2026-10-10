@@ -88,6 +88,7 @@ export function SessionRailView(props: SessionRailViewProps) {
         liveStatus={row.liveStatus}
         pinned={row.pinned}
         onSelect={row.onSelect}
+        onPrefetch={row.onPrefetch}
         onTogglePin={row.onTogglePin}
         onReorder={row.onReorder}
         onRemove={row.onRemove}
